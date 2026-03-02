@@ -29,31 +29,68 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use((0, helmet_1.default)({
-    contentSecurityPolicy: false, // Often needed for APIs on Vercel
+    contentSecurityPolicy: false,
 }));
 app.use((0, morgan_1.default)('dev'));
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
 
-// CORS - Allow multiple origins
+// ✅ CORS - All panel origins allowed
 const allowedOrigins = [
+    // Local development
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
     'http://localhost:3003',
     'http://localhost:3004',
-    process.env.FRONTEND_URL // Ensure this is set in Vercel Env Variables
-];
+
+    // ✅ USER PANEL
+    'https://apex-user-panel.vercel.app',
+
+    // ✅ ADMIN PANEL
+    'https://apex-admin-panel.vercel.app',
+
+    // ✅ SELLER PANEL
+    'https://apex-seller-panel.vercel.app',
+
+    // ✅ DELIVERY PANEL
+    'https://apex-delivery-panel.vercel.app',
+
+    // ✅ BACKEND (for internal requests)
+    'https://apex-backend-theta.vercel.app',
+
+    // From environment variable (optional extra origin)
+    process.env.FRONTEND_URL
+].filter(Boolean); // removes undefined if FRONTEND_URL is not set
 
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, Postman, curl)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.error('CORS blocked for origin:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    credentials: true
+}));
+
+// ✅ CRITICAL: Handle preflight OPTIONS requests (fixes the "preflight failed" error)
+app.options('*', (0, cors_1.default)({
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
         }
     },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true
 }));
 
@@ -63,9 +100,9 @@ app.use((0, express_session_1.default)({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: true, // Vercel uses HTTPS by default
-        sameSite: 'none', 
-        maxAge: 24 * 60 * 60 * 1000 
+        secure: true,
+        sameSite: 'none',
+        maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
@@ -115,7 +152,7 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
             console.error('MONGO_URI is missing!');
             return;
         }
-        if (mongoose_1.default.connection.readyState >= 1) return; 
+        if (mongoose_1.default.connection.readyState >= 1) return;
         yield mongoose_1.default.connect(process.env.MONGO_URI);
         console.log('MongoDB Connected!');
     } catch (error) {
@@ -131,7 +168,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Internal Server Error', error: err.message });
 });
 
-// Important: Listen only if not on Vercel
+// Listen only if not on Vercel (local dev)
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
         console.log(`Server running locally on port ${PORT}`);
