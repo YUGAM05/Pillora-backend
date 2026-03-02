@@ -57,7 +57,7 @@ const corsOptions = {
 // ✅ Apply CORS to all routes
 app.use((0, cors_1.default)(corsOptions));
 // ✅ CRITICAL FIX: Handle preflight OPTIONS requests for all routes
-app.options('*', (0, cors_1.default)(corsOptions));
+app.options('(.*)', (0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
 app.use((0, helmet_1.default)({
