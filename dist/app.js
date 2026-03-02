@@ -16,7 +16,6 @@ exports.connectDB = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
 const express_1 = __importDefault(require("express"));
-const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const morgan_1 = __importDefault(require("morgan"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -36,35 +35,27 @@ const allowedOrigins = [
     'http://localhost:3003',
     'http://localhost:5000',
 ];
-const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin)
-            return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-        }
-        else {
-            console.warn(`CORS blocked request from: ${origin}`);
-            callback(new Error(`CORS policy: origin ${origin} not allowed`));
-        }
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true,
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
-};
-// ✅ Apply CORS to all routes
-app.use((0, cors_1.default)(corsOptions));
-// ✅ CRITICAL FIX: Handle preflight OPTIONS requests for all routes
-app.options('(.*)', (0, cors_1.default)(corsOptions));
+// ✅ Manual CORS middleware - no cors package, no path-to-regexp issues
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // ✅ Handle preflight OPTIONS requests instantly - no wildcard needed
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use((0, morgan_1.default)('dev'));
-// ✅ FIXED: Added sameSite: 'none' for cross-origin cookie support
 app.use((0, express_session_1.default)({
     secret: process.env.SESSION_SECRET || 'fallback_secret',
     resave: false,
@@ -93,7 +84,7 @@ const supportRoutes_1 = __importDefault(require("./routes/supportRoutes"));
 const blogRoutes_1 = __importDefault(require("./routes/blogRoutes"));
 const aiRoutes_1 = __importDefault(require("./routes/aiRoutes"));
 const couponRoutes_1 = __importDefault(require("./routes/couponRoutes"));
-// FIX: Ensure DB is connected before every request in serverless environment
+// Ensure DB is connected before every request in serverless environment
 app.use((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     if (mongoose_1.default.connection.readyState === 0) {
         console.log('[middleware] DB disconnected, reconnecting...');

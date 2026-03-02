@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
-import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import mongoose from 'mongoose';
@@ -25,28 +24,23 @@ const allowedOrigins = [
     'http://localhost:5000',
 ];
 
-const corsOptions: cors.CorsOptions = {
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn(`CORS blocked request from: ${origin}`);
-            callback(new Error(`CORS policy: origin ${origin} not allowed`));
-        }
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true,
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
-};
+// ✅ Manual CORS middleware - no cors package, no path-to-regexp issues
+app.use((req, res, next) => {
+    const origin = req.headers.origin as string;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-// ✅ Apply CORS to all routes
-app.use(cors(corsOptions));
+    // ✅ Handle preflight OPTIONS requests instantly - no wildcard needed
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
 
-// ✅ CRITICAL FIX: Handle preflight OPTIONS requests for all routes
-app.options('(.*)', cors(corsOptions));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
@@ -55,7 +49,6 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 
-// ✅ FIXED: Added sameSite: 'none' for cross-origin cookie support
 app.use(session({
     secret: process.env.SESSION_SECRET || 'fallback_secret',
     resave: false,
@@ -87,7 +80,7 @@ import blogRoutes from './routes/blogRoutes';
 import aiRoutes from './routes/aiRoutes';
 import couponRoutes from './routes/couponRoutes';
 
-// FIX: Ensure DB is connected before every request in serverless environment
+// Ensure DB is connected before every request in serverless environment
 app.use(async (req, res, next) => {
     if (mongoose.connection.readyState === 0) {
         console.log('[middleware] DB disconnected, reconnecting...');
