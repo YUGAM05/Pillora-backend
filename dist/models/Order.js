@@ -55,10 +55,23 @@ const OrderSchema = new mongoose_1.Schema({
         addressType: { type: String, enum: ['home', 'office'], default: 'home' }
     },
     totalAmount: { type: Number, required: true },
+    medicineSubtotal: { type: Number, required: true },
+    platformFee: { type: Number, required: true, default: 10 },
+    sellerCommission: { type: Number, required: true },
+    deliveryFee: { type: Number },
+    adminDeliveryCommission: { type: Number },
     paymentMethod: { type: String, required: true, default: 'cod' },
     paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
-    orderStatus: { type: String, enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
+    orderStatus: { type: String, enum: ['pending', 'confirmed', 'shipped', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'cancelled'], default: 'pending' },
     assignedDelivery: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
-    notes: { type: String }
+    deliveryDistance: { type: Number },
+    deliveryEarning: { type: Number },
+    shippingLocation: {
+        lat: { type: Number },
+        lng: { type: Number }
+    },
+    notes: { type: String },
+    couponCode: { type: String },
+    discountAmount: { type: Number, default: 0 }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Order', OrderSchema);

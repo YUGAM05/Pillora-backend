@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = void 0;
+exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 // @desc    Get all hospitals
 // @route   GET /api/hospitals
@@ -214,3 +214,29 @@ const uploadHospitalImages = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.uploadHospitalImages = uploadHospitalImages;
+// @desc    Search hospitals (Autocomplete)
+// @route   GET /api/hospitals/search?q=query
+// @access  Public
+const searchHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { q } = req.query;
+        if (!q || typeof q !== 'string') {
+            res.json([]);
+            return;
+        }
+        const hospitals = yield Hospital_1.default.find({
+            $or: [
+                { name: { $regex: q, $options: 'i' } },
+                { city: { $regex: q, $options: 'i' } },
+                { address: { $regex: q, $options: 'i' } }
+            ]
+        })
+            .select('name city address image images rating')
+            .limit(5);
+        res.json(hospitals);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error searching hospitals', error });
+    }
+});
+exports.searchHospitals = searchHospitals;

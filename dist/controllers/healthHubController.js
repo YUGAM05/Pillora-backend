@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteHealthTip = exports.getAllHealthTips = exports.createHealthTip = void 0;
+exports.getHealthTipById = exports.deleteHealthTip = exports.getAllHealthTips = exports.createHealthTip = void 0;
 const HealthTip_1 = __importDefault(require("../models/HealthTip"));
 const createHealthTip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -55,3 +55,17 @@ const deleteHealthTip = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.deleteHealthTip = deleteHealthTip;
+const getHealthTipById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const tip = yield HealthTip_1.default.findById(id);
+        if (!tip) {
+            return res.status(404).json({ message: 'Health tip not found' });
+        }
+        res.status(200).json(tip);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching health tip details', error });
+    }
+});
+exports.getHealthTipById = getHealthTipById;

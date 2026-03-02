@@ -11,7 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendWhatsAppBill = void 0;
 // NOTE: To make this work with a real WhatsApp account, you need to:
-// 1. Sign up for Facebook Developers (Meta) or use a provider like Twilio
+// 1. Sign up for Facebook Developers (Meta) or use a professional WhatsApp API provider
 // 2. Get your Phone Number ID and Access Token
 // 3. Replace the placeholder values below in your .env file
 const sendWhatsAppBill = (userPhone, customerName, orderId, amount, pdfLink // In a real app, you'd generate a public link to the PDF

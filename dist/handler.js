@@ -33,33 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-const mongoose_1 = __importStar(require("mongoose"));
-const UserSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    passwordHash: { type: String }, // Not required for Google OAuth users
-    googleId: { type: String, unique: true, sparse: true }, // Google OAuth ID
-    profilePicture: { type: String }, // Profile picture URL from Google
-    role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin'], default: 'customer' },
-    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved' },
-    phone: { type: String },
-    address: {
-        street: String,
-        city: String,
-        state: String,
-        zip: String
-    },
-    bankDetails: {
-        accountNumber: String,
-        ifsc: String
-    },
-    pharmacyCertificate: { type: String },
-    location: {
-        lat: { type: Number, default: 23.0225 }, // Default to Ahmedabad lat
-        lng: { type: Number, default: 72.5714 } // Default to Ahmedabad lng
-    },
-    kyc_status: { type: String, enum: ['Pending', 'Verified', 'Rejected'], default: 'Pending' },
-    aadhaarNumber: { type: String, sparse: true },
-    aadhaarCardUrl: { type: String }
-}, { timestamps: true });
-exports.default = mongoose_1.default.model('User', UserSchema);
+const app_1 = __importStar(require("./app"));
+// Connect to DB on every cold start (Vercel serverless)
+// FIX: Wrapped in catch so a DB connection failure doesn't silently
+// crash the handler and return a blank 500 with no error message.
+(0, app_1.connectDB)().catch((err) => {
+    console.error('[handler] DB connection failed on cold start:', err);
+});
+exports.default = app_1.default;

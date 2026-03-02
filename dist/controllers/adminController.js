@@ -12,19 +12,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
+exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
+const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
 // @access  Private/Admin
 const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalUsers = yield User_1.default.countDocuments({ role: 'user' });
-        const totalSellers = yield User_1.default.countDocuments({ role: 'seller' });
+        const totalUsers = yield User_1.default.countDocuments({ role: 'customer' });
+        const totalSellers = yield User_1.default.countDocuments({ role: 'seller', status: 'approved' });
         const totalDonors = yield BloodDonor_1.default.countDocuments();
         const totalOrders = yield Order_1.default.countDocuments();
         const pendingProducts = yield Inventory_1.default.countDocuments({ status: 'pending' });
@@ -34,7 +35,27 @@ const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
             { $group: { _id: null, total: { $sum: '$totalAmount' } } }
         ]);
         const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
-        const recentUsers = yield User_1.default.find().sort({ createdAt: -1 }).limit(5).select('-passwordHash');
+        // Calculate Admin Profit
+        const profitResult = yield Order_1.default.aggregate([
+            { $match: { paymentStatus: 'paid' } },
+            {
+                $group: {
+                    _id: null,
+                    totalProfit: {
+                        $sum: {
+                            $add: [
+                                "$platformFee",
+                                "$sellerCommission",
+                                { $ifNull: ["$adminDeliveryCommission", 0] }
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+        const totalProfit = profitResult.length > 0 ? profitResult[0].totalProfit : 0;
+        const recentUsers = yield User_1.default.find().sort({ createdAt: -1 }).limit(10).select('-passwordHash');
+        const activeSellers = yield User_1.default.find({ role: 'seller', status: 'approved' }).sort({ createdAt: -1 }).limit(5).select('-passwordHash');
         res.json({
             counts: {
                 users: totalUsers,
@@ -42,9 +63,11 @@ const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 donors: totalDonors,
                 orders: totalOrders,
                 pendingProducts,
-                revenue: totalRevenue
+                revenue: totalRevenue,
+                profit: totalProfit
             },
-            recentUsers
+            recentUsers,
+            activeSellers
         });
     }
     catch (error) {
@@ -238,3 +261,101 @@ const getAllOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getAllOrders = getAllOrders;
+// @desc    Get dashboard trend data (Revenue & Signups)
+// @route   GET /api/admin/trends
+// @access  Private/Admin
+const getAdminTrends = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        // Revenue Trends (Paid Orders)
+        const revenueTrends = yield Order_1.default.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: sevenDaysAgo },
+                    paymentStatus: 'paid'
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                    revenue: { $sum: "$totalAmount" },
+                    orders: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id": 1 } }
+        ]);
+        // User Signup Trends
+        const signupTrends = yield User_1.default.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: sevenDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id": 1 } }
+        ]);
+        // Seller Signup Trends
+        const sellerTrends = yield User_1.default.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: sevenDaysAgo },
+                    role: 'seller'
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id": 1 } }
+        ]);
+        res.json({
+            revenue: revenueTrends,
+            users: signupTrends,
+            sellers: sellerTrends
+        });
+    }
+    catch (error) {
+        console.error("Trends Error:", error);
+        res.status(500).json({ message: 'Error fetching trend data', error });
+    }
+});
+exports.getAdminTrends = getAdminTrends;
+// @desc    Verify user Aadhaar with AI
+// @route   POST /api/admin/users/:id/verify-aadhaar
+// @access  Private/Admin
+const verifyUserAadhaar = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const user = yield User_1.default.findById(id);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        if (!user.aadhaarCardUrl) {
+            res.status(400).json({ message: 'No Aadhaar card found for this user' });
+            return;
+        }
+        const result = yield (0, aadhaarVerifier_1.verifyAadhaarLocal)(user.aadhaarCardUrl, user.name);
+        user.kyc_status = result.status;
+        // In this case, we use the status to also update the main status if approved?
+        // Or just update kyc_status.
+        yield user.save();
+        res.json({
+            message: result.status === 'Verified' ? 'Aadhaar verified successfully' : result.remarks,
+            kyc_status: user.kyc_status,
+            remarks: result.remarks
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Verification failed', error: error.message });
+    }
+});
+exports.verifyUserAadhaar = verifyUserAadhaar;

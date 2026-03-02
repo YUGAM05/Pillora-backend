@@ -12,10 +12,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateOrderStatus = exports.getSellerOrders = exports.updateSellerProduct = exports.addSellerProduct = exports.getSellerInventory = exports.getSellerDashboard = void 0;
+exports.updateSellerProfile = exports.updateOrderStatus = exports.getSellerOrders = exports.deleteSellerProduct = exports.updateSellerProduct = exports.addSellerProduct = exports.getSellerInventory = exports.getSellerDashboard = void 0;
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
+const User_1 = __importDefault(require("../models/User"));
 const getSellerDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // 1. Get total products
@@ -229,7 +230,8 @@ const getSellerDashboard = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.getSellerDashboard = getSellerDashboard;
 const getSellerInventory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const products = yield Inventory_1.default.find({ seller: req.user.id });
+        const query = req.user.role === 'admin' ? {} : { seller: req.user.id };
+        const products = yield Inventory_1.default.find(query);
         res.json(products);
     }
     catch (error) {
@@ -297,6 +299,29 @@ const updateSellerProduct = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.updateSellerProduct = updateSellerProduct;
+const deleteSellerProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const product = yield Inventory_1.default.findOne({ _id: id, seller: req.user.id });
+        if (!product) {
+            res.status(404).json({ message: 'Product not found or unauthorized' });
+            return;
+        }
+        yield Inventory_1.default.deleteOne({ _id: id });
+        // Add notification for seller
+        yield Notification_1.default.create({
+            user: req.user.id,
+            message: `Product "${product.name}" has been deleted.`,
+            type: 'info'
+        });
+        res.json({ message: 'Product deleted successfully' });
+    }
+    catch (error) {
+        console.error("Error deleting product:", error);
+        res.status(500).json({ message: 'Error deleting product', error });
+    }
+});
+exports.deleteSellerProduct = deleteSellerProduct;
 const getSellerOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // 1. Find all products owned by this seller
@@ -347,3 +372,50 @@ const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.updateOrderStatus = updateOrderStatus;
+const updateSellerProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        const { name, phone, address, location } = req.body;
+        const user = yield User_1.default.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        if (name)
+            user.name = name;
+        if (phone)
+            user.phone = phone;
+        if (address) {
+            user.address = {
+                street: address.street || ((_a = user.address) === null || _a === void 0 ? void 0 : _a.street),
+                city: address.city || ((_b = user.address) === null || _b === void 0 ? void 0 : _b.city),
+                state: address.state || ((_c = user.address) === null || _c === void 0 ? void 0 : _c.state),
+                zip: address.zip || ((_d = user.address) === null || _d === void 0 ? void 0 : _d.zip)
+            };
+        }
+        if (location) {
+            user.location = {
+                lat: location.lat || ((_e = user.location) === null || _e === void 0 ? void 0 : _e.lat),
+                lng: location.lng || ((_f = user.location) === null || _f === void 0 ? void 0 : _f.lng)
+            };
+        }
+        yield user.save();
+        res.json({
+            message: 'Profile updated successfully',
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status,
+                phone: user.phone,
+                address: user.address,
+                location: user.location
+            }
+        });
+    }
+    catch (error) {
+        console.error("Error updating seller profile:", error);
+        res.status(500).json({ message: 'Error updating profile', error });
+    }
+});
+exports.updateSellerProfile = updateSellerProfile;

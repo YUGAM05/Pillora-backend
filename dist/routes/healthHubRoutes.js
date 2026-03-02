@@ -8,5 +8,6 @@ const healthHubController_1 = require("../controllers/healthHubController");
 const router = express_1.default.Router();
 router.post('/', healthHubController_1.createHealthTip);
 router.get('/', healthHubController_1.getAllHealthTips);
+router.get('/:id', healthHubController_1.getHealthTipById);
 router.delete('/:id', healthHubController_1.deleteHealthTip);
 exports.default = router;

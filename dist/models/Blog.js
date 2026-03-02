@@ -34,39 +34,15 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const BloodRequestSchema = new mongoose_1.Schema({
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    patientName: { type: String, required: true },
-    age: { type: Number, required: true },
-    bloodGroup: {
-        type: String,
-        enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
-        required: true
-    },
-    units: { type: Number, required: true, default: 1 },
-    hospitalAddress: { type: String, required: true },
-    area: { type: String, required: true },
-    city: { type: String, required: true },
-    contactNumber: { type: String, required: true }, // Person to contact
-    reason: { type: String },
-    status: {
-        type: String,
-        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed'],
-        default: 'Open'
-    },
-    isUrgent: { type: Boolean, default: false },
-    kycDocumentType: {
-        type: String,
-        enum: ['Aadhar Card', 'PAN Card', 'Driving License'],
-        required: true
-    },
-    kycDocumentId: { type: String, required: false },
-    kycDocumentImage: { type: String, required: false },
-    aiVerificationStatus: {
-        type: String,
-        enum: ['Pending', 'Verified', 'Rejected', 'Error'],
-        default: 'Pending'
-    },
-    aiVerificationRemarks: { type: String }
+const BlogSchema = new mongoose_1.Schema({
+    title: { type: String, required: true },
+    description: { type: String, required: true },
+    content: { type: String, required: true },
+    category: { type: String, required: true },
+    imageUrl: { type: String },
+    author: { type: String, required: true },
+    authorRole: { type: String, default: 'Author' },
+    readTime: { type: String, required: true },
+    date: { type: Date, default: Date.now },
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('BloodRequest', BloodRequestSchema);
+exports.default = mongoose_1.default.model('Blog', BlogSchema);

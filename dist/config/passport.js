@@ -15,44 +15,60 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const passport_1 = __importDefault(require("passport"));
 const passport_google_oauth20_1 = require("passport-google-oauth20");
 const User_1 = __importDefault(require("../models/User"));
-passport_1.default.use(new passport_google_oauth20_1.Strategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL,
-}, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX: Wrapped GoogleStrategy initialization in a try-catch guard.
+// Previously, if GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_CALLBACK_URL
+// were missing from Vercel environment variables, passport would throw an error
+// at import time — crashing the ENTIRE server before any request could be handled.
+// This caused FUNCTION_INVOCATION_FAILED on every single request including login.
+// ─────────────────────────────────────────────────────────────────────────────
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL;
+if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_CALLBACK_URL) {
+    console.warn('[Passport] WARNING: Google OAuth env variables are missing. ' +
+        'Google login will be disabled. Set GOOGLE_CLIENT_ID, ' +
+        'GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL in Vercel to enable it.');
+}
+else {
     try {
-        console.log('Google OAuth callback triggered');
-        console.log('Profile:', profile);
-        // Check if user exists with this email
-        let user = yield User_1.default.findOne({ email: (_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value });
-        if (!user) {
-            // Create new user
-            console.log('Creating new user from Google profile');
-            user = yield User_1.default.create({
-                name: profile.displayName,
-                email: (_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value,
-                googleId: profile.id,
-                profilePicture: (_c = profile.photos) === null || _c === void 0 ? void 0 : _c[0].value,
-                role: 'customer',
-                status: 'approved',
-            });
-        }
-        else if (!user.googleId) {
-            // Link Google account to existing email/password user
-            console.log('Linking Google account to existing user');
-            user.googleId = profile.id;
-            user.profilePicture = (_d = profile.photos) === null || _d === void 0 ? void 0 : _d[0].value;
-            yield user.save();
-        }
-        console.log('User authenticated:', user.email);
-        return done(null, user);
+        passport_1.default.use(new passport_google_oauth20_1.Strategy({
+            clientID: GOOGLE_CLIENT_ID,
+            clientSecret: GOOGLE_CLIENT_SECRET,
+            callbackURL: GOOGLE_CALLBACK_URL,
+        }, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b, _c, _d;
+            try {
+                let user = yield User_1.default.findOne({ email: (_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value });
+                if (!user) {
+                    user = yield User_1.default.create({
+                        name: profile.displayName,
+                        email: (_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value,
+                        googleId: profile.id,
+                        profilePicture: (_c = profile.photos) === null || _c === void 0 ? void 0 : _c[0].value,
+                        role: 'customer',
+                        status: 'approved',
+                    });
+                }
+                else if (!user.googleId) {
+                    user.googleId = profile.id;
+                    user.profilePicture = (_d = profile.photos) === null || _d === void 0 ? void 0 : _d[0].value;
+                    yield user.save();
+                }
+                console.log('User authenticated via Google:', user.email);
+                return done(null, user);
+            }
+            catch (error) {
+                console.error('Error in Google OAuth callback:', error);
+                return done(error, undefined);
+            }
+        })));
+        console.log('[Passport] Google OAuth strategy registered successfully.');
     }
-    catch (error) {
-        console.error('Error in Google OAuth:', error);
-        return done(error, undefined);
+    catch (err) {
+        console.error('[Passport] Failed to register Google OAuth strategy:', err);
     }
-})));
+}
 passport_1.default.serializeUser((user, done) => {
     done(null, user._id);
 });

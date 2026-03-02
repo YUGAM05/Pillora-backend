@@ -42,7 +42,11 @@ const corsOptions: cors.CorsOptions = {
     preflightContinue: false,
 };
 
+// ✅ Apply CORS to all routes
 app.use(cors(corsOptions));
+
+// ✅ CRITICAL FIX: Handle preflight OPTIONS requests for all routes
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -52,12 +56,14 @@ app.use(helmet({
 }));
 app.use(morgan('dev'));
 
+// ✅ FIXED: Added sameSite: 'none' for cross-origin cookie support
 app.use(session({
     secret: process.env.SESSION_SECRET || 'fallback_secret',
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
     },
 }));
@@ -83,7 +89,6 @@ import aiRoutes from './routes/aiRoutes';
 import couponRoutes from './routes/couponRoutes';
 
 // FIX: Ensure DB is connected before every request in serverless environment
-// Vercel functions can go cold — this reconnects automatically on each request
 app.use(async (req, res, next) => {
     if (mongoose.connection.readyState === 0) {
         console.log('[middleware] DB disconnected, reconnecting...');
@@ -137,8 +142,6 @@ export const connectDB = async () => {
         await mongoose.connect(uri);
         console.log('[DB] MongoDB Connected successfully!');
     } catch (error: any) {
-        // FIX: Removed process.exit(1) — crashing the process in serverless
-        // permanently kills the function until next cold start
         console.error('[DB] MongoDB Connection Error:', error.message);
     }
 };

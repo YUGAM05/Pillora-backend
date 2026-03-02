@@ -4,10 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const productController_1 = require("../controllers/productController");
+const aiController_1 = require("../controllers/aiController");
 const router = express_1.default.Router();
-router.get('/', productController_1.getPublicProducts);
-router.get('/deals', productController_1.getDealProducts);
-router.get('/search', productController_1.searchProducts);
-router.get('/:id', productController_1.getProductById);
+router.post('/chat', aiController_1.chatWithAI);
 exports.default = router;

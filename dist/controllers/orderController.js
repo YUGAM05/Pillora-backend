@@ -45,15 +45,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrderById = exports.getUserOrders = exports.createOrder = void 0;
+exports.updateOrderStatus = exports.getOrderById = exports.getUserOrders = exports.createOrder = void 0;
 const Order_1 = __importDefault(require("../models/Order"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
+const Coupon_1 = __importDefault(require("../models/Coupon"));
 // @desc    Create new order
 // @route   POST /api/orders
 // @access  Private (user must be logged in)
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { items, shippingAddress, totalAmount, paymentMethod, notes } = req.body;
+        const { items, shippingAddress, totalAmount, paymentMethod, notes, shippingLocation, couponCode, discountAmount } = req.body;
         // Validate required fields
         if (!items || !shippingAddress || !totalAmount) {
             res.status(400).json({ message: 'Missing required fields' });
@@ -76,6 +77,28 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 return;
             }
         }
+        // Calculate breakdown
+        const medicineSubtotal = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+        const platformFee = 10;
+        const sellerCommission = Math.round(medicineSubtotal * 0.15);
+        let calculatedTotal = medicineSubtotal + platformFee;
+        // Apply coupon if present
+        let finalDiscountAmount = 0;
+        if (couponCode) {
+            const coupon = yield Coupon_1.default.findOne({ code: couponCode.toUpperCase(), isActive: true });
+            if (coupon && new Date() <= coupon.expiryDate && medicineSubtotal >= coupon.minOrderAmount) {
+                if (coupon.discountType === 'percentage') {
+                    finalDiscountAmount = (medicineSubtotal * coupon.discountValue) / 100;
+                }
+                else {
+                    finalDiscountAmount = coupon.discountValue;
+                }
+                finalDiscountAmount = Math.min(finalDiscountAmount, medicineSubtotal);
+                calculatedTotal -= finalDiscountAmount;
+                // Increment usage count
+                yield Coupon_1.default.findByIdAndUpdate(coupon._id, { $inc: { usageCount: 1 } });
+            }
+        }
         // Create order
         const order = yield Order_1.default.create({
             user: req.user._id,
@@ -87,11 +110,17 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 image: item.image
             })),
             shippingAddress,
-            totalAmount,
+            shippingLocation,
+            medicineSubtotal,
+            platformFee,
+            sellerCommission,
+            totalAmount: calculatedTotal,
             paymentMethod: paymentMethod || 'cod',
             paymentStatus: 'pending',
             orderStatus: 'pending',
-            notes
+            notes,
+            couponCode: couponCode ? couponCode.toUpperCase() : undefined,
+            discountAmount: finalDiscountAmount
         });
         // Update stock for each product
         for (const item of items) {
@@ -102,7 +131,10 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             const { sendWhatsAppBill } = yield Promise.resolve().then(() => __importStar(require('../services/whatsappService')));
             if (shippingAddress && shippingAddress.phone) {
                 const customerName = req.user.name || shippingAddress.fullName;
-                sendWhatsAppBill(shippingAddress.phone, customerName, order._id.toString().slice(-8).toUpperCase(), totalAmount, `http://localhost:3000/order-success/${order._id}`).catch((err) => console.error('WhatsApp Automation Failed:', err));
+                // Use Environment Variable for the Frontend URL instead of localhost
+                const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                sendWhatsAppBill(shippingAddress.phone, customerName, order._id.toString().slice(-8).toUpperCase(), calculatedTotal, // Use the calculated total for the bill
+                `${frontendUrl}/order-success/${order._id}`).catch((err) => console.error('WhatsApp Automation Failed:', err));
             }
         }
         catch (waError) {
@@ -111,14 +143,16 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         res.status(201).json(order);
     }
     catch (error) {
-        console.error('Order creation error:', error);
-        res.status(500).json({ message: 'Error creating order', error });
+        console.error('Order creation error:', {
+            message: error.message,
+            stack: error.stack,
+            body: req.body
+        });
+        res.status(500).json({ message: 'Error creating order', error: error.message });
     }
 });
 exports.createOrder = createOrder;
 // @desc    Get user's orders
-// @route   GET /api/orders
-// @access  Private
 const getUserOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user) {
@@ -136,18 +170,23 @@ const getUserOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 });
 exports.getUserOrders = getUserOrders;
 // @desc    Get single order by ID
-// @route   GET /api/orders/:id
-// @access  Private
 const getOrderById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const order = yield Order_1.default.findById(req.params.id)
-            .populate('items.product', 'name category')
-            .populate('user', 'name email');
+            .populate({
+            path: 'items.product',
+            select: 'name category seller',
+            populate: {
+                path: 'seller',
+                select: 'name phone location'
+            }
+        })
+            .populate('user', 'name email location')
+            .populate('assignedDelivery', 'name phone location');
         if (!order) {
             res.status(404).json({ message: 'Order not found' });
             return;
         }
-        // Check if user owns this order
         if (!req.user || order.user._id.toString() !== req.user._id.toString()) {
             res.status(403).json({ message: 'Not authorized to view this order' });
             return;
@@ -159,3 +198,20 @@ const getOrderById = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getOrderById = getOrderById;
+// @desc    Update order status
+const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+        const order = yield Order_1.default.findByIdAndUpdate(id, { orderStatus: status }, { new: true });
+        if (!order) {
+            res.status(404).json({ message: 'Order not found' });
+            return;
+        }
+        res.json(order);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error updating order status', error });
+    }
+});
+exports.updateOrderStatus = updateOrderStatus;

@@ -12,12 +12,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.verifyRequestWithAI = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Donor_1 = __importDefault(require("../models/Donor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const bloodCompatibility_1 = require("../utils/bloodCompatibility");
 const whatsappService_1 = require("../utils/whatsappService");
+const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
 // @desc    Register as a blood donor
 // @route   POST /api/blood-bank/donors
 // @access  Private
@@ -160,8 +161,8 @@ exports.findMatches = findMatches;
 // @access  Private
 const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent } = req.body;
-        console.log(`[BloodRequest] Incoming request from ${req.user.id} for ${bloodGroup} in ${city}`);
+        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
+        console.log(`[BloodRequest] Incoming request from ${req.user.id} for ${bloodGroup} in ${city}. KYC: ${kycDocumentType}`);
         const request = yield BloodRequest_1.default.create({
             user: req.user.id,
             patientName,
@@ -173,7 +174,10 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             city,
             contactNumber,
             status: isUrgent ? 'Urgent' : 'Open',
-            isUrgent
+            isUrgent,
+            kycDocumentType,
+            kycDocumentId,
+            kycDocumentImage
         });
         // Trigger Matching & Notification Logic
         try {
@@ -222,13 +226,66 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             console.error("Auto-matching/Notification error:", matchErr);
             // Don't fail the request creation if notification fails
         }
+        // Send response immediately
         res.status(201).json(request);
+        // Run AI Verification automatically in background
+        if (kycDocumentImage && kycDocumentType === 'Aadhar Card') {
+            (() => __awaiter(void 0, void 0, void 0, function* () {
+                try {
+                    console.log(`[AutoAI] Starting background verification for request ${request._id}`);
+                    const result = yield (0, aadhaarVerifier_1.verifyAadhaarLocal)(kycDocumentImage, patientName);
+                    request.aiVerificationStatus = result.status;
+                    request.aiVerificationRemarks = result.remarks;
+                    yield request.save();
+                    console.log(`[AutoAI] background verification complete for ${request._id}: ${result.status}`);
+                }
+                catch (aiErr) {
+                    console.error(`[AutoAI] background verification failed for ${request._id}:`, aiErr);
+                }
+            }))();
+        }
     }
     catch (error) {
-        res.status(500).json({ message: error.message || 'Server Error', error });
+        if (!res.headersSent) {
+            res.status(500).json({ message: error.message || 'Server Error', error });
+        }
+        else {
+            console.error("Error after response sent:", error);
+        }
     }
 });
 exports.createRequest = createRequest;
+// @desc    Get current user's blood requests
+// @route   GET /api/blood-bank/my-requests
+// @access  Private
+const getMyRequests = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const requests = yield BloodRequest_1.default.find({ user: req.user.id })
+            .sort({ createdAt: -1 });
+        res.json(requests);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.getMyRequests = getMyRequests;
+// @desc    Get current user's donor profile
+// @route   GET /api/blood-bank/my-donor
+// @access  Private
+const getMyDonorProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const donor = yield BloodDonor_1.default.findOne({ user: req.user.id });
+        if (!donor) {
+            res.status(404).json({ message: 'Donor profile not found' });
+            return;
+        }
+        res.json(donor);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.getMyDonorProfile = getMyDonorProfile;
 // @desc    Get all blood requests
 // @route   GET /api/blood-bank/requests
 // @access  Public
@@ -288,3 +345,54 @@ const updateRequestStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.updateRequestStatus = updateRequestStatus;
+// @desc    Delete a donor
+// @route   DELETE /api/blood-bank/admin/donors/:id
+// @access  Private/Admin
+const deleteDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const donor = yield BloodDonor_1.default.findByIdAndDelete(req.params.id);
+        if (!donor) {
+            res.status(404).json({ message: 'Donor not found' });
+            return;
+        }
+        res.json({ message: 'Donor removed successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.deleteDonor = deleteDonor;
+// @desc    Verify blood request KYC with Local AI Agent
+// @route   POST /api/blood-bank/admin/requests/:id/verify-ai
+// @access  Private/Admin
+const verifyRequestWithAI = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        console.log(`[Controller] AI Verification requested for ID: ${id}`);
+        const request = yield BloodRequest_1.default.findById(id);
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+        if (!request.kycDocumentImage) {
+            res.status(400).json({ message: 'No KYC image found for this request' });
+            return;
+        }
+        // Prepare image data (Tesseract can handle base64 data URLs)
+        const imageContent = request.kycDocumentImage;
+        const patientName = request.patientName;
+        const result = yield (0, aadhaarVerifier_1.verifyAadhaarLocal)(imageContent, patientName);
+        console.log(`[Controller] Agent Result for ID ${id}:`, result);
+        request.aiVerificationStatus = result.status;
+        request.aiVerificationRemarks = result.remarks;
+        console.log(`[Controller] Saving request with status: ${request.aiVerificationStatus}...`);
+        const savedRequest = yield request.save();
+        console.log(`[Controller] Request saved successfully. New status: ${savedRequest.aiVerificationStatus}`);
+        res.json(savedRequest);
+    }
+    catch (error) {
+        console.error("Agent Verification Error:", error);
+        res.status(500).json({ message: 'Agent Verification Failed', error: error.message });
+    }
+});
+exports.verifyRequestWithAI = verifyRequestWithAI;

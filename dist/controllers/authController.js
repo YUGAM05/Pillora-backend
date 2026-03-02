@@ -22,7 +22,7 @@ const generateToken = (id, role) => {
     });
 };
 const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { name, email, password, role, bankDetails, pharmacyCertificate, phone, address } = req.body;
+    const { name, email, password, role, bankDetails, pharmacyCertificate, aadhaarCardUrl, phone, address } = req.body;
     try {
         console.log(`Registering user: ${email}, Role: ${role}`);
         const userExists = yield User_1.default.findOne({ email: email.toLowerCase() });
@@ -33,7 +33,7 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         }
         const salt = yield bcryptjs_1.default.genSalt(10);
         const passwordHash = yield bcryptjs_1.default.hash(password, salt);
-        const initialStatus = (role === 'seller' || role === 'delivery') ? 'pending' : 'approved';
+        const initialStatus = role === 'seller' ? 'pending' : 'approved';
         const userData = {
             name,
             email: email.toLowerCase(),
@@ -48,6 +48,8 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 userData.bankDetails = bankDetails;
             if (pharmacyCertificate)
                 userData.pharmacyCertificate = pharmacyCertificate;
+            if (aadhaarCardUrl)
+                userData.aadhaarCardUrl = aadhaarCardUrl;
         }
         const user = yield User_1.default.create(userData);
         if (user) {
@@ -67,18 +69,25 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     name: user.name,
                     email: user.email,
                     role: user.role,
+                    status: user.status,
+                    phone: user.phone,
+                    address: user.address,
+                    location: user.location,
                     token: generateToken(user._id, user.role),
                 });
             }
         }
         else {
             console.log('Registration failed: User creation returned null');
-            res.status(400).json({ message: 'Invalid user data' });
+            res.status(400).json({ message: 'Invalid user data provided' });
         }
     }
     catch (error) {
         console.error('Registration Server Error:', error);
-        res.status(500).json({ message: 'Server Error', error });
+        res.status(500).json({
+            message: 'Internal server error during registration',
+            details: error.message
+        });
     }
 });
 exports.registerUser = registerUser;
@@ -88,11 +97,11 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const user = yield User_1.default.findOne({ email: email.toLowerCase() });
         if (user && user.passwordHash && (yield bcryptjs_1.default.compare(password, user.passwordHash))) {
             console.log(`Login attempt for ${email}: Role=${user.role}, Status=${user.status}`);
-            // Allow admin to login regardless of status
-            // For other roles, check if status is approved
-            if (user.role !== 'admin' && user.status !== 'approved') {
+            // Allow admin, customer, or any non-rejected user to login
+            // We only block rejected users here. Pending users can login but usually have limited access on frontend.
+            if (user.role !== 'admin' && user.status === 'rejected') {
                 res.status(403).json({
-                    message: 'Your account is pending approval or has been rejected.',
+                    message: 'Your account has been rejected. Please contact support.',
                     status: user.status
                 });
                 return;
@@ -103,6 +112,9 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 email: user.email,
                 role: user.role,
                 status: user.status,
+                phone: user.phone,
+                address: user.address,
+                location: user.location,
                 token: generateToken(user._id, user.role),
             });
         }

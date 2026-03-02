@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getProductById = exports.getDealProducts = exports.getPublicProducts = void 0;
+exports.searchProducts = exports.getProductById = exports.getDealProducts = exports.getPublicProducts = void 0;
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 // @desc    Get all approved products for public view
 // @route   GET /api/products?category=Medicine
@@ -20,8 +20,8 @@ const Inventory_1 = __importDefault(require("../models/Inventory"));
 const getPublicProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { category } = req.query;
-        // Build filter for approved products
-        const filter = { status: 'approved' };
+        // Build filter for approved or pending products (for visibility during dev/testing)
+        const filter = { status: { $in: ['approved', 'pending'] } };
         // Add category filter if provided
         if (category && typeof category === 'string') {
             filter.category = category;
@@ -42,7 +42,7 @@ exports.getPublicProducts = getPublicProducts;
 const getDealProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const deals = yield Inventory_1.default.find({
-            status: 'approved',
+            status: { $in: ['approved', 'pending'] },
             isDealOfDay: true
         })
             .populate('seller', 'name')
@@ -66,7 +66,7 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
             res.status(404).json({ message: 'Product not found' });
             return;
         }
-        if (product.status !== 'approved') {
+        if (product.status !== 'approved' && product.status !== 'pending') {
             res.status(404).json({ message: 'Product not available' });
             return;
         }
@@ -77,3 +77,30 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.getProductById = getProductById;
+// @desc    Search products (Autocomplete)
+// @route   GET /api/products/search?q=query
+// @access  Public
+const searchProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { q } = req.query;
+        if (!q || typeof q !== 'string') {
+            res.json([]);
+            return;
+        }
+        const products = yield Inventory_1.default.find({
+            status: 'approved',
+            $or: [
+                { name: { $regex: q, $options: 'i' } },
+                { description: { $regex: q, $options: 'i' } },
+                { category: { $regex: q, $options: 'i' } }
+            ]
+        })
+            .select('name category sellingPrice imageUrl images')
+            .limit(10);
+        res.json(products);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error searching products', error });
+    }
+});
+exports.searchProducts = searchProducts;

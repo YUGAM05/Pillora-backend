@@ -9,10 +9,12 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = express_1.default.Router();
 // Protect stats route with Admin check
 router.get('/stats', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getSystemStats);
+router.get('/trends', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getAdminTrends); // NEW: Trend data for graphs
 // User Management
 const adminController_2 = require("../controllers/adminController");
 router.get('/users', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUsers);
 router.put('/users/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.updateUserStatus);
+router.post('/users/:id/verify-aadhaar', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.verifyUserAadhaar);
 router.get('/users/:id/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUserOrders);
 router.get('/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAllOrders); // NEW: Get all system orders
 // Product Management

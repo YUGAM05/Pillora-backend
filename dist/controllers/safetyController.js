@@ -62,8 +62,9 @@ const analyzeDrugSafety = (req, res) => __awaiter(void 0, void 0, void 0, functi
             safetyLevel,
             isAppropriate,
             appropriateFor: isAppropriate
-                ? `This medication appears appropriate for treating: ${matchingSymptoms.join(', ')}`
-                : `This medication is typically used for: ${drug.treatsSymptoms.slice(0, 5).join(', ')}. It may not be the best choice for your described symptoms.`,
+                ? `Matched Symptoms: ${matchingSymptoms.join(', ')}. This medication is effectively used for your condition.`
+                : `No direct match found for your symptoms. This medication is typically used for: ${drug.treatsSymptoms.slice(0, 5).join(', ')}. Consult a doctor if your symptoms persist.`,
+            mechanismOfAction: `As a ${drug.category.toLowerCase()}, this medication works by ${drug.category.includes('NSAID') ? 'blocking enzymes that cause inflammation and pain' : drug.category.includes('Antibiotic') ? 'inhibiting bacterial cell wall synthesis or reproduction' : 'targeting specific physiological pathways'}.`,
             dosageRecommendations: {
                 adult: drug.dosage.adult,
                 child: drug.dosage.child,
@@ -74,15 +75,23 @@ const analyzeDrugSafety = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 `Take ${drug.dosage.adult} ${drug.dosage.frequency.toLowerCase()}`,
                 `Maximum daily dose: ${drug.dosage.maxDaily}`,
                 'Follow the instructions on the packaging',
-                'Complete the full course if prescribed'
+                'Complete the full course if prescribed',
+                'Do not take on an empty stomach unless specified'
             ],
-            warnings: drug.warnings,
+            criticalPrecautions: [
+                ...drug.warnings.slice(0, 2),
+                `Contraindicated in: ${drug.contraindications.join(', ')}`
+            ],
             sideEffects: drug.sideEffects,
-            contraindications: drug.contraindications,
             interactions: drug.interactions.length > 0
-                ? `May interact with: ${drug.interactions.join(', ')}`
-                : 'No major interactions in database',
-            disclaimer: 'This is an AI-generated analysis for informational purposes only. Always consult a healthcare professional before taking any medication.'
+                ? `Potential interactions with: ${drug.interactions.join(', ')}`
+                : 'No major interactions identified in our current database.',
+            lifestyleAdvice: [
+                'Maintain adequate hydration while on medication',
+                'Avoid alcohol consumption unless cleared by a doctor',
+                'Monitor for any unusual allergic reactions'
+            ],
+            disclaimer: 'CRITICAL: This is an AI-generated safety analysis based on clinical data. It is for informational purposes only and DOES NOT replace professional medical advice, diagnosis, or treatment.'
         };
         res.json(report);
     }
