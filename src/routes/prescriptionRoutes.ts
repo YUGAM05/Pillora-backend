@@ -1,15 +1,24 @@
-import express from 'express';
-import { uploadPrescription, getMyPrescriptions, getAllPrescriptions, updatePrescriptionStatus } from '../controllers/prescriptionController';
-import { protect, adminOnly } from '../middleware/authMiddleware';
+import { Router } from 'express';
+import { protect } from '../middleware/authMiddleware';
+import { authorize } from '../middleware/roleMiddleware';
+import multer from 'multer';
+import {
+    uploadPrescription,
+    getUserPrescriptions,
+    getPrescriptionById,
+    adminGetAllPrescriptions,
+    adminVerifyPrescription
+} from '../controllers/prescriptionController';
 
-const router = express.Router();
+const router = Router();
+const upload = multer({ dest: 'uploads/' });
 
-// User routes
-router.post('/', protect, uploadPrescription);
-router.get('/my', protect, getMyPrescriptions);
+router.post('/', protect, upload.single('prescription'), uploadPrescription);
+router.get('/my', protect, getUserPrescriptions);
+router.get('/:id', protect, getPrescriptionById);
 
 // Admin routes
-router.get('/admin', protect, adminOnly, getAllPrescriptions);
-router.put('/:id/status', protect, adminOnly, updatePrescriptionStatus);
+router.get('/', protect, authorize('admin'), adminGetAllPrescriptions);
+router.put('/:id/verify', protect, authorize('admin'), adminVerifyPrescription);
 
 export default router;

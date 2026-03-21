@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -45,173 +12,190 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateOrderStatus = exports.getOrderById = exports.getUserOrders = exports.createOrder = void 0;
+exports.adminAssignDelivery = exports.adminGetAllOrders = exports.deliveryUpdateStatus = exports.deliveryGetAssignedOrders = exports.sellerUpdateOrderStatus = exports.sellerGetOrders = exports.getOrderById = exports.getUserOrders = exports.createOrder = void 0;
 const Order_1 = __importDefault(require("../models/Order"));
-const Inventory_1 = __importDefault(require("../models/Inventory"));
-const Coupon_1 = __importDefault(require("../models/Coupon"));
-// @desc    Create new order
-// @route   POST /api/orders
-// @access  Private (user must be logged in)
+const Prescription_1 = __importDefault(require("../models/Prescription"));
+const Medicine_1 = __importDefault(require("../models/Medicine"));
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { items, shippingAddress, totalAmount, paymentMethod, notes, shippingLocation, couponCode, discountAmount } = req.body;
-        // Validate required fields
-        if (!items || !shippingAddress || !totalAmount) {
-            res.status(400).json({ message: 'Missing required fields' });
-            return;
+        const user_id = req.user._id;
+        const { rx_id, seller_id, medicines, delivery_address } = req.body;
+        // 1. Calculate totals
+        let subtotal = 0;
+        for (const item of medicines) {
+            subtotal += item.price * item.quantity;
         }
-        // Verify user is authenticated
-        if (!req.user) {
-            res.status(401).json({ message: 'User not authenticated' });
-            return;
-        }
-        // Check stock availability for all items
-        for (const item of items) {
-            const product = yield Inventory_1.default.findById(item.productId);
-            if (!product) {
-                res.status(404).json({ message: `Product ${item.name} not found` });
-                return;
-            }
-            if (product.stock < item.quantity) {
-                res.status(400).json({ message: `Only ${product.stock} left in stock for ${item.name}` });
-                return;
-            }
-        }
-        // Calculate breakdown
-        const medicineSubtotal = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-        const platformFee = 10;
-        const sellerCommission = Math.round(medicineSubtotal * 0.15);
-        let calculatedTotal = medicineSubtotal + platformFee;
-        // Apply coupon if present
-        let finalDiscountAmount = 0;
-        if (couponCode) {
-            const coupon = yield Coupon_1.default.findOne({ code: couponCode.toUpperCase(), isActive: true });
-            if (coupon && new Date() <= coupon.expiryDate && medicineSubtotal >= coupon.minOrderAmount) {
-                if (coupon.discountType === 'percentage') {
-                    finalDiscountAmount = (medicineSubtotal * coupon.discountValue) / 100;
-                }
-                else {
-                    finalDiscountAmount = coupon.discountValue;
-                }
-                finalDiscountAmount = Math.min(finalDiscountAmount, medicineSubtotal);
-                calculatedTotal -= finalDiscountAmount;
-                // Increment usage count
-                yield Coupon_1.default.findByIdAndUpdate(coupon._id, { $inc: { usageCount: 1 } });
-            }
-        }
-        // Create order
+        const platform_fee = 10;
+        const seller_commission = Math.round(subtotal * 0.15);
+        const total_amount = subtotal + platform_fee; // simplified
+        // 2. Create Order
         const order = yield Order_1.default.create({
-            user: req.user._id,
-            items: items.map((item) => ({
-                product: item.productId,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-                image: item.image
-            })),
-            shippingAddress,
-            shippingLocation,
-            medicineSubtotal,
-            platformFee,
-            sellerCommission,
-            totalAmount: calculatedTotal,
-            paymentMethod: paymentMethod || 'cod',
-            paymentStatus: 'pending',
-            orderStatus: 'pending',
-            notes,
-            couponCode: couponCode ? couponCode.toUpperCase() : undefined,
-            discountAmount: finalDiscountAmount
+            user_id,
+            rx_id,
+            seller_id,
+            medicines,
+            total_amount,
+            delivery_address,
+            status: 'order_placed',
+            payment_status: 'pending',
+            platform_fee,
+            seller_commission
         });
-        // Update stock for each product
-        for (const item of items) {
-            yield Inventory_1.default.findByIdAndUpdate(item.productId, { $inc: { stock: -item.quantity } });
+        // 3. Update Prescription if provided
+        if (rx_id) {
+            yield Prescription_1.default.findOneAndUpdate({ rx_id }, { is_used: true });
         }
-        // 🚀 AUTOMATION: Send WhatsApp Bill
-        try {
-            const { sendWhatsAppBill } = yield Promise.resolve().then(() => __importStar(require('../services/whatsappService')));
-            if (shippingAddress && shippingAddress.phone) {
-                const customerName = req.user.name || shippingAddress.fullName;
-                // Use Environment Variable for the Frontend URL instead of localhost
-                const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-                sendWhatsAppBill(shippingAddress.phone, customerName, order._id.toString().slice(-8).toUpperCase(), calculatedTotal, // Use the calculated total for the bill
-                `${frontendUrl}/order-success/${order._id}`).catch((err) => console.error('WhatsApp Automation Failed:', err));
-            }
+        // 4. Reduce Medicine Stock
+        for (const item of medicines) {
+            yield Medicine_1.default.findByIdAndUpdate(item.medicine_id, {
+                $inc: { stock: -item.quantity }
+            });
         }
-        catch (waError) {
-            console.error('Failed to init WhatsApp service:', waError);
+        // 5. Emit Socket Event
+        const io = req.app.get('io');
+        if (io) {
+            io.to(seller_id.toString()).emit('order_created', order);
         }
         res.status(201).json(order);
     }
     catch (error) {
-        console.error('Order creation error:', {
-            message: error.message,
-            stack: error.stack,
-            body: req.body
-        });
-        res.status(500).json({ message: 'Error creating order', error: error.message });
+        console.error(error);
+        res.status(500).json({ message: error.message });
     }
 });
 exports.createOrder = createOrder;
-// @desc    Get user's orders
 const getUserOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        if (!req.user) {
-            res.status(401).json({ message: 'User not authenticated' });
-            return;
-        }
-        const orders = yield Order_1.default.find({ user: req.user._id })
-            .sort({ createdAt: -1 })
-            .populate('items.product', 'name category');
-        res.json(orders);
+        const orders = yield Order_1.default.find({ user_id: req.user._id })
+            .populate('seller_id', 'name pharmacy_name')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
     }
     catch (error) {
-        res.status(500).json({ message: 'Error fetching orders', error });
+        res.status(500).json({ message: error.message });
     }
 });
 exports.getUserOrders = getUserOrders;
-// @desc    Get single order by ID
 const getOrderById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const order = yield Order_1.default.findById(req.params.id)
-            .populate({
-            path: 'items.product',
-            select: 'name category seller',
-            populate: {
-                path: 'seller',
-                select: 'name phone location'
-            }
-        })
-            .populate('user', 'name email location')
-            .populate('assignedDelivery', 'name phone location');
+            .populate('user_id', 'name phone email')
+            .populate('seller_id', 'name pharmacy_name address phone')
+            .populate('delivery_agent_id', 'name phone');
         if (!order) {
-            res.status(404).json({ message: 'Order not found' });
-            return;
+            return res.status(404).json({ message: 'Order not found' });
         }
-        if (!req.user || order.user._id.toString() !== req.user._id.toString()) {
-            res.status(403).json({ message: 'Not authorized to view this order' });
-            return;
-        }
-        res.json(order);
+        res.status(200).json(order);
     }
     catch (error) {
-        res.status(500).json({ message: 'Error fetching order', error });
+        res.status(500).json({ message: error.message });
     }
 });
 exports.getOrderById = getOrderById;
-// @desc    Update order status
-const updateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const sellerGetOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { id } = req.params;
-        const { status } = req.body;
-        const order = yield Order_1.default.findByIdAndUpdate(id, { orderStatus: status }, { new: true });
-        if (!order) {
-            res.status(404).json({ message: 'Order not found' });
-            return;
-        }
-        res.json(order);
+        const orders = yield Order_1.default.find({ seller_id: req.user._id })
+            .populate('user_id', 'name phone')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
     }
     catch (error) {
-        res.status(500).json({ message: 'Error updating order status', error });
+        res.status(500).json({ message: error.message });
     }
 });
-exports.updateOrderStatus = updateOrderStatus;
+exports.sellerGetOrders = sellerGetOrders;
+const sellerUpdateOrderStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { status } = req.body;
+        const allowedStatuses = ['confirmed_by_seller', 'out_for_pickup', 'cancelled'];
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ message: 'Invalid status for seller' });
+        }
+        const order = yield Order_1.default.findOneAndUpdate({ _id: req.params.id, seller_id: req.user._id }, { status }, { new: true });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        const io = req.app.get('io');
+        if (io) {
+            io.to(order._id.toString()).emit('order_status_updated', order);
+        }
+        res.status(200).json(order);
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.sellerUpdateOrderStatus = sellerUpdateOrderStatus;
+const deliveryGetAssignedOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const orders = yield Order_1.default.find({ delivery_agent_id: req.user._id })
+            .populate('user_id', 'name phone')
+            .populate('seller_id', 'name pharmacy_name address phone');
+        res.status(200).json(orders);
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.deliveryGetAssignedOrders = deliveryGetAssignedOrders;
+const deliveryUpdateStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { status, delivery_location } = req.body;
+        const allowedStatuses = ['out_for_pickup', 'in_transit', 'delivered'];
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ message: 'Invalid status for delivery agent' });
+        }
+        const updateData = { status };
+        if (delivery_location) {
+            updateData.delivery_location = delivery_location;
+        }
+        if (status === 'delivered') {
+            updateData.estimated_delivery = new Date(); // Using this as actual delivery time for simplicity
+        }
+        const order = yield Order_1.default.findOneAndUpdate({ _id: req.params.id, delivery_agent_id: req.user._id }, updateData, { new: true });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        const io = req.app.get('io');
+        if (io) {
+            io.to(order._id.toString()).emit('order_status_updated', order);
+        }
+        res.status(200).json(order);
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.deliveryUpdateStatus = deliveryUpdateStatus;
+const adminGetAllOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const orders = yield Order_1.default.find()
+            .populate('user_id', 'name')
+            .populate('seller_id', 'name pharmacy_name')
+            .populate('delivery_agent_id', 'name')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.adminGetAllOrders = adminGetAllOrders;
+const adminAssignDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { delivery_agent_id } = req.body;
+        const order = yield Order_1.default.findByIdAndUpdate(req.params.id, { delivery_agent_id, status: 'out_for_pickup' }, { new: true });
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+        const io = req.app.get('io');
+        if (io) {
+            io.to(delivery_agent_id.toString()).emit('order_assigned', order);
+        }
+        res.status(200).json(order);
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.adminAssignDelivery = adminAssignDelivery;

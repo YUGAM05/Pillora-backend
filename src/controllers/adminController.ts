@@ -19,22 +19,22 @@ export const getSystemStats = async (req: Request, res: Response): Promise<void>
 
         // Calculate Revenue
         const revenueResult = await Order.aggregate([
-            { $match: { paymentStatus: 'paid' } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+            { $match: { payment_status: 'paid' } },
+            { $group: { _id: null, total: { $sum: '$total_amount' } } }
         ]);
         const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
 
         // Calculate Admin Profit
         const profitResult = await Order.aggregate([
-            { $match: { paymentStatus: 'paid' } },
+            { $match: { payment_status: 'paid' } },
             {
                 $group: {
                     _id: null,
                     totalProfit: {
                         $sum: {
                             $add: [
-                                "$platformFee",
-                                "$sellerCommission",
+                                "$platform_fee",
+                                "$seller_commission",
                                 { $ifNull: ["$adminDeliveryCommission", 0] }
                             ]
                         }
@@ -219,7 +219,7 @@ export const getUserOrders = async (req: Request, res: Response): Promise<void> 
     try {
         const { id } = req.params;
         const orders = await Order.find({ user: id })
-            .populate('items.product', 'name imageUrl')
+            .populate('medicines.medicine_id', 'name imageUrl')
             .sort({ createdAt: -1 });
 
         res.json(orders);
@@ -256,7 +256,7 @@ export const getAllOrders = async (req: Request, res: Response): Promise<void> =
     try {
         const orders = await Order.find()
             .populate('user', 'name email')
-            .populate('items.product', 'name imageUrl')
+            .populate('medicines.medicine_id', 'name imageUrl')
             .sort({ createdAt: -1 });
 
         res.json(orders);
@@ -278,13 +278,13 @@ export const getAdminTrends = async (req: Request, res: Response): Promise<void>
             {
                 $match: {
                     createdAt: { $gte: sevenDaysAgo },
-                    paymentStatus: 'paid'
+                    payment_status: 'paid'
                 }
             },
             {
                 $group: {
                     _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    revenue: { $sum: "$totalAmount" },
+                    revenue: { $sum: "$total_amount" },
                     orders: { $sum: 1 }
                 }
             },

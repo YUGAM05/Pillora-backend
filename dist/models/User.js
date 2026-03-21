@@ -43,6 +43,7 @@ const UserSchema = new mongoose_1.Schema({
     role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin'], default: 'customer' },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved' },
     phone: { type: String },
+    pharmacy_name: { type: String },
     address: {
         street: String,
         city: String,

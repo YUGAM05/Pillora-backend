@@ -32,14 +32,42 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const PrescriptionSchema = new mongoose_1.Schema({
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    imageUrl: { type: String, required: true },
-    verifiedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
-    status: { type: String, enum: ['pending', 'verified', 'rejected'], default: 'pending' },
-    notes: { type: String },
-    linkedOrder: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Order' }
+    rx_id: { type: String, unique: true },
+    user_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    image_url: { type: String, required: true },
+    ocr_text: { type: String },
+    ai_result: { type: mongoose_1.Schema.Types.Mixed },
+    medicines_extracted: [{
+            name: String,
+            dosage: String,
+            quantity: String,
+            duration: String
+        }],
+    admin_status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    admin_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    admin_notes: { type: String },
+    valid_until: { type: Date },
+    is_used: { type: Boolean, default: false }
 }, { timestamps: true });
+PrescriptionSchema.pre('save', function () {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!this.rx_id) {
+            const year = new Date().getFullYear();
+            const count = yield mongoose_1.default.model('Prescription').countDocuments();
+            this.rx_id = `RX-${year}-${(count + 1).toString().padStart(5, '0')}`;
+        }
+    });
+});
 exports.default = mongoose_1.default.model('Prescription', PrescriptionSchema);

@@ -7,8 +7,34 @@ import morgan from 'morgan';
 import mongoose from 'mongoose';
 import session from 'express-session';
 import passport from './config/passport';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+    cors: {
+        origin: '*', // Adjust for production
+        methods: ['GET', 'POST']
+    }
+});
+
+// Make io accessible in controllers
+app.set('io', io);
+
+io.on('connection', (socket) => {
+    console.log('New client connected:', socket.id);
+
+    socket.on('join', (room) => {
+        socket.join(room);
+        console.log(`Socket ${socket.id} joined room: ${room}`);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
+});
+
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = [
@@ -24,17 +50,23 @@ const allowedOrigins = [
     'http://localhost:5000',
 ];
 
-// ✅ Manual CORS middleware - no cors package, no path-to-regexp issues
+// ✅ Permissive CORS for development
 app.use((req, res, next) => {
-    const origin = req.headers.origin as string;
-    if (origin && allowedOrigins.includes(origin)) {
+    console.log(`[Request] ${req.method} ${req.url}`);
+    const origin = req.headers.origin;
+    // Allow all local origins (localhost and 127.0.0.1) or any origin in the allowed list
+    const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
+    if (origin && (isLocal || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (!origin) {
+        // Fallback for tools/non-browser requests
+        res.setHeader('Access-Control-Allow-Origin', '*');
     }
+
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-    // ✅ Handle preflight OPTIONS requests instantly - no wildcard needed
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
@@ -43,6 +75,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+app.use('/uploads', express.static('uploads')); // Serve uploaded files
 
 app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -79,11 +112,11 @@ import supportRoutes from './routes/supportRoutes';
 import blogRoutes from './routes/blogRoutes';
 import aiRoutes from './routes/aiRoutes';
 import couponRoutes from './routes/couponRoutes';
+import medicineRoutes from './routes/medicineRoutes';
+import uploadRoutes from './routes/uploadRoutes';
 
-// Ensure DB is connected before every request in serverless environment
 app.use(async (req, res, next) => {
     if (mongoose.connection.readyState === 0) {
-        console.log('[middleware] DB disconnected, reconnecting...');
         await connectDB();
     }
     next();
@@ -105,57 +138,44 @@ app.use('/api/support', supportRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/medicines', medicineRoutes);
+app.use('/api/upload', uploadRoutes);
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Apex Care API is running',
+        message: 'Apex Care API is running with Sockets',
         timestamp: new Date().toISOString(),
         dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-        services: {
-            aiSafetyChecker: 'Active',
-            bloodBank: 'Active',
-        },
     });
 });
 
 export const connectDB = async () => {
-    if (mongoose.connection.readyState >= 1) {
-        console.log('[DB] Already connected, reusing connection');
-        return;
-    }
+    if (mongoose.connection.readyState >= 1) return;
     try {
         const uri = process.env.MONGO_URI;
-        console.log('[DB] MONGO_URI exists:', !!uri);
-        if (!uri) {
-            console.error('[DB] MONGO_URI is not set in environment variables!');
-            return;
-        }
-        console.log('[DB] Connecting to MongoDB...');
+        if (!uri) return;
         await mongoose.connect(uri);
-        console.log('[DB] MongoDB Connected successfully!');
+        console.log('[DB] Connected to MongoDB');
     } catch (error: any) {
-        console.error('[DB] MongoDB Connection Error:', error.message);
+        console.error('[DB] Connection Error:', error.message);
     }
 };
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('[GlobalError]', err.message);
-    res.status(err.status || 500).json({
-        message: err.message || 'Internal Server Error',
-    });
+    res.status(err.status || 500).json({ message: err.message || 'Internal Server Error' });
 });
 
 if (process.env.NODE_ENV !== 'production') {
-    (async () => {
-        try {
-            await connectDB();
-            app.listen(PORT, () => {
-                console.log(`Server running on port ${PORT} - Payload Limit 100mb Active`);
-            });
-        } catch (err) {
-            console.error('Fatal startup error:', err);
-        }
-    })();
+    httpServer.listen(PORT, () => {
+        console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
+        // Connect to DB in background so server stays alive even if DB is slow
+        connectDB().then(() => {
+            console.log('✅ Background DB connection established');
+        }).catch(err => {
+            console.error('❌ Background DB connection failed:', err);
+        });
+    });
 }
 
 export default app;

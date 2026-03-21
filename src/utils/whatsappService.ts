@@ -15,5 +15,6 @@ export const sendWhatsAppMessage = async (to: string, content: string | { conten
         return { sid: `SIM_${Date.now()}` };
     } catch (error) {
         console.error('Error in WhatsApp simulation:', error);
+        return { error: 'Simulation error' };
     }
 };

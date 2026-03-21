@@ -1,193 +1,213 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import Order from '../models/Order';
-import Inventory from '../models/Inventory';
-import Coupon from '../models/Coupon';
+import Prescription from '../models/Prescription';
+import Medicine from '../models/Medicine';
 import { AuthRequest } from '../middleware/authMiddleware';
 
-// @desc    Create new order
-// @route   POST /api/orders
-// @access  Private (user must be logged in)
-export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
+export const createOrder = async (req: AuthRequest, res: Response) => {
     try {
-        const { items, shippingAddress, totalAmount, paymentMethod, notes, shippingLocation, couponCode, discountAmount } = req.body;
+        const user_id = req.user._id;
+        const { rx_id, seller_id, medicines, delivery_address } = req.body;
 
-        // Validate required fields
-        if (!items || !shippingAddress || !totalAmount) {
-            res.status(400).json({ message: 'Missing required fields' });
-            return;
+        // 1. Calculate totals
+        let subtotal = 0;
+        for (const item of medicines) {
+            subtotal += item.price * item.quantity;
         }
 
-        // Verify user is authenticated
-        if (!req.user) {
-            res.status(401).json({ message: 'User not authenticated' });
-            return;
-        }
+        const platform_fee = 10;
+        const seller_commission = Math.round(subtotal * 0.15);
+        const total_amount = subtotal + platform_fee; // simplified
 
-        // Check stock availability for all items
-        for (const item of items) {
-            const product = await Inventory.findById(item.productId);
-            if (!product) {
-                res.status(404).json({ message: `Product ${item.name} not found` });
-                return;
-            }
-            if (product.stock < item.quantity) {
-                res.status(400).json({ message: `Only ${product.stock} left in stock for ${item.name}` });
-                return;
-            }
-        }
-
-        // Calculate breakdown
-        const medicineSubtotal = items.reduce((acc: number, item: any) => acc + (item.price * item.quantity), 0);
-        const platformFee = 10;
-        const sellerCommission = Math.round(medicineSubtotal * 0.15);
-        let calculatedTotal = medicineSubtotal + platformFee;
-
-        // Apply coupon if present
-        let finalDiscountAmount = 0;
-        if (couponCode) {
-            const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
-            if (coupon && new Date() <= coupon.expiryDate && medicineSubtotal >= coupon.minOrderAmount) {
-                if (coupon.discountType === 'percentage') {
-                    finalDiscountAmount = (medicineSubtotal * coupon.discountValue) / 100;
-                } else {
-                    finalDiscountAmount = coupon.discountValue;
-                }
-                finalDiscountAmount = Math.min(finalDiscountAmount, medicineSubtotal);
-                calculatedTotal -= finalDiscountAmount;
-
-                // Increment usage count
-                await Coupon.findByIdAndUpdate(coupon._id, { $inc: { usageCount: 1 } });
-            }
-        }
-
-        // Create order
+        // 2. Create Order
         const order = await Order.create({
-            user: req.user._id,
-            items: items.map((item: any) => ({
-                product: item.productId,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-                image: item.image
-            })),
-            shippingAddress,
-            shippingLocation,
-            medicineSubtotal,
-            platformFee,
-            sellerCommission,
-            totalAmount: calculatedTotal,
-            paymentMethod: paymentMethod || 'cod',
-            paymentStatus: 'pending',
-            orderStatus: 'pending',
-            notes,
-            couponCode: couponCode ? couponCode.toUpperCase() : undefined,
-            discountAmount: finalDiscountAmount
+            user_id,
+            rx_id,
+            seller_id,
+            medicines,
+            total_amount,
+            delivery_address,
+            status: 'order_placed',
+            payment_status: 'pending',
+            platform_fee,
+            seller_commission
         });
 
-        // Update stock for each product
-        for (const item of items) {
-            await Inventory.findByIdAndUpdate(
-                item.productId,
-                { $inc: { stock: -item.quantity } }
-            );
+        // 3. Update Prescription if provided
+        if (rx_id) {
+            await Prescription.findOneAndUpdate({ rx_id }, { is_used: true });
         }
 
-        // 🚀 AUTOMATION: Send WhatsApp Bill
-        try {
-            const { sendWhatsAppBill } = await import('../services/whatsappService');
-            if (shippingAddress && shippingAddress.phone) {
-                const customerName = req.user.name || shippingAddress.fullName;
-                
-                // Use Environment Variable for the Frontend URL instead of localhost
-                const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        // 4. Reduce Medicine Stock
+        for (const item of medicines) {
+            await Medicine.findByIdAndUpdate(item.medicine_id, {
+                $inc: { stock: -item.quantity }
+            });
+        }
 
-                sendWhatsAppBill(
-                    shippingAddress.phone,
-                    customerName,
-                    order._id.toString().slice(-8).toUpperCase(),
-                    calculatedTotal, // Use the calculated total for the bill
-                    `${frontendUrl}/order-success/${order._id}`
-                ).catch((err: any) => console.error('WhatsApp Automation Failed:', err));
-            }
-        } catch (waError) {
-            console.error('Failed to init WhatsApp service:', waError);
+        // 5. Emit Socket Event
+        const io = req.app.get('io');
+        if (io) {
+            io.to(seller_id.toString()).emit('order_created', order);
         }
 
         res.status(201).json(order);
     } catch (error: any) {
-        console.error('Order creation error:', {
-            message: error.message,
-            stack: error.stack,
-            body: req.body
-        });
-        res.status(500).json({ message: 'Error creating order', error: error.message });
+        console.error(error);
+        res.status(500).json({ message: error.message });
     }
 };
 
-// @desc    Get user's orders
-export const getUserOrders = async (req: AuthRequest, res: Response): Promise<void> => {
+export const getUserOrders = async (req: AuthRequest, res: Response) => {
     try {
-        if (!req.user) {
-            res.status(401).json({ message: 'User not authenticated' });
-            return;
-        }
-
-        const orders = await Order.find({ user: req.user._id })
-            .sort({ createdAt: -1 })
-            .populate('items.product', 'name category');
-
-        res.json(orders);
-    } catch (error) {
-        res.status(500).json({ message: 'Error fetching orders', error });
+        const orders = await Order.find({ user_id: req.user._id })
+            .populate('seller_id', 'name pharmacy_name')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
     }
 };
 
-// @desc    Get single order by ID
-export const getOrderById = async (req: AuthRequest, res: Response): Promise<void> => {
+export const getOrderById = async (req: Request, res: Response) => {
     try {
         const order = await Order.findById(req.params.id)
-            .populate({
-                path: 'items.product',
-                select: 'name category seller',
-                populate: {
-                    path: 'seller',
-                    select: 'name phone location'
-                }
-            })
-            .populate('user', 'name email location')
-            .populate('assignedDelivery', 'name phone location');
+            .populate('user_id', 'name phone email')
+            .populate('seller_id', 'name pharmacy_name address phone')
+            .populate('delivery_agent_id', 'name phone');
 
         if (!order) {
-            res.status(404).json({ message: 'Order not found' });
-            return;
+            return res.status(404).json({ message: 'Order not found' });
         }
-
-        if (!req.user || order.user._id.toString() !== req.user._id.toString()) {
-            res.status(403).json({ message: 'Not authorized to view this order' });
-            return;
-        }
-
-        res.json(order);
-    } catch (error) {
-        res.status(500).json({ message: 'Error fetching order', error });
+        res.status(200).json(order);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
     }
 };
 
-// @desc    Update order status
-export const updateOrderStatus = async (req: AuthRequest, res: Response): Promise<void> => {
+export const sellerGetOrders = async (req: AuthRequest, res: Response) => {
     try {
-        const { id } = req.params;
+        const orders = await Order.find({ seller_id: req.user._id })
+            .populate('user_id', 'name phone')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const sellerUpdateOrderStatus = async (req: AuthRequest, res: Response) => {
+    try {
         const { status } = req.body;
+        const allowedStatuses = ['confirmed_by_seller', 'out_for_pickup', 'cancelled'];
 
-        const order = await Order.findByIdAndUpdate(id, { orderStatus: status }, { new: true });
-
-        if (!order) {
-            res.status(404).json({ message: 'Order not found' });
-            return;
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ message: 'Invalid status for seller' });
         }
 
-        res.json(order);
-    } catch (error) {
-        res.status(500).json({ message: 'Error updating order status', error });
+        const order = await Order.findOneAndUpdate(
+            { _id: req.params.id, seller_id: req.user._id },
+            { status },
+            { new: true }
+        );
+
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(order._id.toString()).emit('order_status_updated', order);
+        }
+
+        res.status(200).json(order);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const deliveryGetAssignedOrders = async (req: AuthRequest, res: Response) => {
+    try {
+        const orders = await Order.find({ delivery_agent_id: req.user._id })
+            .populate('user_id', 'name phone')
+            .populate('seller_id', 'name pharmacy_name address phone');
+        res.status(200).json(orders);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const deliveryUpdateStatus = async (req: AuthRequest, res: Response) => {
+    try {
+        const { status, delivery_location } = req.body;
+        const allowedStatuses = ['out_for_pickup', 'in_transit', 'delivered'];
+
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ message: 'Invalid status for delivery agent' });
+        }
+
+        const updateData: any = { status };
+        if (delivery_location) {
+            updateData.delivery_location = delivery_location;
+        }
+        if (status === 'delivered') {
+            updateData.estimated_delivery = new Date(); // Using this as actual delivery time for simplicity
+        }
+
+        const order = await Order.findOneAndUpdate(
+            { _id: req.params.id, delivery_agent_id: req.user._id },
+            updateData,
+            { new: true }
+        );
+
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(order._id.toString()).emit('order_status_updated', order);
+        }
+
+        res.status(200).json(order);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const adminGetAllOrders = async (req: Request, res: Response) => {
+    try {
+        const orders = await Order.find()
+            .populate('user_id', 'name')
+            .populate('seller_id', 'name pharmacy_name')
+            .populate('delivery_agent_id', 'name')
+            .sort({ createdAt: -1 });
+        res.status(200).json(orders);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const adminAssignDelivery = async (req: Request, res: Response) => {
+    try {
+        const { delivery_agent_id } = req.body;
+        const order = await Order.findByIdAndUpdate(
+            req.params.id,
+            { delivery_agent_id, status: 'out_for_pickup' },
+            { new: true }
+        );
+
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+            io.to(delivery_agent_id.toString()).emit('order_assigned', order);
+        }
+
+        res.status(200).json(order);
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
     }
 };

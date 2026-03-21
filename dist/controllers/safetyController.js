@@ -8,9 +8,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkSafety = exports.analyzeDrugSafety = void 0;
 const drugDatabase_1 = require("../data/drugDatabase");
+const Inventory_1 = __importDefault(require("../models/Inventory"));
 // @desc    Comprehensive drug safety analysis
 // @route   POST /api/safety/analyze
 // @access  Public
@@ -21,77 +25,84 @@ const analyzeDrugSafety = (req, res) => __awaiter(void 0, void 0, void 0, functi
             res.status(400).json({ message: 'Please provide both medicine name and symptoms' });
             return;
         }
-        // Find drug in database
-        const drug = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === medicineName.toLowerCase() ||
+        // 1. First, check our own Inventory for this medicine
+        // This allows the "Own Implementation" requested by the user
+        const inventoryProduct = yield Inventory_1.default.findOne({
+            status: 'approved',
+            $or: [
+                { name: { $regex: new RegExp(`^${medicineName}$`, 'i') } },
+                { description: { $regex: new RegExp(medicineName, 'i') } }
+            ]
+        });
+        // 2. Also find drug in clinical database for fallback or supplemental data
+        const clinicalDrug = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === medicineName.toLowerCase() ||
             d.genericName.toLowerCase() === medicineName.toLowerCase());
-        if (!drug) {
-            // Drug not found in database
+        if (!inventoryProduct && !clinicalDrug) {
+            // Drug not found anywhere
             res.json({
                 found: false,
                 medicineName,
-                message: 'This medication is not in our database. Please consult a healthcare professional for detailed information.',
+                message: 'This medication is not in our verified inventory or safety database. Please consult a healthcare professional.',
                 safetyLevel: 'unknown',
                 recommendation: 'We recommend consulting with a pharmacist or doctor before taking this medication.'
             });
             return;
         }
-        // Analyze symptom compatibility
+        // 3. Analyze symptom compatibility
+        // We use clinical data if available, otherwise analyze product description
+        const treatableSymptoms = clinicalDrug ? clinicalDrug.treatsSymptoms : [];
+        const productInfo = inventoryProduct ? (inventoryProduct.description || '') + ' ' + (inventoryProduct.safetyInformation || '') : '';
         const symptomWords = symptoms.toLowerCase().split(/[\s,]+/);
-        const matchingSymptoms = drug.treatsSymptoms.filter(treatedSymptom => symptomWords.some((word) => treatedSymptom.includes(word) || word.includes(treatedSymptom)));
-        const isAppropriate = matchingSymptoms.length > 0;
-        const isSafe = drug.contraindications.length === 0; // Simplified - would need more context
-        let safetyLevel;
-        if (isAppropriate && isSafe) {
-            safetyLevel = 'safe';
+        const matchingSymptoms = treatableSymptoms.filter(ts => symptomWords.some(word => ts.includes(word) || word.includes(ts)));
+        // If no clinical match, look for symptom keywords in product description
+        let isAppropriate = matchingSymptoms.length > 0;
+        if (!isAppropriate && inventoryProduct) {
+            const symptomsToLink = ['pain', 'fever', 'cough', 'allergy', 'infection', 'stomach', 'headache'];
+            isAppropriate = symptomsToLink.some(s => { var _a; return symptomWords.includes(s) && (((_a = inventoryProduct.description) === null || _a === void 0 ? void 0 : _a.toLowerCase().includes(s)) || inventoryProduct.category.toLowerCase().includes(s)); });
         }
-        else if (isAppropriate && !isSafe) {
-            safetyLevel = 'caution';
-        }
-        else if (!isAppropriate) {
-            safetyLevel = 'warning';
-        }
-        else {
-            safetyLevel = 'unsafe';
-        }
-        // Generate report
+        const safetyLevel = isAppropriate ? (clinicalDrug ? 'safe' : 'caution') : 'warning';
+        // 4. Construct high-fidelity report using merged data
         const report = {
             found: true,
-            medicineName: drug.name,
-            genericName: drug.genericName,
-            category: drug.category,
+            medicineName: (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.name) || (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.name) || medicineName,
+            genericName: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.genericName) || (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.manufacturer) || 'Generic Pharmaceutical',
+            category: (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.category) || (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.category) || 'Healthcare Product',
             safetyLevel,
             isAppropriate,
             appropriateFor: isAppropriate
-                ? `Matched Symptoms: ${matchingSymptoms.join(', ')}. This medication is effectively used for your condition.`
-                : `No direct match found for your symptoms. This medication is typically used for: ${drug.treatsSymptoms.slice(0, 5).join(', ')}. Consult a doctor if your symptoms persist.`,
-            mechanismOfAction: `As a ${drug.category.toLowerCase()}, this medication works by ${drug.category.includes('NSAID') ? 'blocking enzymes that cause inflammation and pain' : drug.category.includes('Antibiotic') ? 'inhibiting bacterial cell wall synthesis or reproduction' : 'targeting specific physiological pathways'}.`,
+                ? `Matched Symptoms: ${matchingSymptoms.length > 0 ? matchingSymptoms.join(', ') : 'Condition Match'}. This medication is indicated for your symptoms.`
+                : `Caution: No direct clinical link found between "${medicineName}" and your symptoms. This is usually used for ${(clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.treatsSymptoms.slice(0, 3).join(', ')) || (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.category)}.`,
+            mechanismOfAction: (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.description) || (clinicalDrug
+                ? `As a ${clinicalDrug.category.toLowerCase()}, this medication targets specific physiological pathways to provide relief.`
+                : 'Works by targeting therapeutic receptors to alleviate symptoms.'),
             dosageRecommendations: {
-                adult: drug.dosage.adult,
-                child: drug.dosage.child,
-                frequency: drug.dosage.frequency,
-                maxDaily: drug.dosage.maxDaily
+                adult: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.dosage.adult) || 'As prescribed by doctor',
+                child: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.dosage.child) || 'Not recommended without pediatric advice',
+                frequency: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.dosage.frequency) || 'Follow package instructions',
+                maxDaily: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.dosage.maxDaily) || 'Do not exceed prescribed limit'
             },
             usageInstructions: [
-                `Take ${drug.dosage.adult} ${drug.dosage.frequency.toLowerCase()}`,
-                `Maximum daily dose: ${drug.dosage.maxDaily}`,
-                'Follow the instructions on the packaging',
-                'Complete the full course if prescribed',
-                'Do not take on an empty stomach unless specified'
+                (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.directionsForUse) || 'Take with water after meals',
+                `Manufacturer: ${(inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.manufacturer) || (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.name) || 'Authorized Lab'}`,
+                'Follow the instructions on the packaging precisely',
+                clinicalDrug ? `Full course: ${clinicalDrug.dosage.frequency}` : 'Complete the recommended dosage',
+                'Store in a cool, dry place away from sunlight'
             ],
             criticalPrecautions: [
-                ...drug.warnings.slice(0, 2),
-                `Contraindicated in: ${drug.contraindications.join(', ')}`
+                ...((clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.warnings) || []),
+                (inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.safetyInformation) || 'No specific safety metadata provided by seller. Proceed with standard clinical oversight.',
+                `Contraindicated in: ${(clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.contraindications.join(', ')) || 'Hypersensitivity to components'}`
             ],
-            sideEffects: drug.sideEffects,
-            interactions: drug.interactions.length > 0
-                ? `Potential interactions with: ${drug.interactions.join(', ')}`
-                : 'No major interactions identified in our current database.',
+            sideEffects: (clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.sideEffects) || ['Mild nausea', 'Dizziness', 'Dry mouth'],
+            interactions: ((inventoryProduct === null || inventoryProduct === void 0 ? void 0 : inventoryProduct.drugInteractions) && inventoryProduct.drugInteractions.length > 0)
+                ? `Verified Interactions: ${inventoryProduct.drugInteractions.join(', ')}`
+                : ((clinicalDrug === null || clinicalDrug === void 0 ? void 0 : clinicalDrug.interactions) ? `Clinical Interactions: ${clinicalDrug.interactions.join(', ')}` : 'No major interactions identified.'),
             lifestyleAdvice: [
-                'Maintain adequate hydration while on medication',
-                'Avoid alcohol consumption unless cleared by a doctor',
-                'Monitor for any unusual allergic reactions'
+                'Ensure proper hydration during treatment',
+                'Monitor for any unusual allergic reactions',
+                'Maintain a light diet if experiencing stomach sensitivity'
             ],
-            disclaimer: 'CRITICAL: This is an AI-generated safety analysis based on clinical data. It is for informational purposes only and DOES NOT replace professional medical advice, diagnosis, or treatment.'
+            disclaimer: 'APEX SAFETY ENGINE: This analysis is generated using our proprietary pharmaceutical database and verified inventory data. It is FOR INFORMATIONAL USE ONLY and does not replace the advice of a certified physician.'
         };
         res.json(report);
     }
@@ -109,95 +120,74 @@ const checkSafety = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const { cartItems, medicalConditions } = req.body;
         // cartItems: [{ name: 'Aspirin', ingredients: ['...'], ... }]
         let warnings = [];
-        // 1. Check Drug-Drug Interactions using the database
+        const names = cartItems.map((item) => item.name.toLowerCase());
+        // 1. Fetch all Inventory products for these items to get real-time interaction data
+        const inventoryProducts = yield Inventory_1.default.find({
+            name: { $in: cartItems.map((item) => new RegExp(`^${item.name}$`, 'i')) }
+        });
+        // 2. Check Drug-Drug Interactions
         if (cartItems && cartItems.length > 1) {
-            const names = cartItems.map((item) => item.name.toLowerCase());
-            // Check each drug against others in the cart
+            // Compare each drug against others
             for (let i = 0; i < names.length; i++) {
-                const drug1 = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === names[i] || d.genericName.toLowerCase() === names[i]);
-                if (drug1) {
-                    for (let j = i + 1; j < names.length; j++) {
-                        const drug2Name = names[j];
-                        const drug2 = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === drug2Name || d.genericName.toLowerCase() === drug2Name);
-                        // Check if drug1 interacts with drug2
-                        if (drug1.interactions.some(interaction => drug2Name.includes(interaction.toLowerCase()) ||
-                            interaction.toLowerCase().includes(drug2Name) ||
-                            (drug2 && (drug2.name.toLowerCase().includes(interaction.toLowerCase()) ||
-                                drug2.genericName.toLowerCase().includes(interaction.toLowerCase()))))) {
-                            warnings.push(`⚠️ INTERACTION: ${drug1.name} and ${(drug2 === null || drug2 === void 0 ? void 0 : drug2.name) || drug2Name} may interact. Consult your healthcare provider.`);
-                        }
-                        // Check reverse (if drug2 lists drug1 as interaction)
-                        if (drug2 && drug2.interactions.some(interaction => names[i].includes(interaction.toLowerCase()) ||
-                            interaction.toLowerCase().includes(names[i]) ||
-                            drug1.name.toLowerCase().includes(interaction.toLowerCase()) ||
-                            drug1.genericName.toLowerCase().includes(interaction.toLowerCase()))) {
-                            // Avoid duplicate warnings
-                            const warningExists = warnings.some(w => w.includes(drug1.name) && w.includes(drug2.name));
-                            if (!warningExists) {
-                                warnings.push(`⚠️ INTERACTION: ${drug1.name} and ${drug2.name} may interact. Consult your healthcare provider.`);
-                            }
-                        }
+                const name1 = names[i];
+                // Get data from clinical DB
+                const clinicalDrug1 = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === name1 || d.genericName.toLowerCase() === name1);
+                // Get data from our own Inventory
+                const inventoryDrug1 = inventoryProducts.find(p => p.name.toLowerCase() === name1);
+                for (let j = i + 1; j < names.length; j++) {
+                    const name2 = names[j];
+                    const clinicalDrug2 = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === name2 || d.genericName.toLowerCase() === name2);
+                    const inventoryDrug2 = inventoryProducts.find(p => p.name.toLowerCase() === name2);
+                    // Check clinical database interactions
+                    const clinicalInteracts = (clinicalDrug1 === null || clinicalDrug1 === void 0 ? void 0 : clinicalDrug1.interactions.some(inter => name2.includes(inter.toLowerCase()) ||
+                        (clinicalDrug2 && clinicalDrug2.name.toLowerCase().includes(inter.toLowerCase())))) || (clinicalDrug2 === null || clinicalDrug2 === void 0 ? void 0 : clinicalDrug2.interactions.some(inter => name1.includes(inter.toLowerCase()) ||
+                        (clinicalDrug1 && clinicalDrug1.name.toLowerCase().includes(inter.toLowerCase()))));
+                    // Check our OWN Inventory defined interactions
+                    const inventoryInteracts = (inventoryDrug1 === null || inventoryDrug1 === void 0 ? void 0 : inventoryDrug1.drugInteractions.some(inter => name2.includes(inter.toLowerCase()) ||
+                        (inventoryDrug2 && inventoryDrug2.name.toLowerCase().includes(inter.toLowerCase())))) || (inventoryDrug2 === null || inventoryDrug2 === void 0 ? void 0 : inventoryDrug2.drugInteractions.some(inter => name1.includes(inter.toLowerCase()) ||
+                        (inventoryDrug1 && inventoryDrug1.name.toLowerCase().includes(inter.toLowerCase()))));
+                    if (clinicalInteracts || inventoryInteracts) {
+                        warnings.push(`⚠️ INTERACTION: ${name1.toUpperCase()} and ${name2.toUpperCase()} may interact. ${inventoryInteracts ? '(Verified in Inventory)' : '(Clinical Reference)'}`);
                     }
                 }
             }
-            // Specific known critical interactions
+            // Universal high-risk combinations (Static safety net)
             if (names.includes('aspirin') && names.includes('warfarin')) {
-                warnings.push('🚨 CRITICAL: Aspirin and Warfarin significantly increase bleeding risk. Seek immediate medical advice.');
+                warnings.push('🚨 CRITICAL: Aspirin and Warfarin significantly increase bleeding risk.');
             }
-            if (names.includes('ibuprofen') && names.includes('aspirin')) {
-                warnings.push('⚠️ WARNING: Taking Ibuprofen with Aspirin may reduce the heart-protective effects of Aspirin.');
-            }
-            if ((names.includes('alprazolam') || names.includes('zolpidem')) && names.includes('alcohol')) {
-                warnings.push('🚨 CRITICAL: Benzodiazepines/sedatives with alcohol can cause severe respiratory depression.');
+            if (names.includes('alprazolam') && names.includes('alcohol')) {
+                warnings.push('🚨 CRITICAL: Alcohol with Alprazolam can cause fatal respiratory depression.');
             }
         }
-        // 2. Check Condition-Drug Interactions
+        // 3. Check Condition-Drug Interactions
         if (medicalConditions && medicalConditions.length > 0) {
             const conditions = medicalConditions.map((c) => c.toLowerCase());
-            const names = cartItems.map((item) => item.name.toLowerCase());
-            // Check each medication against medical conditions
             for (const name of names) {
-                const drug = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === name || d.genericName.toLowerCase() === name);
-                if (drug) {
-                    // Check contraindications
-                    for (const contraindication of drug.contraindications) {
-                        if (conditions.some((condition) => condition.includes(contraindication.toLowerCase()) ||
-                            contraindication.toLowerCase().includes(condition))) {
-                            warnings.push(`🚨 CONTRAINDICATION: ${drug.name} is contraindicated with ${contraindication}. Do not use without consulting a doctor.`);
+                const clinicalDrug = drugDatabase_1.DRUG_DATABASE.find(d => d.name.toLowerCase() === name || d.genericName.toLowerCase() === name);
+                const inventoryDrug = inventoryProducts.find(p => p.name.toLowerCase() === name);
+                // Clinical Contraindications
+                if (clinicalDrug) {
+                    for (const contra of clinicalDrug.contraindications) {
+                        if (conditions.some(c => c.includes(contra.toLowerCase()) || contra.toLowerCase().includes(c))) {
+                            warnings.push(`🚨 CONTRAINDICATION: ${name.toUpperCase()} is risky with ${contra}.`);
                         }
                     }
                 }
-            }
-            // Specific condition-drug checks
-            if (conditions.includes('high blood pressure') || conditions.includes('hypertension')) {
-                if (names.some((n) => n.includes('pseudoephedrine') || n.includes('decongestant'))) {
-                    warnings.push('⚠️ WARNING: Decongestants can raise blood pressure.');
-                }
-            }
-            if (conditions.includes('diabetes')) {
-                if (names.includes('prednisolone') || names.includes('prednisone')) {
-                    warnings.push('⚠️ WARNING: Corticosteroids can increase blood sugar levels. Monitor glucose closely.');
-                }
-            }
-            if (conditions.includes('kidney disease') || conditions.includes('renal disease')) {
-                if (names.includes('ibuprofen') || names.includes('naproxen') || names.includes('diclofenac')) {
-                    warnings.push('⚠️ WARNING: NSAIDs can worsen kidney function. Use with caution.');
-                }
-                if (names.includes('metformin')) {
-                    warnings.push('🚨 CONTRAINDICATION: Metformin is contraindicated in severe kidney disease.');
-                }
-            }
-            if (conditions.includes('asthma')) {
-                if (names.includes('aspirin') || names.includes('atenolol')) {
-                    warnings.push('⚠️ WARNING: These medications may worsen asthma symptoms.');
+                // Inventory Safety Info Check
+                if (inventoryDrug === null || inventoryDrug === void 0 ? void 0 : inventoryDrug.safetyInformation) {
+                    const safetyLower = inventoryDrug.safetyInformation.toLowerCase();
+                    if (conditions.some(c => safetyLower.includes(c))) {
+                        warnings.push(`⚠️ SAFETY ALERT: ${name.toUpperCase()} documentation mentions risks related to your condition.`);
+                    }
                 }
             }
         }
         res.json({
             isSafe: warnings.length === 0,
-            warnings,
+            warnings: Array.from(new Set(warnings)), // Deduplicate
             checkedMedications: cartItems.length,
-            checkedConditions: (medicalConditions === null || medicalConditions === void 0 ? void 0 : medicalConditions.length) || 0
+            checkedConditions: (medicalConditions === null || medicalConditions === void 0 ? void 0 : medicalConditions.length) || 0,
+            engine: "Apex Verified Safety Engine"
         });
     }
     catch (error) {

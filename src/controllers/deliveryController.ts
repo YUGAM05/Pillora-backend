@@ -31,8 +31,8 @@ export const getDeliveryDashboard = async (req: AuthRequest, res: Response) => {
         const userId = req.user?._id;
         console.log(`[getDeliveryDashboard] User ID: ${userId}`);
 
-        const assignedCount = await Order.countDocuments({ assignedDelivery: userId, orderStatus: { $ne: 'delivered' } });
-        const completedOrders = await Order.find({ assignedDelivery: userId, orderStatus: 'delivered' });
+        const assignedCount = await Order.countDocuments({ delivery_agent_id: userId, status: { $ne: 'delivered' } });
+        const completedOrders = await Order.find({ delivery_agent_id: userId, status: 'delivered' });
 
         const completedCount = completedOrders.length;
         const totalEarnings = completedOrders.reduce((sum, order) => sum + (order.deliveryEarning || 0), 0);
@@ -54,8 +54,8 @@ export const getAvailableDeliveries = async (req: AuthRequest, res: Response) =>
     try {
         console.log(`[getAvailableDeliveries] Fetching available orders...`);
         const orders = await Order.find({
-            orderStatus: { $in: ['confirmed', 'shipped'] },
-            assignedDelivery: { $exists: false }
+            status: { $in: ['confirmed', 'shipped'] },
+            delivery_agent_id: { $exists: false }
         })
             .populate('user', 'name email phone location')
             .populate({
@@ -98,7 +98,7 @@ export const getMyDeliveries = async (req: AuthRequest, res: Response) => {
     try {
         const userId = req.user?._id;
         console.log(`[getMyDeliveries] Fetching deliveries for user: ${userId}`);
-        const orders = await Order.find({ assignedDelivery: userId })
+        const orders = await Order.find({ delivery_agent_id: userId })
             .populate('user', 'name email phone location')
             .populate({
                 path: 'items.product',
@@ -187,7 +187,7 @@ export const confirmPickup = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Invalid Order ID format' });
         }
 
-        const order = await Order.findOne({ _id: orderId, assignedDelivery: userId });
+        const order = await Order.findOne({ _id: orderId, delivery_agent_id: userId });
 
         if (!order) {
             console.warn(`[ConfirmPickup] Not found or not assigned. Order: ${orderId}, User: ${userId}`);
@@ -215,15 +215,15 @@ export const confirmDelivery = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Invalid Order ID format' });
         }
 
-        const order = await Order.findOne({ _id: orderId, assignedDelivery: userId });
+        const order = await Order.findOne({ _id: orderId, delivery_agent_id: userId });
 
         if (!order) {
             console.warn(`[ConfirmDelivery] Not found or not assigned. Order: ${orderId}, User: ${userId}`);
             return res.status(404).json({ message: 'Order not found or not assigned to you' });
         }
 
-        order.orderStatus = 'delivered';
-        order.paymentStatus = 'paid'; // Assume paid on delivery if COD
+        order.status = 'delivered';
+        order.payment_status = 'paid'; // Assume paid on delivery if COD
         await order.save();
         console.log(`[ConfirmDelivery] Success - Order: ${orderId}`);
 
@@ -246,7 +246,7 @@ export const updateDeliveryStatus = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Invalid Order ID format' });
         }
 
-        const order = await Order.findOne({ _id: orderId, assignedDelivery: userId });
+        const order = await Order.findOne({ _id: orderId, delivery_agent_id: userId });
 
         if (!order) {
             return res.status(404).json({ message: 'Order not found or not assigned to you' });

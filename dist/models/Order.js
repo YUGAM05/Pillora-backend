@@ -35,43 +35,50 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const OrderSchema = new mongoose_1.Schema({
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    user_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' }, // Legacy
+    rx_id: { type: String },
+    seller_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    seller: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' }, // Legacy
+    delivery_agent_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    assignedDelivery: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' }, // Legacy
+    medicines: [{
+            medicine_id: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Medicine', required: true },
+            product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Inventory' }, // Legacy
+            name: { type: String, required: true },
+            quantity: { type: Number, required: true },
+            price: { type: Number, required: true }
+        }],
     items: [{
             product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Inventory' },
-            name: { type: String, required: true },
-            price: { type: Number, required: true },
-            quantity: { type: Number, required: true },
-            image: { type: String }
+            quantity: { type: Number },
+            price: { type: Number }
         }],
-    shippingAddress: {
-        fullName: { type: String, required: true },
-        phone: { type: String, required: true },
-        email: { type: String, required: true },
-        addressLine1: { type: String, required: true },
-        addressLine2: { type: String },
-        city: { type: String, required: true },
-        state: { type: String, required: true },
-        pinCode: { type: String, required: true },
-        addressType: { type: String, enum: ['home', 'office'], default: 'home' }
+    total_amount: { type: Number, required: true },
+    totalAmount: { type: Number }, // Legacy
+    delivery_address: { type: String, required: true },
+    shippingLocation: { type: Object }, // Legacy
+    status: {
+        type: String,
+        default: 'order_placed'
     },
-    totalAmount: { type: Number, required: true },
-    medicineSubtotal: { type: Number, required: true },
-    platformFee: { type: Number, required: true, default: 10 },
-    sellerCommission: { type: Number, required: true },
-    deliveryFee: { type: Number },
-    adminDeliveryCommission: { type: Number },
-    paymentMethod: { type: String, required: true, default: 'cod' },
-    paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' },
-    orderStatus: { type: String, enum: ['pending', 'confirmed', 'shipped', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'cancelled'], default: 'pending' },
-    assignedDelivery: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
-    deliveryDistance: { type: Number },
-    deliveryEarning: { type: Number },
-    shippingLocation: {
-        lat: { type: Number },
-        lng: { type: Number }
+    orderStatus: { type: String }, // Legacy
+    payment_status: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
+    paymentStatus: { type: String }, // Legacy
+    delivery_location: {
+        lat: Number,
+        lng: Number
     },
-    notes: { type: String },
-    couponCode: { type: String },
-    discountAmount: { type: Number, default: 0 }
+    estimated_delivery: { type: Date },
+    platform_fee: { type: Number, default: 10 },
+    platformFee: { type: Number }, // Legacy
+    seller_commission: { type: Number, required: true },
+    sellerCommission: { type: Number }, // Legacy
+    delivery_fee: { type: Number },
+    deliveryFee: { type: Number }, // Legacy
+    deliveryEarning: { type: Number }, // Legacy
+    adminDeliveryCommission: { type: Number }, // Legacy
+    medicineSubtotal: { type: Number }, // Legacy
+    deliveryDistance: { type: Number } // Legacy
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Order', OrderSchema);

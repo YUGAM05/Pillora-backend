@@ -31,21 +31,21 @@ const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const pendingProducts = yield Inventory_1.default.countDocuments({ status: 'pending' });
         // Calculate Revenue
         const revenueResult = yield Order_1.default.aggregate([
-            { $match: { paymentStatus: 'paid' } },
-            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+            { $match: { payment_status: 'paid' } },
+            { $group: { _id: null, total: { $sum: '$total_amount' } } }
         ]);
         const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
         // Calculate Admin Profit
         const profitResult = yield Order_1.default.aggregate([
-            { $match: { paymentStatus: 'paid' } },
+            { $match: { payment_status: 'paid' } },
             {
                 $group: {
                     _id: null,
                     totalProfit: {
                         $sum: {
                             $add: [
-                                "$platformFee",
-                                "$sellerCommission",
+                                "$platform_fee",
+                                "$seller_commission",
                                 { $ifNull: ["$adminDeliveryCommission", 0] }
                             ]
                         }
@@ -216,7 +216,7 @@ const getUserOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         const { id } = req.params;
         const orders = yield Order_1.default.find({ user: id })
-            .populate('items.product', 'name imageUrl')
+            .populate('medicines.medicine_id', 'name imageUrl')
             .sort({ createdAt: -1 });
         res.json(orders);
     }
@@ -251,7 +251,7 @@ const getAllOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     try {
         const orders = yield Order_1.default.find()
             .populate('user', 'name email')
-            .populate('items.product', 'name imageUrl')
+            .populate('medicines.medicine_id', 'name imageUrl')
             .sort({ createdAt: -1 });
         res.json(orders);
     }
@@ -273,13 +273,13 @@ const getAdminTrends = (req, res) => __awaiter(void 0, void 0, void 0, function*
             {
                 $match: {
                     createdAt: { $gte: sevenDaysAgo },
-                    paymentStatus: 'paid'
+                    payment_status: 'paid'
                 }
             },
             {
                 $group: {
                     _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    revenue: { $sum: "$totalAmount" },
+                    revenue: { $sum: "$total_amount" },
                     orders: { $sum: 1 }
                 }
             },

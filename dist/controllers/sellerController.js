@@ -84,22 +84,22 @@ const getSellerDashboard = (req, res) => __awaiter(void 0, void 0, void 0, funct
         // Initialize trend keys (optional but good for empty usage)
         // ... (Skipping full initialization for brevity/complexity, relies on sparse data or frontend filling blanks)
         orders.forEach(order => {
-            if (order.orderStatus === 'pending')
+            if (order.status === 'pending')
                 pendingOrders++;
             let orderRevenueForSeller = 0;
             let isSellerOrder = false;
             // Calculate revenue ONLY for items belonging to this seller
-            order.items.forEach(item => {
+            order.medicines.forEach((item) => {
                 // We need to check if this item is one of the seller's products
-                const matchingProduct = sellerProducts.find(p => p._id.toString() === item.product.toString());
+                const matchingProduct = sellerProducts.find(p => p._id.toString() === item.medicine_id.toString());
                 if (matchingProduct) {
                     isSellerOrder = true;
                     const itemTotal = item.price * item.quantity;
                     orderRevenueForSeller += itemTotal;
                     totalRevenue += itemTotal;
                     // Track sales for top products
-                    if (!productSales[item.product.toString()]) {
-                        productSales[item.product.toString()] = {
+                    if (!productSales[item.medicine_id.toString()]) {
+                        productSales[item.medicine_id.toString()] = {
                             name: matchingProduct.name,
                             category: matchingProduct.category,
                             price: matchingProduct.sellingPrice,
@@ -107,7 +107,7 @@ const getSellerDashboard = (req, res) => __awaiter(void 0, void 0, void 0, funct
                             sold: 0
                         };
                     }
-                    productSales[item.product.toString()].sold += item.quantity;
+                    productSales[item.medicine_id.toString()].sold += item.quantity;
                 }
             });
             // Populate Sales Trend
@@ -276,7 +276,7 @@ const addSellerProduct = (req, res) => __awaiter(void 0, void 0, void 0, functio
         res.status(201).json(savedProduct);
     }
     catch (error) {
-        console.error("Error adding product:", error);
+        console.error("Error adding medicine_id:", error);
         res.status(500).json({ message: 'Error adding product', error: error.message });
     }
 });
@@ -317,7 +317,7 @@ const deleteSellerProduct = (req, res) => __awaiter(void 0, void 0, void 0, func
         res.json({ message: 'Product deleted successfully' });
     }
     catch (error) {
-        console.error("Error deleting product:", error);
+        console.error("Error deleting medicine_id:", error);
         res.status(500).json({ message: 'Error deleting product', error });
     }
 });
@@ -339,7 +339,7 @@ const getSellerOrders = (req, res) => __awaiter(void 0, void 0, void 0, function
             const relevantItems = order.items.filter(item => 
             // Check if product exists and belongs to seller
             item.product && item.product.seller.toString() === req.user.id);
-            return Object.assign(Object.assign({}, order.toObject()), { items: relevantItems // Only show seller's items
+            return Object.assign(Object.assign({}, order.toObject()), { medicines: relevantItems // Only show seller's items
              });
         });
         res.json(sellerOrders);

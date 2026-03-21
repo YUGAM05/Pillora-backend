@@ -1,0 +1,103 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "send",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "083bd6be-9879-4aaf-8783-08d786401b2a",
+      "name": "Send message",
+      "webhookId": "3d0fd66c-d134-4562-a4e3-0fd72f90fbd7",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "mxUBYM1PuzodZr0H",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "92a3522c-570d-476c-9470-090114e39a7d",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "1b1edef1-eb81-4b91-b503-cda917208a45",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "1d2d1847-825f-4dff-98ae-798acb379bec",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "11013db2-def7-4b86-8b7c-1a8966340df0",
+      "name": "Webhook",
+      "webhookId": "1d2d1847-825f-4dff-98ae-798acb379bec"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9f00b7f9-e23e-40ae-9801-0c61bb8ac8ee",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3f47084c39a7b6ce95470222dbf456d91df410a13bf217b13f53e6fb0120fd47"
+  },
+  "id": "K34VXLNveGRpcVn6",
+  "tags": []
+}

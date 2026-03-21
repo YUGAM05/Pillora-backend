@@ -82,15 +82,15 @@ export const getSellerDashboard = async (req: AuthRequest, res: Response) => {
         // ... (Skipping full initialization for brevity/complexity, relies on sparse data or frontend filling blanks)
 
         orders.forEach(order => {
-            if (order.orderStatus === 'pending') pendingOrders++;
+            if (order.status === 'pending') pendingOrders++;
 
             let orderRevenueForSeller = 0;
             let isSellerOrder = false;
 
             // Calculate revenue ONLY for items belonging to this seller
-            order.items.forEach(item => {
+            order.medicines.forEach((item: any) => {
                 // We need to check if this item is one of the seller's products
-                const matchingProduct = sellerProducts.find(p => p._id.toString() === item.product.toString());
+                const matchingProduct = sellerProducts.find(p => p._id.toString() === item.medicine_id.toString());
 
                 if (matchingProduct) {
                     isSellerOrder = true;
@@ -99,8 +99,8 @@ export const getSellerDashboard = async (req: AuthRequest, res: Response) => {
                     totalRevenue += itemTotal;
 
                     // Track sales for top products
-                    if (!productSales[item.product.toString()]) {
-                        productSales[item.product.toString()] = {
+                    if (!productSales[item.medicine_id.toString()]) {
+                        productSales[item.medicine_id.toString()] = {
                             name: matchingProduct.name,
                             category: matchingProduct.category,
                             price: matchingProduct.sellingPrice,
@@ -108,13 +108,13 @@ export const getSellerDashboard = async (req: AuthRequest, res: Response) => {
                             sold: 0
                         };
                     }
-                    productSales[item.product.toString()].sold += item.quantity;
+                    productSales[item.medicine_id.toString()].sold += item.quantity;
                 }
             });
 
             // Populate Sales Trend
             if (isSellerOrder) {
-                const dateKey = formatDateKey(new Date(order.createdAt));
+                const dateKey = formatDateKey(new Date((order as any).createdAt));
                 if (!trendMap[dateKey]) {
                     trendMap[dateKey] = { revenue: 0, orders: 0 };
                 }
@@ -289,7 +289,7 @@ export const addSellerProduct = async (req: AuthRequest, res: Response) => {
 
         res.status(201).json(savedProduct);
     } catch (error) {
-        console.error("Error adding product:", error);
+        console.error("Error adding medicine_id:", error);
         res.status(500).json({ message: 'Error adding product', error: (error as any).message });
     }
 };
@@ -336,7 +336,7 @@ export const deleteSellerProduct = async (req: AuthRequest, res: Response) => {
 
         res.json({ message: 'Product deleted successfully' });
     } catch (error) {
-        console.error("Error deleting product:", error);
+        console.error("Error deleting medicine_id:", error);
         res.status(500).json({ message: 'Error deleting product', error });
     }
 };
@@ -364,7 +364,7 @@ export const getSellerOrders = async (req: AuthRequest, res: Response) => {
 
             return {
                 ...order.toObject(),
-                items: relevantItems // Only show seller's items
+                medicines: relevantItems // Only show seller's items
             };
         });
 
