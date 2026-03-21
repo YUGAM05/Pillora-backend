@@ -1,9 +1,28 @@
 import { Request, Response } from 'express';
 import Prescription from '../models/Prescription';
-import { extractTextFromImage, cleanOcrText } from '../services/ocrService';
 import { verifyPrescription } from '../services/aiService';
-import fs from 'fs';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// ✅ Replaces Tesseract OCR - uses Gemini Vision directly
+const extractTextWithGemini = async (buffer: Buffer, mimeType: string): Promise<string> => {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+    const base64Image = buffer.toString('base64');
+
+    const result = await model.generateContent([
+        {
+            inlineData: {
+                mimeType: mimeType,
+                data: base64Image
+            }
+        },
+        'Extract all text from this prescription image including medicine names, dosages, and instructions. Return only the extracted text.'
+    ]);
+
+    return result.response.text();
+};
 
 export const uploadPrescription = async (req: AuthRequest, res: Response) => {
     try {
@@ -13,37 +32,40 @@ export const uploadPrescription = async (req: AuthRequest, res: Response) => {
 
         const userId = req.user._id;
         console.log(`[Upload] Starting process for user: ${userId}`);
-        const filePath = req.file.path;
-        console.log(`[Upload] File saved at: ${filePath}`);
 
-        // 1. Extract Text
-        console.log(`[Upload] Starting OCR...`);
-        const rawText = await extractTextFromImage(filePath);
-        const cleanedText = cleanOcrText(rawText);
-        console.log(`[Upload] OCR complete. Text length: ${cleanedText.length}`);
+        // ✅ Use buffer instead of file path
+        const fileBuffer = req.file.buffer;
+        const mimeType = req.file.mimetype;
+        console.log(`[Upload] File received in memory. Size: ${fileBuffer.length} bytes`);
+
+        // 1. Extract Text using Gemini Vision (replaces Tesseract)
+        console.log(`[Upload] Starting Gemini OCR...`);
+        const extractedText = await extractTextWithGemini(fileBuffer, mimeType);
+        console.log(`[Upload] OCR complete. Text length: ${extractedText.length}`);
 
         // 2. Verify with AI
         console.log(`[Upload] Starting AI Verification...`);
-        const aiResult = await verifyPrescription(cleanedText);
+        const aiResult = await verifyPrescription(extractedText);
         console.log(`[Upload] AI Result: ${aiResult.is_valid ? 'Valid' : 'Invalid'}`);
 
-        // 3. Create Prescription Record
+        // 3. Convert image to base64 for storage in DB
+        const base64Image = `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
+
+        // 4. Create Prescription Record
         console.log(`[Upload] Saving to DB...`);
         const prescription = await Prescription.create({
             user_id: userId,
-            image_url: filePath,
-            ocr_text: cleanedText,
+            image_url: base64Image,  // ✅ Store as base64 instead of file path
+            ocr_text: extractedText,
             ai_result: aiResult,
             medicines_extracted: aiResult.medicines || [],
             admin_status: 'pending'
         });
         console.log(`[Upload] DB Record created: ${prescription._id}`);
 
-        // 4. Do NOT delete the local file so that the Admin and User can view it later.
-        console.log(`[Upload] Keeping image file at ${filePath} for future rendering.`);
-
         console.log(`[Upload] Success! Returning 201.`);
         res.status(201).json(prescription);
+
     } catch (error: any) {
         console.error('[Upload Error]', error);
         res.status(500).json({ message: error.message });

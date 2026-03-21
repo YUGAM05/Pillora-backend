@@ -11,7 +11,9 @@ import {
 } from '../controllers/prescriptionController';
 
 const router = Router();
-const upload = multer({ dest: 'uploads/' });
+
+// ✅ Fixed: memoryStorage instead of dest: 'uploads/'
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/', protect, upload.single('prescription'), uploadPrescription);
 router.get('/my', protect, getUserPrescriptions);
