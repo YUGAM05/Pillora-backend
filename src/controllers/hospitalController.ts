@@ -1,6 +1,14 @@
 import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { v2 as cloudinary } from 'cloudinary'; // ✅ Added
+
+// ✅ Cloudinary config
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 // @desc    Get all hospitals
 // @route   GET /api/hospitals
@@ -212,8 +220,23 @@ export const uploadHospitalImages = async (req: AuthRequest, res: Response): Pro
             res.status(400).json({ message: 'No files uploaded' });
             return;
         }
-        const urls = files.map((f) => `/uploads/hospitals/${f.filename}`);
-        res.json({ urls });
+
+        // ✅ Upload each file buffer to Cloudinary
+        const uploadPromises = files.map((file) => {
+            return new Promise<string>((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    { folder: 'hospitals' },
+                    (error, result) => {
+                        if (error) reject(error);
+                        else resolve(result!.secure_url); // ✅ Cloudinary URL
+                    }
+                );
+                stream.end(file.buffer); // ✅ Push buffer to Cloudinary
+            });
+        });
+
+        const urls = await Promise.all(uploadPromises);
+        res.json({ urls }); // ✅ Returns Cloudinary URLs
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Server Error', error });
     }
