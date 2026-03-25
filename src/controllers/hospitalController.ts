@@ -120,8 +120,10 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
             isOnlinePaymentAvailable,
             ambulanceContact,
             contactNumber,
+            phoneNumbers,
             description,
-            rating
+            rating,
+            doctors
         } = req.body;
 
         if (!name || !address || !city || (!image && (!images || images.length === 0)) || !consultationFee) {
@@ -132,6 +134,14 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
         let imagesArr: string[] = [];
         if (Array.isArray(images)) {
             imagesArr = images.filter(Boolean);
+        }
+
+        // Build phoneNumbers array (prefer the array, fall back to single contactNumber)
+        let phoneNumbersArr: string[] = [];
+        if (Array.isArray(phoneNumbers)) {
+            phoneNumbersArr = phoneNumbers.filter((p: string) => p && p.trim() !== '');
+        } else if (typeof phoneNumbers === 'string' && phoneNumbers.trim()) {
+            phoneNumbersArr = [phoneNumbers.trim()];
         }
 
         const hospital = await Hospital.create({
@@ -150,8 +160,10 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             ambulanceContact,
             contactNumber,
+            phoneNumbers: phoneNumbersArr,
             description: description || '',
-            rating: rating ? Number(rating) : 0
+            rating: rating ? Number(rating) : 0,
+            doctors: Array.isArray(doctors) ? doctors : []
         });
 
         res.status(201).json(hospital);
