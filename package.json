@@ -37,6 +37,7 @@
     "multer-storage-cloudinary": "^4.0.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "slugify": "^1.6.8",
     "socket.io": "^4.8.3",
     "tesseract.js": "^7.0.0",
     "ts-node": "^10.9.2",

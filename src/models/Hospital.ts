@@ -9,6 +9,7 @@ export interface IDoctor {
 
 export interface IHospital extends Document {
     name: string;
+    slug: string;
     address: string;
     city: string;
     image?: string;
@@ -34,6 +35,7 @@ const DoctorSchema: Schema = new Schema({
 
 const HospitalSchema: Schema = new Schema({
     name: { type: String, required: true },
+    slug: { type: String, unique: true, trim: true },
     address: { type: String, required: true },
     city: { type: String, required: true },
     image: { type: String, required: false },

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { v2 as cloudinary } from 'cloudinary'; // ✅ Added
+import slugify from 'slugify';
+import mongoose from 'mongoose';
 
 // ✅ Cloudinary config
 cloudinary.config({
@@ -34,7 +36,23 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
 // @access  Public
 export const getHospitalById = async (req: Request, res: Response): Promise<void> => {
     try {
-        const hospital = await Hospital.findById(req.params.id);
+        const { id } = req.params;
+        const querySlug = req.query.slug as string;
+        const queryId = req.query.id as string;
+
+        let hospital;
+        if (querySlug) {
+            hospital = await Hospital.findOne({ slug: querySlug });
+        } else if (queryId) {
+            hospital = await Hospital.findById(queryId);
+        } else if (id) {
+            if (mongoose.isValidObjectId(id)) {
+                hospital = await Hospital.findById(id);
+            } else {
+                hospital = await Hospital.findOne({ slug: id });
+            }
+        }
+
         if (hospital) {
             res.json(hospital);
         } else {
@@ -96,7 +114,19 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
             }
         ];
 
-        await Hospital.insertMany(hospitals);
+        const seededHospitals = [];
+        for (const h of hospitals) {
+            let baseSlug = slugify(h.name, { lower: true, strict: true, trim: true });
+            let currentSlug = baseSlug;
+            let counter = 2;
+            while (seededHospitals.some((s) => s.slug === currentSlug)) {
+                currentSlug = `${baseSlug}-${counter}`;
+                counter++;
+            }
+            seededHospitals.push({ ...h, slug: currentSlug });
+        }
+
+        await Hospital.insertMany(seededHospitals);
         res.json({ message: 'Hospitals seeded successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -144,8 +174,17 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
             phoneNumbersArr = [phoneNumbers.trim()];
         }
 
+        let baseSlug = slugify(name, { lower: true, strict: true, trim: true });
+        let currentSlug = baseSlug;
+        let counter = 2;
+        while (await Hospital.findOne({ slug: currentSlug })) {
+            currentSlug = `${baseSlug}-${counter}`;
+            counter++;
+        }
+
         const hospital = await Hospital.create({
             name,
+            slug: currentSlug,
             address,
             city,
             image,
