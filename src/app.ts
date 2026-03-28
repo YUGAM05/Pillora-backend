@@ -43,6 +43,8 @@ const allowedOrigins = [
     'https://apex-seller-panel.vercel.app',
     'https://apex-delivery-panel.vercel.app',
     'https://apex-backend-theta.vercel.app',
+    'https://pillora.in',        // ✅ added
+    'https://www.pillora.in',    // ✅ added
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
