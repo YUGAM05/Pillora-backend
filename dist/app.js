@@ -27,11 +27,10 @@ const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: '*', // Adjust for production
+        origin: '*',
         methods: ['GET', 'POST']
     }
 });
-// Make io accessible in controllers
 app.set('io', io);
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
@@ -50,22 +49,21 @@ const allowedOrigins = [
     'https://apex-seller-panel.vercel.app',
     'https://apex-delivery-panel.vercel.app',
     'https://apex-backend-theta.vercel.app',
+    'https://pillora.in',
+    'https://www.pillora.in',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
     'http://localhost:3003',
     'http://localhost:5000',
 ];
-// ✅ Permissive CORS for development
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    // Allow all local origins (localhost and 127.0.0.1) or any origin in the allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
     if (origin && (isLocal || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     }
     else if (!origin) {
-        // Fallback for tools/non-browser requests
         res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -78,7 +76,7 @@ app.use((req, res, next) => {
 });
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
-app.use('/uploads', express_1.default.static('uploads')); // Serve uploaded files
+app.use('/uploads', express_1.default.static('uploads'));
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
@@ -163,12 +161,11 @@ app.use((err, req, res, next) => {
 });
 if (process.env.NODE_ENV !== 'production') {
     httpServer.listen(PORT, () => {
-        console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
-        // Connect to DB in background so server stays alive even if DB is slow
+        console.log(`Server (HTTP + WS) ready on port ${PORT}`);
         (0, exports.connectDB)().then(() => {
-            console.log('✅ Background DB connection established');
+            console.log('Background DB connection established');
         }).catch(err => {
-            console.error('❌ Background DB connection failed:', err);
+            console.error('Background DB connection failed:', err);
         });
     });
 }
