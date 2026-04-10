@@ -179,8 +179,9 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
                 const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&route=otp&variables_values=${otpValue}&flash=0&numbers=${phone}`;
                 await axios.get(url);
                 console.log(`[OTP SENT] via Fast2SMS to ${phone}`);
-            } catch (smsError) {
-                console.error('Fast2SMS Error:', smsError);
+            } catch (smsError: any) {
+                console.error('Fast2SMS Error Data:', smsError.response?.data || smsError.message);
+                // We keep going so the user isn't fully blocked from testing locally
             }
         } else {
             console.log('[OTP] Fast2SMS API key not configured. Mocking SMS sending.');
