@@ -175,9 +175,17 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
         const apiKey = process.env.FAST2SMS_API_KEY;
         if (apiKey) {
             try {
-                // Fast2SMS API integration
-                const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&route=otp&variables_values=${otpValue}&flash=0&numbers=${phone}`;
-                await axios.get(url);
+                // Fast2SMS API integration using Quick route (q)
+                const url = `https://www.fast2sms.com/dev/bulkV2`;
+                await axios.get(url, {
+                    params: {
+                        authorization: apiKey,
+                        message: `Your OTP is ${otpValue}. Valid for 5 minutes.`,
+                        language: "english",
+                        route: "q",
+                        numbers: phone,
+                    }
+                });
                 console.log(`[OTP SENT] via Fast2SMS to ${phone}`);
             } catch (smsError: any) {
                 console.error('Fast2SMS Error Data:', smsError.response?.data || smsError.message);
