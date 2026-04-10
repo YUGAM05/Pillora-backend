@@ -102,10 +102,10 @@ const UserSchema: Schema = new Schema({
     phone: { type: String },
     pharmacy_name: { type: String },
     address: {
-        street: string,
-        city: string,
-        state: string,
-        zip: string
+        street: String,
+        city: String,
+        state: String,
+        zip: String
     },
     otp: { type: String },
     otpExpiresAt: { type: Date },
