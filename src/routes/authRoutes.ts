@@ -1,5 +1,5 @@
 import express from 'express';
-import { registerUser, loginUser } from '../controllers/authController';
+import { registerUser, loginUser, sendOtp, verifyOtp } from '../controllers/authController';
 import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
 
@@ -7,6 +7,8 @@ const router = express.Router();
 
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
 
 // Setup
 import { setupAdmin } from '../controllers/authController';

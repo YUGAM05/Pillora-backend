@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
+import axios from 'axios';
 
 const generateToken = (id: string, role: string) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET || 'defaultSecret', {
@@ -148,6 +149,103 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         }
     } catch (error: any) {
         console.error('Login Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+};
+
+export const sendOtp = async (req: Request, res: Response): Promise<void> => {
+    const { phone } = req.body;
+    try {
+        const user = await User.findOne({ phone });
+        if (!user) {
+            res.status(404).json({ message: 'User not found with this mobile number.' });
+            return;
+        }
+
+        // Generate 6-digit OTP
+        const otpValue = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Save to user (valid for 10 minutes)
+        user.otp = otpValue;
+        user.otpExpiresAt = new Date(Date.now() + 10 * 60000);
+        await user.save();
+
+        console.log(`[OTP GENERATED] For phone ${phone}: ${otpValue}`);
+        
+        const apiKey = process.env.FAST2SMS_API_KEY;
+        if (apiKey) {
+            try {
+                // Fast2SMS API integration
+                const url = `https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&route=otp&variables_values=${otpValue}&flash=0&numbers=${phone}`;
+                await axios.get(url);
+                console.log(`[OTP SENT] via Fast2SMS to ${phone}`);
+            } catch (smsError) {
+                console.error('Fast2SMS Error:', smsError);
+            }
+        } else {
+            console.log('[OTP] Fast2SMS API key not configured. Mocking SMS sending.');
+        }
+        
+        res.json({ message: 'OTP sent to your mobile number successfully!', otp: otpValue });
+    } catch (error: any) {
+        console.error('Send OTP Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+};
+
+export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
+    const { phone, otp } = req.body;
+    try {
+        const user = await User.findOne({ phone });
+        if (!user) {
+            res.status(404).json({ message: 'User not found.' });
+            return;
+        }
+
+        if (!user.otp || !user.otpExpiresAt) {
+            res.status(400).json({ message: 'No OTP requested for this user.' });
+            return;
+        }
+
+        if (new Date() > user.otpExpiresAt) {
+            res.status(400).json({ message: 'OTP has expired.' });
+            return;
+        }
+
+        if (user.otp !== otp) {
+            res.status(400).json({ message: 'Invalid OTP.' });
+            return;
+        }
+
+        // Clear OTP after successful verification
+        user.otp = undefined;
+        user.otpExpiresAt = undefined;
+        await user.save();
+
+        if (user.role !== 'admin' && user.status === 'rejected') {
+            res.status(403).json({
+                message: 'Your account has been rejected. Please contact support.',
+                status: user.status
+            });
+            return;
+        }
+
+        console.log(`[OTP VERIFIED] Login successful for phone: ${phone}`);
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            phone: user.phone,
+            address: user.address,
+            location: user.location,
+            token: generateToken(user._id as unknown as string, user.role),
+        });
+
+    } catch (error: any) {
+        console.error('Verify OTP Error:', error);
         res.status(500).json({ message: 'Server Error', error: error.message || error });
     }
 };

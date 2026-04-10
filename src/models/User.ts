@@ -16,6 +16,8 @@ export interface IUser extends Document {
         state: string;
         zip: string;
     };
+    otp?: string;
+    otpExpiresAt?: Date;
     bankDetails?: {
         accountNumber: string;
         ifsc: string;
@@ -100,11 +102,13 @@ const UserSchema: Schema = new Schema({
     phone: { type: String },
     pharmacy_name: { type: String },
     address: {
-        street: String,
-        city: String,
-        state: String,
-        zip: String
+        street: string,
+        city: string,
+        state: string,
+        zip: string
     },
+    otp: { type: String },
+    otpExpiresAt: { type: Date },
     bankDetails: {
         accountNumber: String,
         ifsc: String
