@@ -22,36 +22,34 @@ export const registerDonor = async (req: AuthRequest, res: Response): Promise<vo
             return;
         }
 
-        // Check if already registered by user ID
-        const existingDonorByUser = await BloodDonor.findOne({ user: req.user.id });
-        if (existingDonorByUser) {
-            res.status(400).json({ message: 'You are already registered as a donor' });
-            return;
-        }
-
-        // Check if phone number already exists
-        const existingDonorByPhone = await BloodDonor.findOne({ phone });
+        // Check if phone number already used by a DIFFERENT user
+        const existingDonorByPhone = await BloodDonor.findOne({ phone, user: { $ne: req.user.id } });
         if (existingDonorByPhone) {
-            res.status(400).json({ message: 'This phone number is already registered' });
+            res.status(400).json({ message: 'This phone number is already registered by another donor' });
             return;
         }
 
-        const donor = await BloodDonor.create({
-            user: req.user.id,
-            name,
-            bloodGroup,
-            gender,
-            age,
-            phone,
-            address,
-            area,
-            city,
-            source: 'user_panel',
-            location: {
-                type: 'Point',
-                coordinates: location // [longitude, latitude]
-            }
-        });
+        // Upsert: update existing record or create new one
+        const donor = await BloodDonor.findOneAndUpdate(
+            { user: req.user.id },
+            {
+                user: req.user.id,
+                name,
+                bloodGroup,
+                gender,
+                age,
+                phone,
+                address,
+                area,
+                city,
+                source: 'user_panel',
+                location: {
+                    type: 'Point',
+                    coordinates: location // [longitude, latitude]
+                }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
 
         res.status(201).json(donor);
     } catch (error: any) {
