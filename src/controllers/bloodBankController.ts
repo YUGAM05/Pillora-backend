@@ -219,6 +219,19 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
             aiVerificationRemarks: aiRemarks
         });
 
+        res.status(201).json(request);
+
+        // Emit socket event for real-time update
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                io.to(req.user.id).emit('blood_request_updated', request);
+                console.log(`[Socket] Emitted update to user: ${req.user.id}`);
+            }
+        } catch (socketErr) {
+            console.error("[Socket] Failed to emit update:", socketErr);
+        }
+
         // Trigger Matching & Notification Logic
         try {
             const compatibleGroups = getCompatibleDonors(bloodGroup);
