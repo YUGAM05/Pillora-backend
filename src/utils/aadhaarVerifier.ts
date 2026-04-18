@@ -226,13 +226,17 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
         }
 
         console.log("[Agent] Verification Complete. Final Result:", result);
-        return result;
+        return {
+            ...result,
+            aadhaarNumber: aadhaarNumber // Return the raw extracted number
+        };
 
     } catch (error: any) {
         console.error("[Agent] Local Verification Error:", error);
         return {
             status: "Error",
-            remarks: `Technical Error: ${error.message}`
+            remarks: `Technical Error: ${error.message}`,
+            aadhaarNumber: null
         };
     }
 };

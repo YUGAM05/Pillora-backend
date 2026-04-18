@@ -162,7 +162,43 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 export const createRequest = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
-        console.log(`[BloodRequest] Incoming request from ${req.user.id} for ${bloodGroup} in ${city}. KYC: ${kycDocumentType}`);
+
+        // Logic for Privacy-Compliant KYC Handling
+        let finalKycDocumentImage = kycDocumentImage;
+        let finalKycDocumentId = kycDocumentId;
+        let aiStatus: 'Pending' | 'Verified' | 'Rejected' | 'Error' = 'Pending';
+        let aiRemarks = '';
+
+        if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
+            console.log(`[PrivacySafe] Processing Aadhaar for ${patientName}...`);
+            try {
+                const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
+                aiStatus = result.status as any;
+                aiRemarks = result.remarks;
+                
+                if (result.aadhaarNumber) {
+                    const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+                    // Mask format: **** **** XX (only last 2 digits visible as requested)
+                    finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
+                    console.log(`[PrivacySafe] Aadhaar extracted and masked: ${finalKycDocumentId}`);
+                }
+                
+                // CRITICAL: Immediately delete/overwrite the image data so it's never stored
+                finalKycDocumentImage = undefined; 
+                console.log(`[PrivacySafe] Aadhaar image discarded after extraction.`);
+            } catch (err) {
+                console.error("[PrivacySafe] OCR/Verification failed:", err);
+                aiStatus = 'Error';
+                aiRemarks = 'Technical error during extraction';
+                finalKycDocumentImage = undefined; // Still discard image on error
+            }
+        } else if (kycDocumentId) {
+            // If manual input is provided and it looks like a full Aadhaar, mask it
+            if (kycDocumentType === 'Aadhar Card' && kycDocumentId.length >= 12) {
+                const cleanNum = kycDocumentId.replace(/\s/g, '');
+                finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
+            }
+        }
 
         const request = await BloodRequest.create({
             user: req.user.id,
@@ -177,8 +213,10 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
             status: isUrgent ? 'Urgent' : 'Open',
             isUrgent,
             kycDocumentType,
-            kycDocumentId,
-            kycDocumentImage
+            kycDocumentId: finalKycDocumentId,
+            kycDocumentImage: finalKycDocumentImage, // This will be undefined for Aadhaar
+            aiVerificationStatus: aiStatus,
+            aiVerificationRemarks: aiRemarks
         });
 
         // Trigger Matching & Notification Logic
@@ -191,8 +229,7 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
                 Donor.find({
                     blood_group: { $in: compatibleGroups },
                     city: new RegExp(city, 'i'),
-                    area: new RegExp(area, 'i'),
-                    // isAvailable: true // Not in the schema provided by user, but let's assume availability isn't tracked in the simple schema
+                    area: new RegExp(area, 'i')
                 }).limit(5),
                 BloodDonor.find({
                     bloodGroup: { $in: compatibleGroups },
@@ -202,60 +239,29 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
                 }).limit(5)
             ]);
 
-            console.log(`[BloodMatch] Found ${donors1.length} in Donor table and ${donors2.length} in BloodDonor table`);
-
             const allMatchedDonors = [
                 ...donors1.map((d: any) => ({ name: d.donor_name, phone: d.donor_phone })),
                 ...donors2.map(d => ({ name: d.name, phone: d.phone }))
             ];
 
             const matchedDonors = Array.from(new Map(allMatchedDonors.map(d => [d.phone, d])).values()).slice(0, 5);
-            console.log(`[BloodMatch] Unique matched donors: ${matchedDonors.length}`);
 
             if (matchedDonors.length > 0) {
-                // Get requester's phone
                 const requesterPhone = contactNumber;
-                console.log(`[BloodMatch] Notifying requester at: ${requesterPhone}`);
-
-                let messageBody = `🚨 Apex Care Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors:\n\n`;
+                let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors:\n\n`;
 
                 matchedDonors.forEach(donor => {
                     messageBody += `👤 ${donor.name}\n📞 ${donor.phone}\n\n`;
                 });
 
                 messageBody += `Please contact them immediately. Stay Safe!`;
-
-                // Send WhatsApp to requester
                 await sendWhatsAppMessage(requesterPhone, messageBody);
-                console.log(`[BloodMatch] WhatsApp trigger called for ${requesterPhone}`);
-            } else {
-                console.log(`[BloodMatch] No donors matched the criteria.`);
             }
         } catch (matchErr) {
             console.error("Auto-matching/Notification error:", matchErr);
-            // Don't fail the request creation if notification fails
         }
 
-        // Send response immediately
         res.status(201).json(request);
-
-        // Run AI Verification automatically in background
-        if (kycDocumentImage && kycDocumentType === 'Aadhar Card') {
-            (async () => {
-                try {
-                    console.log(`[AutoAI] Starting background verification for request ${request._id}`);
-                    const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
-
-                    request.aiVerificationStatus = result.status as any;
-                    request.aiVerificationRemarks = result.remarks;
-                    await request.save();
-
-                    console.log(`[AutoAI] background verification complete for ${request._id}: ${result.status}`);
-                } catch (aiErr) {
-                    console.error(`[AutoAI] background verification failed for ${request._id}:`, aiErr);
-                }
-            })();
-        }
 
     } catch (error: any) {
         if (!res.headersSent) {
