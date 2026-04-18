@@ -160,9 +160,9 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 // @route   POST /api/blood-bank/requests
 // @access  Private
 export const createRequest = async (req: AuthRequest, res: Response): Promise<void> => {
-    // 15s absolute timeout for the entire broadcast process
+    // 25s absolute timeout for the entire broadcast process (AI OCR takes time)
     const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Broadcast Timeout')), 15000)
+        setTimeout(() => reject(new Error('Broadcast Timeout')), 25000)
     );
 
     try {
