@@ -160,127 +160,97 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 // @route   POST /api/blood-bank/requests
 // @access  Private
 export const createRequest = async (req: AuthRequest, res: Response): Promise<void> => {
+    // 15s absolute timeout for the entire broadcast process
+    const timeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Broadcast Timeout')), 15000)
+    );
+
     try {
-        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
+        await Promise.race([
+            (async () => {
+                const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
 
-        // Logic for Privacy-Compliant KYC Handling
-        let finalKycDocumentImage = kycDocumentImage;
-        let finalKycDocumentId = kycDocumentId;
-        let aiStatus: 'Pending' | 'Verified' | 'Rejected' | 'Error' = 'Pending';
-        let aiRemarks = '';
+                // Logic for Privacy-Compliant KYC Handling
+                let finalKycDocumentImage = kycDocumentImage;
+                let finalKycDocumentId = kycDocumentId;
+                let aiStatus: 'Pending' | 'Verified' | 'Rejected' | 'Error' = 'Pending';
+                let aiRemarks = '';
 
-        if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
-            console.log(`[PrivacySafe] Processing Aadhaar for ${patientName}...`);
-            try {
-                const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
-                aiStatus = result.status as any;
-                aiRemarks = result.remarks;
-                
-                if (result.aadhaarNumber) {
-                    const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
-                    // Mask format: **** **** XX (only last 2 digits visible as requested)
+                if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
+                    console.log(`[PrivacySafe] Processing Aadhaar for ${patientName}...`);
+                    try {
+                        const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
+                        aiStatus = result.status as any;
+                        aiRemarks = result.remarks;
+                        
+                        if (result.aadhaarNumber) {
+                            const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+                            finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
+                        }
+                        finalKycDocumentImage = undefined; 
+                        console.log(`[PrivacySafe] Aadhaar extracted and masked.`);
+                    } catch (err) {
+                        console.error("[PrivacySafe] OCR/Verification failed:", err);
+                        aiStatus = 'Error';
+                        aiRemarks = 'Technical error during extraction';
+                        finalKycDocumentImage = undefined; 
+                    }
+                } else if (kycDocumentId && kycDocumentType === 'Aadhar Card' && kycDocumentId.length >= 12) {
+                    const cleanNum = kycDocumentId.replace(/\s/g, '');
                     finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
-                    console.log(`[PrivacySafe] Aadhaar extracted and masked: ${finalKycDocumentId}`);
                 }
-                
-                // CRITICAL: Immediately delete/overwrite the image data so it's never stored
-                finalKycDocumentImage = undefined; 
-                console.log(`[PrivacySafe] Aadhaar image discarded after extraction.`);
-            } catch (err) {
-                console.error("[PrivacySafe] OCR/Verification failed:", err);
-                aiStatus = 'Error';
-                aiRemarks = 'Technical error during extraction';
-                finalKycDocumentImage = undefined; // Still discard image on error
-            }
-        } else if (kycDocumentId) {
-            // If manual input is provided and it looks like a full Aadhaar, mask it
-            if (kycDocumentType === 'Aadhar Card' && kycDocumentId.length >= 12) {
-                const cleanNum = kycDocumentId.replace(/\s/g, '');
-                finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
-            }
-        }
 
-        const request = await BloodRequest.create({
-            user: req.user.id,
-            patientName,
-            age,
-            bloodGroup,
-            units,
-            hospitalAddress,
-            area,
-            city,
-            contactNumber,
-            status: isUrgent ? 'Urgent' : 'Open',
-            isUrgent,
-            kycDocumentType,
-            kycDocumentId: finalKycDocumentId,
-            kycDocumentImage: finalKycDocumentImage, // This will be undefined for Aadhaar
-            aiVerificationStatus: aiStatus,
-            aiVerificationRemarks: aiRemarks
-        });
-
-        res.status(201).json(request);
-
-        // Emit socket event for real-time update
-        try {
-            const io = req.app.get('io');
-            if (io) {
-                io.to(req.user.id).emit('blood_request_updated', request);
-                console.log(`[Socket] Emitted update to user: ${req.user.id}`);
-            }
-        } catch (socketErr) {
-            console.error("[Socket] Failed to emit update:", socketErr);
-        }
-
-        // Trigger Matching & Notification Logic
-        try {
-            const compatibleGroups = getCompatibleDonors(bloodGroup);
-            console.log(`[BloodMatch] Finding donors for: ${bloodGroup} in ${city}, ${area}. Compatible groups: ${compatibleGroups}`);
-
-            // Search for donors in the specific city/area across both models
-            const [donors1, donors2] = await Promise.all([
-                Donor.find({
-                    blood_group: { $in: compatibleGroups },
-                    city: new RegExp(city, 'i'),
-                    area: new RegExp(area, 'i')
-                }).limit(5),
-                BloodDonor.find({
-                    bloodGroup: { $in: compatibleGroups },
-                    city: new RegExp(city, 'i'),
-                    area: new RegExp(area, 'i'),
-                    isAvailable: true
-                }).limit(5)
-            ]);
-
-            const allMatchedDonors = [
-                ...donors1.map((d: any) => ({ name: d.donor_name, phone: d.donor_phone })),
-                ...donors2.map(d => ({ name: d.name, phone: d.phone }))
-            ];
-
-            const matchedDonors = Array.from(new Map(allMatchedDonors.map(d => [d.phone, d])).values()).slice(0, 5);
-
-            if (matchedDonors.length > 0) {
-                const requesterPhone = contactNumber;
-                let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors:\n\n`;
-
-                matchedDonors.forEach(donor => {
-                    messageBody += `👤 ${donor.name}\n📞 ${donor.phone}\n\n`;
+                const request = await BloodRequest.create({
+                    user: req.user.id,
+                    patientName,
+                    age,
+                    bloodGroup,
+                    units,
+                    hospitalAddress,
+                    area,
+                    city,
+                    contactNumber,
+                    status: isUrgent ? 'Urgent' : 'Open',
+                    isUrgent,
+                    kycDocumentType,
+                    kycDocumentId: finalKycDocumentId,
+                    kycDocumentImage: finalKycDocumentImage,
+                    aiVerificationStatus: aiStatus,
+                    aiVerificationRemarks: aiRemarks
                 });
 
-                messageBody += `Please contact them immediately. Stay Safe!`;
-                await sendWhatsAppMessage(requesterPhone, messageBody);
-            }
-        } catch (matchErr) {
-            console.error("Auto-matching/Notification error:", matchErr);
-        }
+                res.status(201).json(request);
 
-        res.status(201).json(request);
+                // Socket Emission
+                const io = req.app.get('io');
+                if (io) io.to(req.user.id).emit('blood_request_updated', request);
 
+                // Matching logic (can continue after response) - don't await this to keep response fast
+                (async () => {
+                    try {
+                        const compatibleGroups = getCompatibleDonors(bloodGroup);
+                        const [donors1, donors2] = await Promise.all([
+                            Donor.find({ blood_group: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i') }).limit(5),
+                            BloodDonor.find({ bloodGroup: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i'), isAvailable: true }).limit(5)
+                        ]);
+                        const matchedDonors = Array.from(new Map([...donors1.map((d: any) => ({ name: d.donor_name, phone: d.donor_phone })), ...donors2.map(d => ({ name: d.name, phone: d.phone }))].map(d => [d.phone, d])).values()).slice(0, 5);
+                        if (matchedDonors.length > 0) {
+                            let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors.\n\nPlease contact them immediately. Stay Safe!`;
+                            await sendWhatsAppMessage(contactNumber, messageBody);
+                        }
+                    } catch (e) { console.error("Post-response matching error:", e); }
+                })();
+
+                return;
+            })(),
+            timeout
+        ]);
     } catch (error: any) {
         if (!res.headersSent) {
-            res.status(500).json({ message: error.message || 'Server Error', error });
-        } else {
-            console.error("Error after response sent:", error);
+            if (error.message === 'Broadcast Timeout') {
+                return res.status(504).json({ message: 'Broadcast request timed out on server. The request might still be processing.' });
+            }
+            res.status(500).json({ message: error.message || 'Server Error' });
         }
     }
 };
