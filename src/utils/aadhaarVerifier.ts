@@ -171,28 +171,35 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
         });
 
         console.log(`[Agent] Calling Ollama (Llama3)... Text length: ${cleanText.length}`);
-        const response = await ollama.invoke(formattedPrompt).catch(err => {
-            console.error("[Agent] Ollama Invoke Error:", err);
-            throw new Error(`Ollama failed to respond: ${err.message}`);
-        });
-        console.log("[Agent] Ollama Raw Response:", response.slice(0, 100) + "...");
+        
+        // Use a flag to track if AI succeeded
+        let aiResultAvailable = false;
+        let result = {
+            status: verhoeffResult ? "Verified" : "Rejected",
+            remarks: verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect"
+        };
 
-        let result;
         try {
-            // Flexible JSON extraction
+            // Set a timeout for Ollama (8 seconds)
+            const aiPromise = ollama.invoke(formattedPrompt);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('AI Request Timeout')), 8000)
+            );
+
+            const response = await Promise.race([aiPromise, timeoutPromise]) as string;
+            console.log("[Agent] AI Response received.");
+
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-                result = JSON.parse(jsonMatch[0]);
+                const parsed = JSON.parse(jsonMatch[0]);
+                result.status = parsed.status || result.status;
+                result.remarks = parsed.remarks || result.remarks;
+                aiResultAvailable = true;
                 console.log("[Agent] Parsed AI Result:", result);
-            } else {
-                throw new Error("No JSON in response");
             }
-        } catch (e) {
-            console.error("[Agent] AI response unreadable as JSON. Full response:", response);
-            result = {
-                status: verhoeffResult ? "Verified" : "Rejected",
-                remarks: verhoeffResult ? "Verified via Verhoeff checksum (AI output error)" : "kyc verification is inncorrect"
-            };
+        } catch (e: any) {
+            console.warn(`[Agent] AI Analysis skipped or failed: ${e.message}. Falling back to logic-only verification.`);
+            // Result is already set to the regex/verhoeff result above
         }
 
         // Final check on status enum compatibility
