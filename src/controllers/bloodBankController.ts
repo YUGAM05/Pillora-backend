@@ -194,7 +194,7 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
                         aiRemarks = result.remarks;
                         if (result.aadhaarNumber) {
                             const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
-                            finalKycDocumentId = `**** **** ${cleanNum.slice(-2)}`;
+                            finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
                         }
                     } catch (err) { 
                         aiStatus = 'Error'; 
@@ -382,6 +382,11 @@ export const verifyRequestWithAI = async (req: Request, res: Response): Promise<
 
         request.aiVerificationStatus = result.status as any;
         request.aiVerificationRemarks = result.remarks;
+        
+        if (result.aadhaarNumber) {
+            const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+            request.kycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
+        }
 
         console.log(`[Controller] Saving request with status: ${request.aiVerificationStatus}...`);
         const savedRequest = await request.save();
@@ -394,3 +399,35 @@ export const verifyRequestWithAI = async (req: Request, res: Response): Promise<
         res.status(500).json({ message: 'Agent Verification Failed', error: error.message });
     }
 };
+
+// @desc    Update KYC verification status manually (Accept/Reject)
+// @route   PATCH /api/blood-bank/admin/requests/:id/kyc
+// @access  Private/Admin
+export const updateKycStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { status } = req.body;
+        if (!['Verified', 'Rejected'].includes(status)) {
+            res.status(400).json({ message: 'Invalid KYC status' });
+            return;
+        }
+
+        const request = await BloodRequest.findByIdAndUpdate(
+            req.params.id,
+            { 
+                aiVerificationStatus: status,
+                aiVerificationRemarks: `Manually ${status.toLowerCase()} by Admin.`
+            },
+            { new: true }
+        );
+
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+
+        res.json(request);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+};
+

@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { protect, adminOnly } from '../middleware/authMiddleware';
-import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, getMyRequests, getMyDonorProfile, verifyRequestWithAI } from '../controllers/bloodBankController';
+import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, getMyRequests, getMyDonorProfile, verifyRequestWithAI, updateKycStatus } from '../controllers/bloodBankController';
 import { exportDonorsToExcel, exportRequestsToExcel, exportDonorsToPDF, exportRequestsToPDF } from '../controllers/bloodBankExportController';
 import { importDonorsFromExcel, getDonorStats } from '../controllers/bloodBankImportController';
 import { downloadDonorTemplate } from '../controllers/bloodBankTemplateController';
@@ -23,6 +23,7 @@ router.get('/my-requests', protect, getMyRequests);
 router.get('/my-donor', protect, getMyDonorProfile);
 router.get('/admin/requests', protect, adminOnly, getAllRequestsAdmin);
 router.patch('/admin/requests/:id/status', protect, adminOnly, updateRequestStatus);
+router.patch('/admin/requests/:id/kyc', protect, adminOnly, updateKycStatus);
 router.post('/admin/requests/:id/verify-ai', protect, adminOnly, verifyRequestWithAI);
 
 
