@@ -136,100 +136,17 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             }
         }
 
-        // Use LangChain/Ollama for "brain" analysis
-        const prompt = PromptTemplate.fromTemplate(`
-            You are an AI assistant for Apex Care. Your task is to verify an Aadhaar card.
-            
-            IMPORTANT: Return ONLY a valid JSON object.
-            
-            EXTRACTED TEXT FROM OCR:
-            "{text}"
-            
-            PATIENT NAME TO MATCH:
-            "{patientName}"
-            
-            AADHAAR NUMBER FOUND BY LOGIC:
-            "{aadhaarNumber}"
-            
-            VERHOEFF CHECKSUM RESULT:
-            "{verhoeffResult}"
-            
-            Analyze the text. Check if it looks like a genuine Aadhaar card and if the name matches.
-            
-            Return JSON:
-            {{
-                "status": "Verified" or "Rejected",
-                "remarks": "reason"
-            }}
-        `);
-
-        // Limit text length to avoid token limit or performance issues
-        const cleanText = text.replace(/"/g, "'").replace(/[\n\r]/g, " ").slice(0, 1500);
-
-        const formattedPrompt = await prompt.format({
-            text: cleanText,
-            patientName,
-            aadhaarNumber: aadhaarNumber || "Errors",
-            verhoeffResult: "Passed"
-        });
-
-        console.log(`[Agent] Calling Ollama (Llama3)... Text length: ${cleanText.length}`);
-        
-        // Use a flag to track if AI succeeded
-        let aiResultAvailable = false;
+        // Format result instantly from logic
         let result = {
-            status: verhoeffResult ? "Verified" : "Rejected",
-            remarks: verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect"
+            status: verhoeffResult && hasKeyword ? "Verified" : "Rejected",
+            remarks: verhoeffResult && hasKeyword ? "Verified via fast pattern matching" : "kyc verification is inncorrect"
         };
-
-        try {
-            // Set a timeout for Ollama (8 seconds)
-            const aiPromise = ollama.invoke(formattedPrompt);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('AI Request Timeout')), 8000)
-            );
-
-            const response = await Promise.race([aiPromise, timeoutPromise]) as string;
-            console.log("[Agent] AI Response received.");
-
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                result.status = parsed.status || result.status;
-                result.remarks = parsed.remarks || result.remarks;
-                aiResultAvailable = true;
-                console.log("[Agent] Parsed AI Result:", result);
-            }
-        } catch (e: any) {
-            console.warn(`[Agent] AI Analysis skipped or failed: ${e.message}. Falling back to logic-only verification.`);
-            // Result is already set to the regex/verhoeff result above
-        }
-
-        // Final check on status enum compatibility
-        const validStatuses = ['Verified', 'Rejected', 'Error'];
-
-        // Normalize status to match Enum ('Verified', 'Rejected', 'Error')
-        if (result && typeof result.status === 'string') {
-            const normalized = result.status.charAt(0).toUpperCase() + result.status.slice(1).toLowerCase();
-            if (validStatuses.includes(normalized)) {
-                result.status = normalized;
-            }
-        }
-
+        
         // CRITICAL: Overwrite AI result if Verhoeff fails
         if (!verhoeffResult && aadhaarNumber) {
-            console.log("[Agent] Verhoeff failed. Overriding AI result for transparency.");
+            console.log("[Agent] Verhoeff failed.");
             result.status = "Rejected";
             result.remarks = "kyc verification is inncorrect";
-        }
-
-        if (!result || !validStatuses.includes(result.status)) {
-            console.warn(`[Agent] AI returned invalid or missing status, defaulting to logic result.`);
-            const fallbackRemarks = verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect";
-            result = {
-                status: verhoeffResult ? "Verified" : "Rejected",
-                remarks: (result && result.remarks) || fallbackRemarks
-            };
         }
 
         // Ensure "kyc verification is inncorrect" is used for any rejection
@@ -237,7 +154,7 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             result.remarks = "kyc verification is inncorrect";
         }
 
-        console.log("[Agent] Verification Complete. Final Result:", result);
+        console.log("[Agent] Fast Verification Complete. Final Result:", result);
         return {
             ...result,
             aadhaarNumber: aadhaarNumber // Return the raw extracted number

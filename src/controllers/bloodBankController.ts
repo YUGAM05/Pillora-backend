@@ -163,67 +163,51 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
     try {
         const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
 
-        // 1. Instant Save: Create the request with 'Pending' status immediately
+        let finalKycDocumentId = kycDocumentId;
+        let aiStatus: 'Verified' | 'Rejected' | 'Error' = 'Pending' as any;
+        let aiRemarks = '';
+
+        // Perform Fast Extract & Validate synchronously
+        if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
+            console.log(`[SyncAI] Processing Aadhaar for Request: ${patientName}`);
+            try {
+                const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
+                aiStatus = result.status as any;
+                aiRemarks = result.remarks;
+                if (result.aadhaarNumber) {
+                    const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+                    finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
+                }
+            } catch (err) { 
+                console.error("[SyncAI] Error", err);
+                aiStatus = 'Error'; 
+                aiRemarks = 'AI Verification failed'; 
+            }
+        } else {
+            // Manual verification fallback
+            aiStatus = 'Verified';
+            aiRemarks = 'Verified via manual details';
+        }
+
+        // 1. Instant Save: Create the request with exact verify status
         const request = await BloodRequest.create({
             user: req.user.id,
             patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber,
             status: isUrgent ? 'Urgent' : 'Open',
             isUrgent, kycDocumentType,
-            kycDocumentId: kycDocumentId || 'Processing...', 
+            kycDocumentId: finalKycDocumentId || 'Processing...', 
             kycDocumentImage: kycDocumentImage, // Store image for Admin
-            aiVerificationStatus: 'Pending',
-            aiVerificationRemarks: 'AI is analyzing your document...'
+            aiVerificationStatus: aiStatus,
+            aiVerificationRemarks: aiRemarks
         });
 
-        // 2. Instant Response: Return 201 Created to the frontend within milliseconds to prevent timeouts
+        // 2. Instant Response: Return 201 Created to the frontend
         res.status(201).json(request);
 
-        // 3. Background Processing: Move heavy lifting outside the HTTP cycle
+        // 3. Background Processing: Matching & notifications safe out of flow
         (async () => {
             try {
-                let finalKycDocumentId = kycDocumentId;
-                let aiStatus: 'Verified' | 'Rejected' | 'Error' = 'Pending' as any;
-                let aiRemarks = '';
-
-                // Perform AI OCR
-                if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
-                    console.log(`[BackgroundAI] Processing Aadhaar for Request: ${request._id}`);
-                    try {
-                        const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
-                        aiStatus = result.status as any;
-                        aiRemarks = result.remarks;
-                        if (result.aadhaarNumber) {
-                            const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
-                            finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
-                        }
-                    } catch (err) { 
-                        console.error("[BackgroundAI] Error", err);
-                        aiStatus = 'Error'; 
-                        aiRemarks = 'AI Verification failed (High Load)'; 
-                    }
-                } else {
-                    // Manual verification fallback
-                    aiStatus = 'Verified';
-                    aiRemarks = 'Verified via manual details';
-                }
-
-                // Update the request with AI results
-                const updatedRequest = await BloodRequest.findByIdAndUpdate(
-                    request._id,
-                    { 
-                        aiVerificationStatus: aiStatus, 
-                        aiVerificationRemarks: aiRemarks,
-                        kycDocumentId: finalKycDocumentId 
-                    },
-                    { new: true }
-                );
-
-                // Notify frontend via Socket.io
-                const io = req.app.get('io');
-                if (io) io.to(req.user.id).emit('blood_request_updated', updatedRequest);
-                console.log(`[BackgroundAI] Completed for Request: ${request._id}. Status: ${aiStatus}`);
-
-                // Perform Matching & Notifications async since it is safe in background
+                // Perform Matching & Notifications
                 if (aiStatus === 'Verified') {
                     const compatibleGroups = getCompatibleDonors(bloodGroup);
                     const [donors1, donors2] = await Promise.all([
