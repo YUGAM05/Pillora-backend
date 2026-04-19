@@ -91,7 +91,8 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             console.log("[Agent] No Aadhaar number pattern found. Rejecting immediately.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
 
@@ -102,7 +103,8 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             console.log("[Agent] Verhoeff checksum failed. Rejecting.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
 
@@ -116,7 +118,8 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             console.log("[Agent] No essential Aadhaar keywords found. Rejecting.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
 
@@ -222,9 +225,11 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
 
         if (!result || !validStatuses.includes(result.status)) {
             console.warn(`[Agent] AI returned invalid or missing status, defaulting to logic result.`);
-            result = result || {};
-            result.status = verhoeffResult ? "Verified" : "Rejected";
-            result.remarks = result.remarks || (verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect");
+            const fallbackRemarks = verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect";
+            result = {
+                status: verhoeffResult ? "Verified" : "Rejected",
+                remarks: (result && result.remarks) || fallbackRemarks
+            };
         }
 
         // Ensure "kyc verification is inncorrect" is used for any rejection
