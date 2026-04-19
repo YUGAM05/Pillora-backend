@@ -5,7 +5,7 @@ import BloodRequest from '../models/BloodRequest';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { getCompatibleDonors } from '../utils/bloodCompatibility';
 import { sendWhatsAppMessage } from '../utils/whatsappService';
-import { verifyAadhaarLocal } from '../utils/aadhaarVerifier';
+import { verifyAadhaarLocal, validateVerhoeff } from '../utils/aadhaarVerifier';
 
 
 
@@ -167,21 +167,21 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
         let aiStatus: 'Verified' | 'Rejected' | 'Error' = 'Pending' as any;
         let aiRemarks = '';
 
-        // Perform Fast Extract & Validate synchronously
-        if (kycDocumentType === 'Aadhar Card' && kycDocumentImage) {
-            console.log(`[SyncAI] Processing Aadhaar for Request: ${patientName}`);
-            try {
-                const result = await verifyAadhaarLocal(kycDocumentImage, patientName);
-                aiStatus = result.status as any;
-                aiRemarks = result.remarks;
-                if (result.aadhaarNumber) {
-                    const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+        // Perform Fast Extract & Validate synchronously instantly natively
+        if (kycDocumentType === 'Aadhar Card') {
+            if (!kycDocumentId || kycDocumentId.trim() === '') {
+                aiStatus = 'Rejected';
+                aiRemarks = 'Aadhaar Document Number is mandatory';
+            } else {
+                const cleanNum = kycDocumentId.replace(/\s/g, '');
+                if (cleanNum.length === 12 && validateVerhoeff(cleanNum)) {
+                    aiStatus = 'Verified';
+                    aiRemarks = 'Verified via fast mathematical pattern matching';
                     finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
+                } else {
+                    aiStatus = 'Rejected';
+                    aiRemarks = 'Fake or Invalid Aadhaar Number';
                 }
-            } catch (err) { 
-                console.error("[SyncAI] Error", err);
-                aiStatus = 'Error'; 
-                aiRemarks = 'AI Verification failed'; 
             }
         } else {
             // Manual verification fallback
