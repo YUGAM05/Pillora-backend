@@ -38,11 +38,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = [
-    'https://apex-admin-panel.vercel.app',
-    'https://apex-user-panel.vercel.app',
-    'https://apex-seller-panel.vercel.app',
-    'https://apex-delivery-panel.vercel.app',
-    'https://apex-backend-theta.vercel.app',
     'https://pillora.in',        // ✅ added
     'https://www.pillora.in',    // ✅ added
     'http://localhost:3000',
