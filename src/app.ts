@@ -111,6 +111,7 @@ import aiRoutes from './routes/aiRoutes';
 import couponRoutes from './routes/couponRoutes';
 import medicineRoutes from './routes/medicineRoutes';
 import uploadRoutes from './routes/uploadRoutes';
+import partnerRoutes from './routes/partnerRoutes';
 
 app.use(async (req, res, next) => {
     if (mongoose.connection.readyState === 0) {
@@ -137,6 +138,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/partners', partnerRoutes);
 
 app.get('/', (req, res) => {
     res.status(200).json({
