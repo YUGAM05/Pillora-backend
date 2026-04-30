@@ -27,6 +27,8 @@ export interface IPartnerRequest extends Document {
     isDigitized?: string;
     areasCovered?: string;
     bloodGroups?: string[];
+    // Pricing Plan
+    interestedPlan?: string;
     
     status: 'pending' | 'reviewed' | 'contacted' | 'rejected';
 }
@@ -57,6 +59,9 @@ const PartnerRequestSchema: Schema = new Schema({
     isDigitized: { type: String },
     areasCovered: { type: String },
     bloodGroups: [{ type: String }],
+    
+    // Pricing Plan
+    interestedPlan: { type: String },
     
     status: { 
         type: String, 
