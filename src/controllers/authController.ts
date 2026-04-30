@@ -3,10 +3,13 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import axios from 'axios';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
+import AuditLog from '../models/AuditLog';
 
 const generateToken = (id: string, role: string) => {
     return jwt.sign({ id, role }, process.env.JWT_SECRET || 'defaultSecret', {
-        expiresIn: '30d',
+        expiresIn: '30m',
     });
 };
 
@@ -133,6 +136,26 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
+            if (user.role === 'admin') {
+                await AuditLog.create({
+                    action: 'login',
+                    adminId: user._id,
+                    email: user.email,
+                    ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+                    status: 'success',
+                    details: { message: 'Admin authenticated (password valid)' }
+                });
+
+                if (user.isMfaEnabled) {
+                    res.json({
+                        mfaRequired: true,
+                        userId: user._id,
+                        message: 'MFA required'
+                    });
+                    return;
+                }
+            }
+
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -145,6 +168,16 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 token: generateToken(user._id as unknown as string, user.role),
             });
         } else {
+            if (user && user.role === 'admin') {
+                await AuditLog.create({
+                    action: 'login_failed',
+                    adminId: user._id,
+                    email: user.email,
+                    ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+                    status: 'failed',
+                    details: { message: 'Invalid password' }
+                });
+            }
             res.status(401).json({ message: 'Invalid email or password' });
         }
     } catch (error: any) {
@@ -277,5 +310,79 @@ export const setupAdmin = async (req: Request, res: Response): Promise<void> => 
     } catch (error: any) {
         console.error('Setup Admin Error:', error);
         res.status(500).json({ message: 'Setup Failed', error: error.message || error });
+    }
+};
+
+export const setupMfa = async (req: Request, res: Response): Promise<void> => {
+    const { userId } = req.body;
+    try {
+        const user = await User.findById(userId);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        
+        const secret = authenticator.generateSecret();
+        user.mfaSecret = secret;
+        await user.save();
+
+        const otpauthUrl = authenticator.keyuri(user.email, 'Pillora Admin', secret);
+        const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+        res.json({ secret, qrCode: qrCodeDataUrl });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error setting up MFA', error: error.message });
+    }
+};
+
+export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
+    const { userId, token } = req.body;
+    try {
+        const user = await User.findById(userId);
+        if (!user || !user.mfaSecret) {
+            res.status(400).json({ message: 'MFA not set up for this user' });
+            return;
+        }
+
+        const isValid = authenticator.verify({ token, secret: user.mfaSecret });
+        if (isValid) {
+            user.isMfaEnabled = true;
+            await user.save();
+            
+            if (user.role === 'admin') {
+                await AuditLog.create({
+                    action: 'mfa_verified',
+                    adminId: user._id,
+                    email: user.email,
+                    ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+                    status: 'success'
+                });
+            }
+
+            res.json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status,
+                phone: user.phone,
+                address: user.address,
+                location: user.location,
+                token: generateToken(user._id as unknown as string, user.role),
+            });
+        } else {
+            if (user.role === 'admin') {
+                await AuditLog.create({
+                    action: 'mfa_failed',
+                    adminId: user._id,
+                    email: user.email,
+                    ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+                    status: 'failed'
+                });
+            }
+            res.status(401).json({ message: 'Invalid MFA token' });
+        }
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error verifying MFA', error: error.message });
     }
 };

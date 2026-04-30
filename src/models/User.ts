@@ -88,6 +88,10 @@ export interface IUser extends Document {
     acknowledgeSla?: boolean;
     consentBackgroundCheck?: boolean;
 
+    // Admin MFA
+    mfaSecret?: string;
+    isMfaEnabled?: boolean;
+
     createdAt: Date;
 }
 
@@ -176,7 +180,11 @@ const UserSchema: Schema = new Schema({
     agreedToGpsTracking: { type: Boolean },
     agreedToHandleMeds: { type: Boolean },
     acknowledgeSla: { type: Boolean },
-    consentBackgroundCheck: { type: Boolean }
+    consentBackgroundCheck: { type: Boolean },
+
+    // Admin MFA
+    mfaSecret: { type: String },
+    isMfaEnabled: { type: Boolean, default: false }
 }, { timestamps: true });
 
 export default mongoose.model<IUser>('User', UserSchema);

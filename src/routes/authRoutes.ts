@@ -3,12 +3,26 @@ import { registerUser, loginUser, sendOtp, verifyOtp } from '../controllers/auth
 import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
 
+import rateLimit from 'express-rate-limit';
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Limit each IP to 5 requests per windowMs
+    message: { message: 'Too many login attempts from this IP, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 const router = express.Router();
 
 router.post('/register', registerUser);
-router.post('/login', loginUser);
+router.post('/login', loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
+
+import { setupMfa, verifyMfa } from '../controllers/authController';
+router.post('/setup-mfa', setupMfa);
+router.post('/verify-mfa', verifyMfa);
 
 // Setup
 import { setupAdmin } from '../controllers/authController';
