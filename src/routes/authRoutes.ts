@@ -1,13 +1,18 @@
 import express from 'express';
-import { registerUser, loginUser, sendOtp, verifyOtp } from '../controllers/authController';
+import {
+    registerUser, loginUser, sendOtp, verifyOtp,
+    setupMfa, verifyMfa, setupAdmin,
+    refreshToken, validateSession, logoutAdmin, emergencyLockdown
+} from '../controllers/authController';
 import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
-
 import rateLimit from 'express-rate-limit';
+import { requireAdminAuth } from '../middleware/requireAdminAuth';
 
+// ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per windowMs
+    max: 5,
     message: { message: 'Too many login attempts from this IP, please try again after 15 minutes' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -15,17 +20,25 @@ const loginLimiter = rateLimit({
 
 const router = express.Router();
 
+// ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', registerUser);
 router.post('/login', loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 
-import { setupMfa, verifyMfa } from '../controllers/authController';
+// ── MFA routes (semi-public — user ID required but no full auth) ─────────────
 router.post('/setup-mfa', setupMfa);
 router.post('/verify-mfa', verifyMfa);
 
-// Setup
-import { setupAdmin } from '../controllers/authController';
+// ── Session management ───────────────────────────────────────────────────────
+router.post('/refresh', refreshToken);
+router.get('/validate', validateSession);
+router.post('/logout', logoutAdmin);
+
+// ── Protected admin-only routes ──────────────────────────────────────────────
+router.post('/emergency-lockdown', requireAdminAuth, emergencyLockdown);
+
+// ── Setup (remove in production) ─────────────────────────────────────────────
 router.get('/setup-admin', setupAdmin);
 
 // ─────────────────────────────────────────────
@@ -94,7 +107,6 @@ router.get('/google/seller',
 router.get('/google/seller/callback',
     passport.authenticate('google', {
         session: false,
-        // FIX: was hardcoded localhost:3003 — now uses env variable
         failureRedirect: `${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=auth_failed`
     }),
     (async (req, res) => {
@@ -102,7 +114,6 @@ router.get('/google/seller/callback',
             const user = req.user as any;
 
             if (!user) {
-                // FIX: was hardcoded localhost:3003
                 return res.redirect(`${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=no_user`);
             }
 
@@ -135,7 +146,6 @@ router.get('/google/seller/callback',
             res.redirect(redirectUrl);
         } catch (error) {
             console.error('Error in seller callback:', error);
-            // FIX: was hardcoded localhost:3003
             res.redirect(`${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=server_error`);
         }
     })
@@ -155,7 +165,6 @@ router.get('/google/delivery',
 router.get('/google/delivery/callback',
     passport.authenticate('google', {
         session: false,
-        // FIX: was hardcoded localhost:3002 — now uses env variable
         failureRedirect: `${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=auth_failed`
     }),
     (async (req, res) => {
@@ -163,7 +172,6 @@ router.get('/google/delivery/callback',
             const user = req.user as any;
 
             if (!user) {
-                // FIX: was hardcoded localhost:3002
                 return res.redirect(`${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=no_user`);
             }
 
@@ -196,7 +204,6 @@ router.get('/google/delivery/callback',
             res.redirect(redirectUrl);
         } catch (error) {
             console.error('Error in delivery callback:', error);
-            // FIX: was hardcoded localhost:3002
             res.redirect(`${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=server_error`);
         }
     })
