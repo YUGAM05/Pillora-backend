@@ -7,14 +7,15 @@ const orderController_1 = require("../controllers/orderController");
 const router = (0, express_1.Router)();
 router.post('/', authMiddleware_1.protect, orderController_1.createOrder);
 router.get('/my', authMiddleware_1.protect, orderController_1.getUserOrders);
-router.get('/:id', authMiddleware_1.protect, orderController_1.getOrderById);
-// Seller routes
+// Seller routes — MUST be before /:id
 router.get('/seller', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('seller'), orderController_1.sellerGetOrders);
 router.put('/seller/:id/status', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('seller'), orderController_1.sellerUpdateOrderStatus);
-// Delivery routes
+// Delivery routes — MUST be before /:id
 router.get('/delivery', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('delivery'), orderController_1.deliveryGetAssignedOrders);
 router.put('/delivery/:id/status', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('delivery'), orderController_1.deliveryUpdateStatus);
-// Admin routes
+// Admin routes — MUST be before /:id
 router.get('/admin', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('admin'), orderController_1.adminGetAllOrders);
 router.put('/admin/:id/assign-delivery', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('admin'), orderController_1.adminAssignDelivery);
+// Generic /:id route — MUST come last to avoid swallowing named paths above
+router.get('/:id', authMiddleware_1.protect, orderController_1.getOrderById);
 exports.default = router;

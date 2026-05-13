@@ -34,31 +34,23 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const DoctorSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    specialization: { type: String, required: false },
-    daysAvailable: [{ type: String }],
-    timing: { type: String, required: false },
-}, { _id: false });
-const HospitalSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    slug: { type: String, unique: true, trim: true },
-    address: { type: String, required: true },
-    city: { type: String, required: true },
-    image: { type: String, required: false },
-    images: [{ type: String }],
-    isOpen24Hours: { type: Boolean, default: false },
-    consultationFee: { type: Number, required: true },
-    governmentSchemes: [{ type: String }],
-    isOnlinePaymentAvailable: { type: Boolean, default: true },
-    ambulanceContact: { type: String, required: false },
-    contactNumber: { type: String, required: false },
-    phoneNumbers: [{ type: String }],
-    description: { type: String },
-    rating: { type: Number, default: 0 },
-    doctors: [DoctorSchema],
-    management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
-    is_verified: { type: Boolean, default: false },
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+const AppointmentSchema = new mongoose_1.Schema({
+    patient: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
+    doctor: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+    hospital: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
+    slot: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Slot', required: true },
+    slotTime: { type: Date, required: true },
+    status: {
+        type: String,
+        enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+        default: 'pending'
+    },
+    paymentStatus: {
+        type: String,
+        enum: ['pending', 'paid', 'failed'],
+        default: 'pending'
+    },
+    bookingDate: { type: Date, default: Date.now },
+    notes: { type: String },
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('Hospital', HospitalSchema);
+exports.default = mongoose_1.default.model('Appointment', AppointmentSchema);

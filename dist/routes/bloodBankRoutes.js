@@ -24,6 +24,7 @@ router.get('/my-requests', authMiddleware_1.protect, bloodBankController_1.getMy
 router.get('/my-donor', authMiddleware_1.protect, bloodBankController_1.getMyDonorProfile);
 router.get('/admin/requests', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.getAllRequestsAdmin);
 router.patch('/admin/requests/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.updateRequestStatus);
+router.patch('/admin/requests/:id/kyc', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.updateKycStatus);
 router.post('/admin/requests/:id/verify-ai', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.verifyRequestWithAI);
 // Export routes
 router.get('/admin/export/donors/excel', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankExportController_1.exportDonorsToExcel);

@@ -16,7 +16,6 @@ exports.verifyAadhaarLocal = exports.inv = void 0;
 exports.validateVerhoeff = validateVerhoeff;
 const tesseract_js_1 = __importDefault(require("tesseract.js"));
 const ollama_1 = require("@langchain/ollama");
-const prompts_1 = require("@langchain/core/prompts");
 /**
  * Verhoeff Algorithm for Aadhaar number validation
  */
@@ -96,7 +95,8 @@ const verifyAadhaarLocal = (imageBuffer, patientName) => __awaiter(void 0, void 
             console.log("[Agent] No Aadhaar number pattern found. Rejecting immediately.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
         // 🚨 HARD RULE 2: Verhoeff Checksum
@@ -106,7 +106,8 @@ const verifyAadhaarLocal = (imageBuffer, patientName) => __awaiter(void 0, void 
             console.log("[Agent] Verhoeff checksum failed. Rejecting.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
         // 🚨 HARD RULE 3: Essential Keywords
@@ -118,7 +119,8 @@ const verifyAadhaarLocal = (imageBuffer, patientName) => __awaiter(void 0, void 
             console.log("[Agent] No essential Aadhaar keywords found. Rejecting.");
             return {
                 status: "Rejected",
-                remarks: "kyc verification is inncorrect"
+                remarks: "kyc verification is inncorrect",
+                aadhaarNumber: null
             };
         }
         // 🚨 HARD RULE 4: Name Match (Basic Fuzzy)
@@ -132,98 +134,31 @@ const verifyAadhaarLocal = (imageBuffer, patientName) => __awaiter(void 0, void 
                 // However, OCR can be messy. Let's trust the AI for name matching IF the hard rules passed.
             }
         }
-        // Use LangChain/Ollama for "brain" analysis
-        const prompt = prompts_1.PromptTemplate.fromTemplate(`
-            You are an AI assistant for Apex Care. Your task is to verify an Aadhaar card.
-            
-            IMPORTANT: Return ONLY a valid JSON object.
-            
-            EXTRACTED TEXT FROM OCR:
-            "{text}"
-            
-            PATIENT NAME TO MATCH:
-            "{patientName}"
-            
-            AADHAAR NUMBER FOUND BY LOGIC:
-            "{aadhaarNumber}"
-            
-            VERHOEFF CHECKSUM RESULT:
-            "{verhoeffResult}"
-            
-            Analyze the text. Check if it looks like a genuine Aadhaar card and if the name matches.
-            
-            Return JSON:
-            {{
-                "status": "Verified" or "Rejected",
-                "remarks": "reason"
-            }}
-        `);
-        // Limit text length to avoid token limit or performance issues
-        const cleanText = text.replace(/"/g, "'").replace(/[\n\r]/g, " ").slice(0, 1500);
-        const formattedPrompt = yield prompt.format({
-            text: cleanText,
-            patientName,
-            aadhaarNumber: aadhaarNumber || "Errors",
-            verhoeffResult: "Passed"
-        });
-        console.log(`[Agent] Calling Ollama (Llama3)... Text length: ${cleanText.length}`);
-        const response = yield ollama.invoke(formattedPrompt).catch(err => {
-            console.error("[Agent] Ollama Invoke Error:", err);
-            throw new Error(`Ollama failed to respond: ${err.message}`);
-        });
-        console.log("[Agent] Ollama Raw Response:", response.slice(0, 100) + "...");
-        let result;
-        try {
-            // Flexible JSON extraction
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                result = JSON.parse(jsonMatch[0]);
-                console.log("[Agent] Parsed AI Result:", result);
-            }
-            else {
-                throw new Error("No JSON in response");
-            }
-        }
-        catch (e) {
-            console.error("[Agent] AI response unreadable as JSON. Full response:", response);
-            result = {
-                status: verhoeffResult ? "Verified" : "Rejected",
-                remarks: verhoeffResult ? "Verified via Verhoeff checksum (AI output error)" : "kyc verification is inncorrect"
-            };
-        }
-        // Final check on status enum compatibility
-        const validStatuses = ['Verified', 'Rejected', 'Error'];
-        // Normalize status to match Enum ('Verified', 'Rejected', 'Error')
-        if (result && typeof result.status === 'string') {
-            const normalized = result.status.charAt(0).toUpperCase() + result.status.slice(1).toLowerCase();
-            if (validStatuses.includes(normalized)) {
-                result.status = normalized;
-            }
-        }
+        // Format result instantly from logic
+        let result = {
+            status: verhoeffResult && hasKeyword ? "Verified" : "Rejected",
+            remarks: verhoeffResult && hasKeyword ? "Verified via fast pattern matching" : "kyc verification is inncorrect"
+        };
         // CRITICAL: Overwrite AI result if Verhoeff fails
         if (!verhoeffResult && aadhaarNumber) {
-            console.log("[Agent] Verhoeff failed. Overriding AI result for transparency.");
+            console.log("[Agent] Verhoeff failed.");
             result.status = "Rejected";
             result.remarks = "kyc verification is inncorrect";
-        }
-        if (!result || !validStatuses.includes(result.status)) {
-            console.warn(`[Agent] AI returned invalid or missing status, defaulting to logic result.`);
-            result = result || {};
-            result.status = verhoeffResult ? "Verified" : "Rejected";
-            result.remarks = result.remarks || (verhoeffResult ? "Verified via Verhoeff checksum" : "kyc verification is inncorrect");
         }
         // Ensure "kyc verification is inncorrect" is used for any rejection
         if (result.status === "Rejected") {
             result.remarks = "kyc verification is inncorrect";
         }
-        console.log("[Agent] Verification Complete. Final Result:", result);
-        return result;
+        console.log("[Agent] Fast Verification Complete. Final Result:", result);
+        return Object.assign(Object.assign({}, result), { aadhaarNumber: aadhaarNumber // Return the raw extracted number
+         });
     }
     catch (error) {
         console.error("[Agent] Local Verification Error:", error);
         return {
             status: "Error",
-            remarks: `Technical Error: ${error.message}`
+            remarks: `Technical Error: ${error.message}`,
+            aadhaarNumber: null
         };
     }
 });

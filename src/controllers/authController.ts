@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import Session from '../models/Session';
 import axios from 'axios';
-import { authenticator } from 'otplib';
+const { authenticator } = require('otplib');
 import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
 
@@ -212,6 +212,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 phone: user.phone,
                 address: user.address,
                 location: user.location,
+                isPasswordResetRequired: user.isPasswordResetRequired,
                 token: generateToken(user._id as unknown as string, user.role),
             });
 
@@ -564,6 +565,7 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
             phone: user.phone,
             address: user.address,
             location: user.location,
+            isPasswordResetRequired: user.isPasswordResetRequired,
             token: generateToken(user._id as unknown as string, user.role),
         });
 
@@ -594,5 +596,35 @@ export const setupAdmin = async (req: Request, res: Response): Promise<void> => 
     } catch (error: any) {
         console.error('Setup Admin Error:', error);
         res.status(500).json({ message: 'Setup Failed', error: error.message || error });
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CHANGE PASSWORD
+// ═══════════════════════════════════════════════════════════════════════════════
+export const changePassword = async (req: any, res: Response): Promise<void> => {
+    const { newPassword } = req.body;
+    const userId = req.user?.id;
+
+    try {
+        if (!newPassword || newPassword.length < 6) {
+            res.status(400).json({ message: 'Password must be at least 6 characters long' });
+            return;
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        user.passwordHash = await bcrypt.hash(newPassword, salt);
+        user.isPasswordResetRequired = false;
+        await user.save();
+
+        res.json({ message: 'Password updated successfully' });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating password', error: error.message });
     }
 };

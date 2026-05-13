@@ -26,8 +26,9 @@ const extractTextFromImage = (imagePath) => __awaiter(void 0, void 0, void 0, fu
 exports.extractTextFromImage = extractTextFromImage;
 const cleanOcrText = (raw) => {
     return raw
-        .replace(/\n+/g, '\n') // Replace multiple newlines with single
-        .replace(/\s+/g, ' ') // Replace multiple spaces with single
+        .replace(/\r/g, '') // Remove carriage returns
+        .replace(/[ \t]+/g, ' ') // Replace multiple spaces/tabs with single space
+        .replace(/\n\s*\n/g, '\n') // Replace multiple newlines with single newline
         .trim(); // Trim whitespace
 };
 exports.cleanOcrText = cleanOcrText;

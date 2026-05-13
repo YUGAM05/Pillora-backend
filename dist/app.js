@@ -27,10 +27,11 @@ const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: '*',
+        origin: '*', // Adjust for production
         methods: ['GET', 'POST']
     }
 });
+// Make io accessible in controllers
 app.set('io', io);
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
@@ -44,26 +45,25 @@ io.on('connection', (socket) => {
 });
 const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
-    'https://apex-admin-panel.vercel.app',
-    'https://apex-user-panel.vercel.app',
-    'https://apex-seller-panel.vercel.app',
-    'https://apex-delivery-panel.vercel.app',
-    'https://apex-backend-theta.vercel.app',
-    'https://pillora.in',
-    'https://www.pillora.in',
+    'https://pillora.in', // ✅ added
+    'https://www.pillora.in', // ✅ added
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
     'http://localhost:3003',
     'http://localhost:5000',
 ];
+// ✅ Permissive CORS for development
 app.use((req, res, next) => {
+    console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
+    // Allow all local origins (localhost and 127.0.0.1) or any origin in the allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
     if (origin && (isLocal || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     }
     else if (!origin) {
+        // Fallback for tools/non-browser requests
         res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -76,7 +76,7 @@ app.use((req, res, next) => {
 });
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
-app.use('/uploads', express_1.default.static('uploads'));
+app.use('/uploads', express_1.default.static('uploads')); // Serve uploaded files
 app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
@@ -110,6 +110,9 @@ const blogRoutes_1 = __importDefault(require("./routes/blogRoutes"));
 const aiRoutes_1 = __importDefault(require("./routes/aiRoutes"));
 const couponRoutes_1 = __importDefault(require("./routes/couponRoutes"));
 const medicineRoutes_1 = __importDefault(require("./routes/medicineRoutes"));
+const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
+const partnerRoutes_1 = __importDefault(require("./routes/partnerRoutes"));
+const hospitalDashboardRoutes_1 = __importDefault(require("./routes/hospitalDashboardRoutes"));
 app.use((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     if (mongoose_1.default.connection.readyState === 0) {
         yield (0, exports.connectDB)();
@@ -133,6 +136,9 @@ app.use('/api/blogs', blogRoutes_1.default);
 app.use('/api/ai', aiRoutes_1.default);
 app.use('/api/coupons', couponRoutes_1.default);
 app.use('/api/medicines', medicineRoutes_1.default);
+app.use('/api/upload', uploadRoutes_1.default);
+app.use('/api/partners', partnerRoutes_1.default);
+app.use('/api/hospital/dashboard', hospitalDashboardRoutes_1.default);
 app.get('/', (req, res) => {
     res.status(200).json({
         message: 'Apex Care API is running with Sockets',
@@ -161,11 +167,12 @@ app.use((err, req, res, next) => {
 });
 if (process.env.NODE_ENV !== 'production') {
     httpServer.listen(PORT, () => {
-        console.log(`Server (HTTP + WS) ready on port ${PORT}`);
+        console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
+        // Connect to DB in background so server stays alive even if DB is slow
         (0, exports.connectDB)().then(() => {
-            console.log('Background DB connection established');
+            console.log('✅ Background DB connection established');
         }).catch(err => {
-            console.error('Background DB connection failed:', err);
+            console.error('❌ Background DB connection failed:', err);
         });
     });
 }

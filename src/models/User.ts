@@ -6,8 +6,9 @@ export interface IUser extends Document {
     passwordHash?: string; // Optional for Google OAuth users
     googleId?: string;
     profilePicture?: string;
-    role: 'customer' | 'seller' | 'delivery' | 'admin';
+    role: 'customer' | 'seller' | 'delivery' | 'admin' | 'hospital';
     status: 'pending' | 'approved' | 'rejected';
+    isPasswordResetRequired?: boolean;
     phone?: string;
     pharmacy_name?: string;
     address?: {
@@ -101,8 +102,9 @@ const UserSchema: Schema = new Schema({
     passwordHash: { type: String }, // Not required for Google OAuth users
     googleId: { type: String, unique: true, sparse: true }, // Google OAuth ID
     profilePicture: { type: String }, // Profile picture URL from Google
-    role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin'], default: 'customer' },
+    role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin', 'hospital'], default: 'customer' },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved' },
+    isPasswordResetRequired: { type: Boolean, default: false },
     phone: { type: String },
     pharmacy_name: { type: String },
     address: {

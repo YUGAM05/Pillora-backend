@@ -40,8 +40,9 @@ const UserSchema = new mongoose_1.Schema({
     passwordHash: { type: String }, // Not required for Google OAuth users
     googleId: { type: String, unique: true, sparse: true }, // Google OAuth ID
     profilePicture: { type: String }, // Profile picture URL from Google
-    role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin'], default: 'customer' },
+    role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin', 'hospital'], default: 'customer' },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved' },
+    isPasswordResetRequired: { type: Boolean, default: false },
     phone: { type: String },
     pharmacy_name: { type: String },
     address: {
@@ -50,6 +51,8 @@ const UserSchema = new mongoose_1.Schema({
         state: String,
         zip: String
     },
+    otp: { type: String },
+    otpExpiresAt: { type: Date },
     bankDetails: {
         accountNumber: String,
         ifsc: String
@@ -61,6 +64,58 @@ const UserSchema = new mongoose_1.Schema({
     },
     kyc_status: { type: String, enum: ['Pending', 'Verified', 'Rejected'], default: 'Pending' },
     aadhaarNumber: { type: String, sparse: true },
-    aadhaarCardUrl: { type: String }
+    aadhaarCardUrl: { type: String },
+    ownerPhotoUrl: { type: String },
+    ownerPan: { type: String },
+    panCardUrl: { type: String },
+    businessPan: { type: String },
+    businessType: { type: String },
+    yearsInOperation: { type: Number },
+    retailDrugLicense: { type: String },
+    drugLicenseNumber: { type: String },
+    licenseExpiryDate: { type: Date },
+    pharmacistCertificate: { type: String },
+    gstNumber: { type: String },
+    cancelledChequeUrl: { type: String },
+    shopEstablishmentUrl: { type: String },
+    rentAgreementUrl: { type: String },
+    shopPhotoFrontUrl: { type: String },
+    shopPhotoInsideUrl: { type: String },
+    whatsappNumber: { type: String },
+    alternateContact: { type: String },
+    operatingHours: { type: String },
+    agreedToTerms: { type: Boolean },
+    agreedToCompliance: { type: Boolean },
+    agreedToNoBannedDrugs: { type: Boolean },
+    selfDeclarationValidLicenses: { type: Boolean },
+    // Delivery Partner specific fields
+    dob: { type: Date },
+    gender: { type: String },
+    aadhaarBackUrl: { type: String },
+    vehicleType: { type: String },
+    vehicleRegNumber: { type: String },
+    dlNumber: { type: String },
+    dlExpiryDate: { type: Date },
+    dlFrontUrl: { type: String },
+    dlBackUrl: { type: String },
+    rcUrl: { type: String },
+    insuranceUrl: { type: String },
+    emergencyContactName: { type: String },
+    emergencyContactNumber: { type: String },
+    upiId: { type: String },
+    preferredZones: [{ type: String }],
+    availableHours: { type: String },
+    daysAvailable: { type: String },
+    employmentType: { type: String },
+    noCriminalRecord: { type: Boolean },
+    policeVerificationUrl: { type: String },
+    referenceContact: { type: String },
+    agreedToGpsTracking: { type: Boolean },
+    agreedToHandleMeds: { type: Boolean },
+    acknowledgeSla: { type: Boolean },
+    consentBackgroundCheck: { type: Boolean },
+    // Admin MFA
+    mfaSecret: { type: String },
+    isMfaEnabled: { type: Boolean, default: false }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('User', UserSchema);

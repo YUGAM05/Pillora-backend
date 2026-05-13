@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAuditLog extends Document {
     action: string;
-    adminId?: string;
+    adminId?: mongoose.Types.ObjectId;
     email?: string;
     ipAddress: string;
     details?: any;

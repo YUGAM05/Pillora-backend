@@ -26,6 +26,7 @@ const sendWhatsAppMessage = (to, content) => __awaiter(void 0, void 0, void 0, f
     }
     catch (error) {
         console.error('Error in WhatsApp simulation:', error);
+        return { error: 'Simulation error' };
     }
 });
 exports.sendWhatsAppMessage = sendWhatsAppMessage;

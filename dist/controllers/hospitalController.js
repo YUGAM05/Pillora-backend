@@ -14,6 +14,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
+const cloudinary_1 = require("cloudinary"); // ✅ Added
+const slugify_1 = __importDefault(require("slugify"));
+const mongoose_1 = __importDefault(require("mongoose"));
+// ✅ Cloudinary config
+cloudinary_1.v2.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 // @desc    Get all hospitals
 // @route   GET /api/hospitals
 // @access  Public
@@ -37,7 +46,24 @@ exports.getHospitals = getHospitals;
 // @access  Public
 const getHospitalById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const hospital = yield Hospital_1.default.findById(req.params.id);
+        const { id } = req.params;
+        const querySlug = req.query.slug;
+        const queryId = req.query.id;
+        let hospital;
+        if (querySlug) {
+            hospital = yield Hospital_1.default.findOne({ slug: querySlug });
+        }
+        else if (queryId) {
+            hospital = yield Hospital_1.default.findById(queryId);
+        }
+        else if (id) {
+            if (mongoose_1.default.isValidObjectId(id)) {
+                hospital = yield Hospital_1.default.findById(id);
+            }
+            else {
+                hospital = yield Hospital_1.default.findOne({ slug: id });
+            }
+        }
         if (hospital) {
             res.json(hospital);
         }
@@ -98,7 +124,18 @@ const seedHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 rating: 4.0
             }
         ];
-        yield Hospital_1.default.insertMany(hospitals);
+        const seededHospitals = [];
+        for (const h of hospitals) {
+            let baseSlug = (0, slugify_1.default)(h.name, { lower: true, strict: true, trim: true });
+            let currentSlug = baseSlug;
+            let counter = 2;
+            while (seededHospitals.some((s) => s.slug === currentSlug)) {
+                currentSlug = `${baseSlug}-${counter}`;
+                counter++;
+            }
+            seededHospitals.push(Object.assign(Object.assign({}, h), { slug: currentSlug }));
+        }
+        yield Hospital_1.default.insertMany(seededHospitals);
         res.json({ message: 'Hospitals seeded successfully' });
     }
     catch (error) {
@@ -111,7 +148,7 @@ exports.seedHospitals = seedHospitals;
 // @access  Private/Admin
 const createHospital = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, address, city, image, images, isOpen24Hours, consultationFee, governmentSchemes, isOnlinePaymentAvailable, ambulanceContact, contactNumber, description, rating } = req.body;
+        const { name, address, city, image, images, isOpen24Hours, consultationFee, governmentSchemes, isOnlinePaymentAvailable, ambulanceContact, contactNumber, phoneNumbers, description, rating, doctors } = req.body;
         if (!name || !address || !city || (!image && (!images || images.length === 0)) || !consultationFee) {
             res.status(400).json({ message: 'Missing required fields' });
             return;
@@ -120,8 +157,24 @@ const createHospital = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (Array.isArray(images)) {
             imagesArr = images.filter(Boolean);
         }
+        // Build phoneNumbers array (prefer the array, fall back to single contactNumber)
+        let phoneNumbersArr = [];
+        if (Array.isArray(phoneNumbers)) {
+            phoneNumbersArr = phoneNumbers.filter((p) => p && p.trim() !== '');
+        }
+        else if (typeof phoneNumbers === 'string' && phoneNumbers.trim()) {
+            phoneNumbersArr = [phoneNumbers.trim()];
+        }
+        let baseSlug = (0, slugify_1.default)(name, { lower: true, strict: true, trim: true });
+        let currentSlug = baseSlug;
+        let counter = 2;
+        while (yield Hospital_1.default.findOne({ slug: currentSlug })) {
+            currentSlug = `${baseSlug}-${counter}`;
+            counter++;
+        }
         const hospital = yield Hospital_1.default.create({
             name,
+            slug: currentSlug,
             address,
             city,
             image,
@@ -136,8 +189,10 @@ const createHospital = (req, res) => __awaiter(void 0, void 0, void 0, function*
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             ambulanceContact,
             contactNumber,
+            phoneNumbers: phoneNumbersArr,
             description: description || '',
-            rating: rating ? Number(rating) : 0
+            rating: rating ? Number(rating) : 0,
+            doctors: Array.isArray(doctors) ? doctors : []
         });
         res.status(201).json(hospital);
     }
@@ -206,8 +261,20 @@ const uploadHospitalImages = (req, res) => __awaiter(void 0, void 0, void 0, fun
             res.status(400).json({ message: 'No files uploaded' });
             return;
         }
-        const urls = files.map((f) => `/uploads/hospitals/${f.filename}`);
-        res.json({ urls });
+        // ✅ Upload each file buffer to Cloudinary
+        const uploadPromises = files.map((file) => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary_1.v2.uploader.upload_stream({ folder: 'hospitals' }, (error, result) => {
+                    if (error)
+                        reject(error);
+                    else
+                        resolve(result.secure_url); // ✅ Cloudinary URL
+                });
+                stream.end(file.buffer); // ✅ Push buffer to Cloudinary
+            });
+        });
+        const urls = yield Promise.all(uploadPromises);
+        res.json({ urls }); // ✅ Returns Cloudinary URLs
     }
     catch (error) {
         res.status(500).json({ message: error.message || 'Server Error', error });

@@ -9,7 +9,8 @@ const roleMiddleware_1 = require("../middleware/roleMiddleware");
 const multer_1 = __importDefault(require("multer"));
 const medicineController_1 = require("../controllers/medicineController");
 const router = (0, express_1.Router)();
-const upload = (0, multer_1.default)({ dest: 'uploads/' });
+// ✅ Fixed: memoryStorage instead of dest: 'uploads/'
+const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 router.post('/', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('seller'), upload.single('image'), medicineController_1.sellerAddMedicine);
 router.get('/my', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('seller'), medicineController_1.sellerGetMyMedicines);
 router.put('/:id', authMiddleware_1.protect, (0, roleMiddleware_1.authorize)('seller'), medicineController_1.sellerUpdateMedicine);

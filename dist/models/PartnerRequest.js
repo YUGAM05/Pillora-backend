@@ -34,31 +34,36 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const DoctorSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    specialization: { type: String, required: false },
-    daysAvailable: [{ type: String }],
-    timing: { type: String, required: false },
-}, { _id: false });
-const HospitalSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    slug: { type: String, unique: true, trim: true },
-    address: { type: String, required: true },
+const PartnerRequestSchema = new mongoose_1.Schema({
+    type: { type: String, enum: ['hospital', 'ngo'], required: true },
+    organizationName: { type: String, required: true },
     city: { type: String, required: true },
-    image: { type: String, required: false },
-    images: [{ type: String }],
-    isOpen24Hours: { type: Boolean, default: false },
-    consultationFee: { type: Number, required: true },
+    area: { type: String, required: true },
+    address: { type: String, required: true },
+    contactPersonName: { type: String, required: true },
+    designation: { type: String, required: true },
+    phoneNumber: { type: String, required: true },
+    email: { type: String, required: true },
+    message: { type: String },
+    // Hospital specific
+    facilityType: { type: String },
+    registrationNumber: { type: String },
+    specializations: [{ type: String }],
+    doctorCount: { type: Number },
+    facilities: [{ type: String }],
     governmentSchemes: [{ type: String }],
-    isOnlinePaymentAvailable: { type: Boolean, default: true },
-    ambulanceContact: { type: String, required: false },
-    contactNumber: { type: String, required: false },
-    phoneNumbers: [{ type: String }],
-    description: { type: String },
-    rating: { type: Number, default: 0 },
-    doctors: [DoctorSchema],
-    management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
-    is_verified: { type: Boolean, default: false },
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    // NGO specific
+    ngoType: { type: String },
+    donorCount: { type: Number },
+    isDigitized: { type: String },
+    areasCovered: { type: String },
+    bloodGroups: [{ type: String }],
+    // Pricing Plan
+    interestedPlan: { type: String },
+    status: {
+        type: String,
+        enum: ['pending', 'reviewed', 'contacted', 'rejected'],
+        default: 'pending'
+    }
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('Hospital', HospitalSchema);
+exports.default = mongoose_1.default.model('PartnerRequest', PartnerRequestSchema);

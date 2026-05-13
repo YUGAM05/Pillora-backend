@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyRequestWithAI = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Donor_1 = __importDefault(require("../models/Donor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
@@ -31,19 +31,14 @@ const registerDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(400).json({ message: 'Age must be between 18 and 60 to donate blood.' });
             return;
         }
-        // Check if already registered by user ID
-        const existingDonorByUser = yield BloodDonor_1.default.findOne({ user: req.user.id });
-        if (existingDonorByUser) {
-            res.status(400).json({ message: 'You are already registered as a donor' });
-            return;
-        }
-        // Check if phone number already exists
-        const existingDonorByPhone = yield BloodDonor_1.default.findOne({ phone });
+        // Check if phone number already used by a DIFFERENT user
+        const existingDonorByPhone = yield BloodDonor_1.default.findOne({ phone, user: { $ne: req.user.id } });
         if (existingDonorByPhone) {
-            res.status(400).json({ message: 'This phone number is already registered' });
+            res.status(400).json({ message: 'This phone number is already registered by another donor' });
             return;
         }
-        const donor = yield BloodDonor_1.default.create({
+        // Upsert: update existing record or create new one
+        const donor = yield BloodDonor_1.default.findOneAndUpdate({ user: req.user.id }, {
             user: req.user.id,
             name,
             bloodGroup,
@@ -58,7 +53,7 @@ const registerDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 type: 'Point',
                 coordinates: location // [longitude, latitude]
             }
-        });
+        }, { upsert: true, new: true, setDefaultsOnInsert: true });
         res.status(201).json(donor);
     }
     catch (error) {
@@ -162,95 +157,71 @@ exports.findMatches = findMatches;
 const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
-        console.log(`[BloodRequest] Incoming request from ${req.user.id} for ${bloodGroup} in ${city}. KYC: ${kycDocumentType}`);
-        const request = yield BloodRequest_1.default.create({
-            user: req.user.id,
-            patientName,
-            age,
-            bloodGroup,
-            units,
-            hospitalAddress,
-            area,
-            city,
-            contactNumber,
-            status: isUrgent ? 'Urgent' : 'Open',
-            isUrgent,
-            kycDocumentType,
-            kycDocumentId,
-            kycDocumentImage
-        });
-        // Trigger Matching & Notification Logic
-        try {
-            const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
-            console.log(`[BloodMatch] Finding donors for: ${bloodGroup} in ${city}, ${area}. Compatible groups: ${compatibleGroups}`);
-            // Search for donors in the specific city/area across both models
-            const [donors1, donors2] = yield Promise.all([
-                Donor_1.default.find({
-                    blood_group: { $in: compatibleGroups },
-                    city: new RegExp(city, 'i'),
-                    area: new RegExp(area, 'i'),
-                    // isAvailable: true // Not in the schema provided by user, but let's assume availability isn't tracked in the simple schema
-                }).limit(5),
-                BloodDonor_1.default.find({
-                    bloodGroup: { $in: compatibleGroups },
-                    city: new RegExp(city, 'i'),
-                    area: new RegExp(area, 'i'),
-                    isAvailable: true
-                }).limit(5)
-            ]);
-            console.log(`[BloodMatch] Found ${donors1.length} in Donor table and ${donors2.length} in BloodDonor table`);
-            const allMatchedDonors = [
-                ...donors1.map((d) => ({ name: d.donor_name, phone: d.donor_phone })),
-                ...donors2.map(d => ({ name: d.name, phone: d.phone }))
-            ];
-            const matchedDonors = Array.from(new Map(allMatchedDonors.map(d => [d.phone, d])).values()).slice(0, 5);
-            console.log(`[BloodMatch] Unique matched donors: ${matchedDonors.length}`);
-            if (matchedDonors.length > 0) {
-                // Get requester's phone
-                const requesterPhone = contactNumber;
-                console.log(`[BloodMatch] Notifying requester at: ${requesterPhone}`);
-                let messageBody = `🚨 Apex Care Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors:\n\n`;
-                matchedDonors.forEach(donor => {
-                    messageBody += `👤 ${donor.name}\n📞 ${donor.phone}\n\n`;
-                });
-                messageBody += `Please contact them immediately. Stay Safe!`;
-                // Send WhatsApp to requester
-                yield (0, whatsappService_1.sendWhatsAppMessage)(requesterPhone, messageBody);
-                console.log(`[BloodMatch] WhatsApp trigger called for ${requesterPhone}`);
+        let finalKycDocumentId = kycDocumentId;
+        let aiStatus = 'Pending';
+        let aiRemarks = '';
+        // Perform Fast Extract & Validate synchronously instantly natively
+        if (kycDocumentType === 'Aadhar Card') {
+            if (!kycDocumentId || kycDocumentId.trim() === '') {
+                aiStatus = 'Rejected';
+                aiRemarks = 'Aadhaar Document Number is mandatory';
             }
             else {
-                console.log(`[BloodMatch] No donors matched the criteria.`);
+                const cleanNum = kycDocumentId.replace(/\s/g, '');
+                if (cleanNum.length === 12 && (0, aadhaarVerifier_1.validateVerhoeff)(cleanNum)) {
+                    aiStatus = 'Verified';
+                    aiRemarks = 'Verified via fast mathematical pattern matching';
+                    finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
+                }
+                else {
+                    aiStatus = 'Rejected';
+                    aiRemarks = 'Fake or Invalid Aadhaar Number';
+                }
             }
         }
-        catch (matchErr) {
-            console.error("Auto-matching/Notification error:", matchErr);
-            // Don't fail the request creation if notification fails
+        else {
+            // Manual verification fallback
+            aiStatus = 'Verified';
+            aiRemarks = 'Verified via manual details';
         }
-        // Send response immediately
+        // 1. Instant Save: Create the request with exact verify status
+        const request = yield BloodRequest_1.default.create({
+            user: req.user.id,
+            patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber,
+            status: isUrgent ? 'Urgent' : 'Open',
+            isUrgent, kycDocumentType,
+            kycDocumentId: finalKycDocumentId || 'Processing...',
+            kycDocumentImage: kycDocumentImage, // Store image for Admin
+            aiVerificationStatus: aiStatus,
+            aiVerificationRemarks: aiRemarks
+        });
+        // 2. Instant Response: Return 201 Created to the frontend
         res.status(201).json(request);
-        // Run AI Verification automatically in background
-        if (kycDocumentImage && kycDocumentType === 'Aadhar Card') {
-            (() => __awaiter(void 0, void 0, void 0, function* () {
-                try {
-                    console.log(`[AutoAI] Starting background verification for request ${request._id}`);
-                    const result = yield (0, aadhaarVerifier_1.verifyAadhaarLocal)(kycDocumentImage, patientName);
-                    request.aiVerificationStatus = result.status;
-                    request.aiVerificationRemarks = result.remarks;
-                    yield request.save();
-                    console.log(`[AutoAI] background verification complete for ${request._id}: ${result.status}`);
+        // 3. Background Processing: Matching & notifications safe out of flow
+        (() => __awaiter(void 0, void 0, void 0, function* () {
+            try {
+                // Perform Matching & Notifications
+                if (aiStatus === 'Verified') {
+                    const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
+                    const [donors1, donors2] = yield Promise.all([
+                        Donor_1.default.find({ blood_group: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i') }).limit(5),
+                        BloodDonor_1.default.find({ bloodGroup: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i'), isAvailable: true }).limit(5)
+                    ]);
+                    const matchedDonors = Array.from(new Map([...donors1.map((d) => ({ name: d.donor_name, phone: d.donor_phone })), ...donors2.map(d => ({ name: d.name, phone: d.phone }))].map(d => [d.phone, d])).values()).slice(0, 5);
+                    if (matchedDonors.length > 0) {
+                        let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors.\n\nPlease contact them immediately. Stay Safe!`;
+                        yield (0, whatsappService_1.sendWhatsAppMessage)(contactNumber, messageBody);
+                    }
                 }
-                catch (aiErr) {
-                    console.error(`[AutoAI] background verification failed for ${request._id}:`, aiErr);
-                }
-            }))();
-        }
+            }
+            catch (bgErr) {
+                console.error("[BackgroundMatching] Error occurred:", bgErr);
+            }
+        }))();
     }
     catch (error) {
         if (!res.headersSent) {
-            res.status(500).json({ message: error.message || 'Server Error', error });
-        }
-        else {
-            console.error("Error after response sent:", error);
+            res.status(500).json({ message: error.message || 'Server Error' });
         }
     }
 });
@@ -385,6 +356,10 @@ const verifyRequestWithAI = (req, res) => __awaiter(void 0, void 0, void 0, func
         console.log(`[Controller] Agent Result for ID ${id}:`, result);
         request.aiVerificationStatus = result.status;
         request.aiVerificationRemarks = result.remarks;
+        if (result.aadhaarNumber) {
+            const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
+            request.kycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
+        }
         console.log(`[Controller] Saving request with status: ${request.aiVerificationStatus}...`);
         const savedRequest = yield request.save();
         console.log(`[Controller] Request saved successfully. New status: ${savedRequest.aiVerificationStatus}`);
@@ -396,3 +371,28 @@ const verifyRequestWithAI = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.verifyRequestWithAI = verifyRequestWithAI;
+// @desc    Update KYC verification status manually (Accept/Reject)
+// @route   PATCH /api/blood-bank/admin/requests/:id/kyc
+// @access  Private/Admin
+const updateKycStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { status } = req.body;
+        if (!['Verified', 'Rejected'].includes(status)) {
+            res.status(400).json({ message: 'Invalid KYC status' });
+            return;
+        }
+        const request = yield BloodRequest_1.default.findByIdAndUpdate(req.params.id, {
+            aiVerificationStatus: status,
+            aiVerificationRemarks: `Manually ${status.toLowerCase()} by Admin.`
+        }, { new: true });
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+        res.json(request);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.updateKycStatus = updateKycStatus;

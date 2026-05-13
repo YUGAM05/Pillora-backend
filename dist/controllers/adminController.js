@@ -12,13 +12,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
+exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
+const Hospital_1 = __importDefault(require("../models/Hospital"));
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
+const axios_1 = __importDefault(require("axios"));
+const slugify_1 = __importDefault(require("slugify"));
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
 // @access  Private/Admin
@@ -359,3 +364,118 @@ const verifyUserAadhaar = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.verifyUserAadhaar = verifyUserAadhaar;
+// @desc    Register a new hospital (Super-Admin)
+// @route   POST /api/admin/hospitals/register
+// @access  Private/Admin
+const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { name, city, email, address, consultationFee, management_type } = req.body;
+        if (!name || !city || !email || !address || !consultationFee) {
+            res.status(400).json({ message: 'Missing required fields' });
+            return;
+        }
+        const userExists = yield User_1.default.findOne({ email: email.toLowerCase() });
+        if (userExists) {
+            res.status(400).json({ message: 'User with this email already exists' });
+            return;
+        }
+        // 1. Generate Credentials
+        const tempPassword = crypto_1.default.randomBytes(8).toString('hex');
+        const salt = yield bcryptjs_1.default.genSalt(10);
+        const passwordHash = yield bcryptjs_1.default.hash(tempPassword, salt);
+        // 2. Create User account for Hospital
+        const user = yield User_1.default.create({
+            name,
+            email: email.toLowerCase(),
+            passwordHash,
+            role: 'hospital',
+            status: 'approved',
+            isPasswordResetRequired: true
+        });
+        // 3. Create Hospital entry
+        let baseSlug = (0, slugify_1.default)(name, { lower: true, strict: true, trim: true });
+        let currentSlug = baseSlug;
+        let counter = 2;
+        while (yield Hospital_1.default.findOne({ slug: currentSlug })) {
+            currentSlug = `${baseSlug}-${counter}`;
+            counter++;
+        }
+        const hospital = yield Hospital_1.default.create({
+            name,
+            slug: currentSlug,
+            city,
+            address,
+            consultationFee,
+            management_type: management_type || 'SELF',
+            user: user._id,
+            is_verified: true,
+            description: `${name} - Multi-specialty care in ${city}`,
+            rating: 4.0
+        });
+        // 4. Trigger "Welcome Kit" email via external Node.js service
+        try {
+            const mailServiceUrl = process.env.MAIL_SERVICE_URL || 'http://localhost:5001/api/send-welcome';
+            yield axios_1.default.post(mailServiceUrl, {
+                to: email,
+                hospitalName: name,
+                username: email,
+                password: tempPassword,
+                loginLink: `${process.env.FRONTEND_URL || 'https://pillora.in'}/login`
+            });
+            console.log(`Welcome email triggered for ${email}`);
+        }
+        catch (mailError) {
+            console.error('Failed to trigger welcome email:', mailError.message);
+            // We don't fail the whole registration if email fails, but we log it
+        }
+        res.status(201).json({
+            message: 'Hospital registered successfully',
+            hospitalId: hospital._id,
+            credentials: {
+                username: email,
+                temporaryPassword: tempPassword
+            }
+        });
+    }
+    catch (error) {
+        console.error('Register Hospital Error:', error);
+        res.status(500).json({ message: 'Failed to register hospital', error: error.message });
+    }
+});
+exports.registerHospital = registerHospital;
+// @desc    Get all hospitals (Admin view)
+// @route   GET /api/admin/hospitals
+// @access  Private/Admin
+const getAdminHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospitals = yield Hospital_1.default.find().populate('user', 'name email status');
+        res.json(hospitals);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching hospitals', error: error.message });
+    }
+});
+exports.getAdminHospitals = getAdminHospitals;
+// @desc    Toggle Hospital Management Mode
+// @route   PUT /api/admin/hospitals/:id/management
+// @access  Private/Admin
+const toggleHospitalManagement = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { management_type } = req.body;
+        if (!['SELF', 'PILLORA'].includes(management_type)) {
+            res.status(400).json({ message: 'Invalid management type' });
+            return;
+        }
+        const hospital = yield Hospital_1.default.findByIdAndUpdate(id, { management_type }, { new: true });
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+        res.json(hospital);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error updating management type', error: error.message });
+    }
+});
+exports.toggleHospitalManagement = toggleHospitalManagement;

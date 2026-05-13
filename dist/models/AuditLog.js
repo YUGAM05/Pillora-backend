@@ -34,31 +34,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const DoctorSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    specialization: { type: String, required: false },
-    daysAvailable: [{ type: String }],
-    timing: { type: String, required: false },
-}, { _id: false });
-const HospitalSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    slug: { type: String, unique: true, trim: true },
-    address: { type: String, required: true },
-    city: { type: String, required: true },
-    image: { type: String, required: false },
-    images: [{ type: String }],
-    isOpen24Hours: { type: Boolean, default: false },
-    consultationFee: { type: Number, required: true },
-    governmentSchemes: [{ type: String }],
-    isOnlinePaymentAvailable: { type: Boolean, default: true },
-    ambulanceContact: { type: String, required: false },
-    contactNumber: { type: String, required: false },
-    phoneNumbers: [{ type: String }],
-    description: { type: String },
-    rating: { type: Number, default: 0 },
-    doctors: [DoctorSchema],
-    management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
-    is_verified: { type: Boolean, default: false },
-    user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+const AuditLogSchema = new mongoose_1.Schema({
+    action: { type: String, required: true },
+    adminId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    email: { type: String },
+    ipAddress: { type: String, required: true },
+    details: { type: mongoose_1.Schema.Types.Mixed },
+    status: { type: String, enum: ['success', 'failed'], required: true },
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('Hospital', HospitalSchema);
+exports.default = mongoose_1.default.model('AuditLog', AuditLogSchema);

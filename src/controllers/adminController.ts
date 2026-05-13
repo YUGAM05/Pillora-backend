@@ -4,7 +4,12 @@ import BloodDonor from '../models/BloodDonor';
 import Inventory from '../models/Inventory';
 import Order from '../models/Order';
 import Notification from '../models/Notification';
+import Hospital from '../models/Hospital';
 import { verifyAadhaarLocal } from '../utils/aadhaarVerifier';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import axios from 'axios';
+import slugify from 'slugify';
 
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
@@ -368,5 +373,127 @@ export const verifyUserAadhaar = async (req: Request, res: Response): Promise<vo
         });
     } catch (error: any) {
         res.status(500).json({ message: 'Verification failed', error: error.message });
+    }
+};
+
+// @desc    Register a new hospital (Super-Admin)
+// @route   POST /api/admin/hospitals/register
+// @access  Private/Admin
+export const registerHospital = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { name, city, email, address, consultationFee, management_type } = req.body;
+
+        if (!name || !city || !email || !address || !consultationFee) {
+            res.status(400).json({ message: 'Missing required fields' });
+            return;
+        }
+
+        const userExists = await User.findOne({ email: email.toLowerCase() });
+        if (userExists) {
+            res.status(400).json({ message: 'User with this email already exists' });
+            return;
+        }
+
+        // 1. Generate Credentials
+        const tempPassword = crypto.randomBytes(8).toString('hex');
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(tempPassword, salt);
+
+        // 2. Create User account for Hospital
+        const user = await User.create({
+            name,
+            email: email.toLowerCase(),
+            passwordHash,
+            role: 'hospital',
+            status: 'approved',
+            isPasswordResetRequired: true
+        });
+
+        // 3. Create Hospital entry
+        let baseSlug = slugify(name, { lower: true, strict: true, trim: true });
+        let currentSlug = baseSlug;
+        let counter = 2;
+        while (await Hospital.findOne({ slug: currentSlug })) {
+            currentSlug = `${baseSlug}-${counter}`;
+            counter++;
+        }
+
+        const hospital = await Hospital.create({
+            name,
+            slug: currentSlug,
+            city,
+            address,
+            consultationFee,
+            management_type: management_type || 'SELF',
+            user: user._id,
+            is_verified: true,
+            description: `${name} - Multi-specialty care in ${city}`,
+            rating: 4.0
+        });
+
+        // 4. Trigger "Welcome Kit" email via external Node.js service
+        try {
+            const mailServiceUrl = process.env.MAIL_SERVICE_URL || 'http://localhost:5001/api/send-welcome';
+            await axios.post(mailServiceUrl, {
+                to: email,
+                hospitalName: name,
+                username: email,
+                password: tempPassword,
+                loginLink: `${process.env.FRONTEND_URL || 'https://pillora.in'}/login`
+            });
+            console.log(`Welcome email triggered for ${email}`);
+        } catch (mailError: any) {
+            console.error('Failed to trigger welcome email:', mailError.message);
+            // We don't fail the whole registration if email fails, but we log it
+        }
+
+        res.status(201).json({
+            message: 'Hospital registered successfully',
+            hospitalId: hospital._id,
+            credentials: {
+                username: email,
+                temporaryPassword: tempPassword
+            }
+        });
+    } catch (error: any) {
+        console.error('Register Hospital Error:', error);
+        res.status(500).json({ message: 'Failed to register hospital', error: error.message });
+    }
+};
+
+// @desc    Get all hospitals (Admin view)
+// @route   GET /api/admin/hospitals
+// @access  Private/Admin
+export const getAdminHospitals = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const hospitals = await Hospital.find().populate('user', 'name email status');
+        res.json(hospitals);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching hospitals', error: error.message });
+    }
+};
+
+// @desc    Toggle Hospital Management Mode
+// @route   PUT /api/admin/hospitals/:id/management
+// @access  Private/Admin
+export const toggleHospitalManagement = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const { management_type } = req.body;
+
+        if (!['SELF', 'PILLORA'].includes(management_type)) {
+            res.status(400).json({ message: 'Invalid management type' });
+            return;
+        }
+
+        const hospital = await Hospital.findByIdAndUpdate(id, { management_type }, { new: true });
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+
+        res.json(hospital);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating management type', error: error.message });
     }
 };

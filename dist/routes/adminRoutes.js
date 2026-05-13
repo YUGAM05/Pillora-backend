@@ -17,6 +17,10 @@ router.put('/users/:id/status', authMiddleware_1.protect, authMiddleware_1.admin
 router.post('/users/:id/verify-aadhaar', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.verifyUserAadhaar);
 router.get('/users/:id/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUserOrders);
 router.get('/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAllOrders); // NEW: Get all system orders
+// Hospital Management
+router.post('/hospitals/register', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.registerHospital);
+router.get('/hospitals', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitals);
+router.put('/hospitals/:id/management', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.toggleHospitalManagement);
 // Product Management
 router.get('/inventory', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminProducts);
 router.put('/inventory/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.updateProductStatus);

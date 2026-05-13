@@ -24,6 +24,9 @@ export interface IHospital extends Document {
     description: string;
     rating: number;
     doctors?: IDoctor[];
+    management_type: 'SELF' | 'PILLORA';
+    is_verified: boolean;
+    user?: mongoose.Types.ObjectId;
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -50,6 +53,9 @@ const HospitalSchema: Schema = new Schema({
     description: { type: String },
     rating: { type: Number, default: 0 },
     doctors: [DoctorSchema],
+    management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
+    is_verified: { type: Boolean, default: false },
+    user: { type: Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
 export default mongoose.model<IHospital>('Hospital', HospitalSchema);

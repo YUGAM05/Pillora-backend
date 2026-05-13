@@ -2,8 +2,10 @@ import express from 'express';
 import {
     registerUser, loginUser, sendOtp, verifyOtp,
     setupMfa, verifyMfa, setupAdmin,
-    refreshToken, validateSession, logoutAdmin, emergencyLockdown
+    refreshToken, validateSession, logoutAdmin, emergencyLockdown,
+    changePassword
 } from '../controllers/authController';
+import { protect } from '../middleware/authMiddleware';
 import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
@@ -40,6 +42,7 @@ router.post('/emergency-lockdown', requireAdminAuth, emergencyLockdown);
 
 // ── Setup (remove in production) ─────────────────────────────────────────────
 router.get('/setup-admin', setupAdmin);
+router.post('/change-password', protect, changePassword);
 
 // ─────────────────────────────────────────────
 // Google OAuth – User Panel
