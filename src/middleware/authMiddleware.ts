@@ -17,14 +17,12 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             
             const secret = process.env.JWT_SECRET;
             if (!secret) {
-                console.error('[AuthMiddleware] ERROR: JWT_SECRET is not defined in environment variables!');
+                console.error('[AuthMiddleware] WARNING: JWT_SECRET env var not set! Using fallback key.');
             }
 
+            // IMPORTANT: This fallback MUST match the same fallback used in authController generateToken
+            const secretToUse = secret || 'pillora_jwt_secret_fallback_2024';
 
-            // Fallback for development if secret is missing
-            const secretToUse = secret || 'defaultSecret';
-
-            
             if (token === 'null' || token === 'undefined' || !token) {
                 console.error('[AuthMiddleware] Rejected: Token is literal "null", "undefined" or empty');
                 res.status(401).json({ message: 'Not authorized, invalid token format' });

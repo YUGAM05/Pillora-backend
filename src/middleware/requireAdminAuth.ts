@@ -21,7 +21,8 @@ export const requireAdminAuth = async (req: Request, res: Response, next: NextFu
         // 2. Verify JWT signature and decode
         let decoded: any;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+            decoded = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+
         } catch (err: any) {
             if (err.name === 'TokenExpiredError') {
                 res.status(401).json({ message: 'Token expired', code: 'TOKEN_EXPIRED' });

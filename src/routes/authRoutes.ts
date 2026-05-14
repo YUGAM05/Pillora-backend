@@ -69,7 +69,8 @@ router.get('/google/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'defaultSecret',
+                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+
                 { expiresIn: '30d' }
             );
 
@@ -127,7 +128,8 @@ router.get('/google/seller/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'defaultSecret',
+                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+
                 { expiresIn: '30d' }
             );
 
@@ -185,7 +187,8 @@ router.get('/google/delivery/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'defaultSecret',
+                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+
                 { expiresIn: '30d' }
             );
 

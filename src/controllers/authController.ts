@@ -12,7 +12,8 @@ import AuditLog from '../models/AuditLog';
 const generateToken = (id: string, role: string, sessionId?: string) => {
     const payload: any = { id: id.toString(), role };
     if (sessionId) payload.sessionId = sessionId;
-    return jwt.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
+    return jwt.sign(payload, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', {
+
         expiresIn: '30d', // Increased to 30 days for better UX
     });
 };
@@ -436,7 +437,8 @@ export const validateSession = async (req: Request, res: Response): Promise<void
     }
 
     try {
-        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+
 
         if (decoded.role !== 'admin') {
             res.status(403).json({ authenticated: false, reason: 'not_admin' });
@@ -471,7 +473,8 @@ export const logoutAdmin = async (req: Request, res: Response): Promise<void> =>
 
     try {
         if (token) {
-            const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+            const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+
             if (decoded.sessionId) {
                 await Session.findOneAndUpdate(
                     { sessionId: decoded.sessionId },
