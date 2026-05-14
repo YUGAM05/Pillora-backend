@@ -12,19 +12,44 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
             token = req.headers.authorization.split(' ')[1];
-            const secret = process.env.JWT_SECRET || 'defaultSecret';
-            if (secret === 'defaultSecret') {
-                console.warn('[AuthMiddleware] CRITICAL: Using defaultSecret fallback. Tokens signed with a real secret will fail.');
+            const secret = process.env.JWT_SECRET;
+            
+            if (!secret) {
+                console.error('[AuthMiddleware] ERROR: JWT_SECRET is not defined in environment variables!');
             }
-            const decoded: any = jwt.verify(token, secret);
+
+            // Fallback for development if secret is missing
+            const secretToUse = secret || 'defaultSecret';
+            
+            if (token === 'null' || token === 'undefined' || !token) {
+                console.error('[AuthMiddleware] Rejected: Token is literal "null", "undefined" or empty');
+                res.status(401).json({ message: 'Not authorized, invalid token format' });
+                return;
+            }
+
+            const decoded: any = jwt.verify(token, secretToUse);
 
             // Fetch user from DB to check status
             // Support both 'id' (new standard) and 'userId' (legacy) token payloads
             const userId = decoded.id || decoded.userId;
+            
+            if (!userId) {
+                console.error('[AuthMiddleware] Decoded token missing id/userId');
+                res.status(401).json({ message: 'Not authorized, malformed token payload' });
+                return;
+            }
+
             req.user = await User.findById(userId).select('-passwordHash');
 
             if (!req.user) {
+                console.error(`[AuthMiddleware] User not found for ID: ${userId}`);
                 res.status(401).json({ message: 'Not authorized, user not found' });
+                return;
+            }
+
+            // Check if user is approved
+            if (req.user.status !== 'approved' && req.user.role !== 'admin') {
+                res.status(403).json({ message: `Account ${req.user.status}. Please contact support.` });
                 return;
             }
 
@@ -34,6 +59,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
                 return;
             }
 
+            // Check for password reset requirement
             if (req.user.isPasswordResetRequired && req.path !== '/change-password' && req.path !== '/logout') {
                 res.status(403).json({ 
                     message: 'Password reset required before continuing', 
@@ -45,8 +71,8 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             next();
         } catch (error: any) {
             console.error('[AuthMiddleware] Token Verification Failed:', error.name, '-', error.message);
-            console.error('[AuthMiddleware] Token being verified:', token?.substring(0, 10) + '...');
-            console.error('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
+            console.error('[AuthMiddleware] Token being verified (start):', token?.substring(0, 15) + '...');
+            console.error('[AuthMiddleware] JWT_SECRET present in process.env:', !!process.env.JWT_SECRET);
             
             res.status(401).json({ 
                 message: 'Not authorized, token failed',
@@ -55,6 +81,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             });
             return;
         }
+
     }
 
     if (!token) {
