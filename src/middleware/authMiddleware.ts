@@ -34,9 +34,15 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             }
 
             next();
-        } catch (error) {
-            console.error('[AuthMiddleware] Token Verification Failed:', error);
-            res.status(401).json({ message: 'Not authorized, token failed' });
+        } catch (error: any) {
+            console.error('[AuthMiddleware] Token Verification Failed:', error.message);
+            console.error('[AuthMiddleware] Token being verified:', token?.substring(0, 10) + '...');
+            console.error('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
+            
+            res.status(401).json({ 
+                message: 'Not authorized, token failed',
+                details: error.message === 'jwt expired' ? 'session_expired' : 'invalid_token'
+            });
             return;
         }
     }

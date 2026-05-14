@@ -40,8 +40,13 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
             next();
         }
         catch (error) {
-            console.error('[AuthMiddleware] Token Verification Failed:', error);
-            res.status(401).json({ message: 'Not authorized, token failed' });
+            console.error('[AuthMiddleware] Token Verification Failed:', error.message);
+            console.error('[AuthMiddleware] Token being verified:', (token === null || token === void 0 ? void 0 : token.substring(0, 10)) + '...');
+            console.error('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
+            res.status(401).json({
+                message: 'Not authorized, token failed',
+                details: error.message === 'jwt expired' ? 'session_expired' : 'invalid_token'
+            });
             return;
         }
     }
