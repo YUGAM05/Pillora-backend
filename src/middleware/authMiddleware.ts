@@ -12,10 +12,11 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
             token = req.headers.authorization.split(' ')[1];
-            if (!process.env.JWT_SECRET) {
-                console.warn('[AuthMiddleware] WARNING: JWT_SECRET is not defined in environment variables! Using defaultSecret fallback.');
+            const secret = process.env.JWT_SECRET || 'defaultSecret';
+            if (secret === 'defaultSecret') {
+                console.warn('[AuthMiddleware] CRITICAL: Using defaultSecret fallback. Tokens signed with a real secret will fail.');
             }
-            const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+            const decoded: any = jwt.verify(token, secret);
 
             // Fetch user from DB to check status
             // Support both 'id' (new standard) and 'userId' (legacy) token payloads
@@ -43,13 +44,14 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 
             next();
         } catch (error: any) {
-            console.error('[AuthMiddleware] Token Verification Failed:', error.message);
+            console.error('[AuthMiddleware] Token Verification Failed:', error.name, '-', error.message);
             console.error('[AuthMiddleware] Token being verified:', token?.substring(0, 10) + '...');
             console.error('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
             
             res.status(401).json({ 
                 message: 'Not authorized, token failed',
-                details: error.message === 'jwt expired' ? 'session_expired' : 'invalid_token'
+                details: error.name === 'TokenExpiredError' ? 'session_expired' : 'invalid_token',
+                error: error.message
             });
             return;
         }
