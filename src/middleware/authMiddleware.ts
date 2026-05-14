@@ -11,15 +11,19 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
-            token = req.headers.authorization.split(' ')[1];
-            const secret = process.env.JWT_SECRET;
+            // Split by one or more whitespace characters
+            const parts = req.headers.authorization.split(/\s+/);
+            token = parts[1];
             
+            const secret = process.env.JWT_SECRET;
             if (!secret) {
                 console.error('[AuthMiddleware] ERROR: JWT_SECRET is not defined in environment variables!');
             }
 
+
             // Fallback for development if secret is missing
             const secretToUse = secret || 'defaultSecret';
+
             
             if (token === 'null' || token === 'undefined' || !token) {
                 console.error('[AuthMiddleware] Rejected: Token is literal "null", "undefined" or empty');
@@ -28,6 +32,8 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             }
 
             const decoded: any = jwt.verify(token, secretToUse);
+            console.log(`[AuthMiddleware] Decoded Token: UserID=${decoded.id || decoded.userId}, Role=${decoded.role}`);
+
 
             // Fetch user from DB to check status
             // Support both 'id' (new standard) and 'userId' (legacy) token payloads
