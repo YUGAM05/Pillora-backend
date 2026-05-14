@@ -381,7 +381,22 @@ export const verifyUserAadhaar = async (req: Request, res: Response): Promise<vo
 // @access  Private/Admin
 export const registerHospital = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { name, city, email, address, consultationFee, management_type } = req.body;
+        const { 
+            name, 
+            city, 
+            email, 
+            address, 
+            consultationFee, 
+            management_type,
+            image,
+            images,
+            ambulanceContact,
+            phoneNumbers,
+            description,
+            isOpen24Hours,
+            isOnlinePaymentAvailable,
+            doctors
+        } = req.body;
 
         if (!name || !city || !email || !address || !consultationFee) {
             res.status(400).json({ message: 'Missing required fields' });
@@ -423,11 +438,18 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             slug: currentSlug,
             city,
             address,
-            consultationFee,
+            consultationFee: Number(consultationFee),
             management_type: management_type || 'SELF',
             user: user._id,
             is_verified: true,
-            description: `${name} - Multi-specialty care in ${city}`,
+            image: image || "",
+            images: Array.isArray(images) ? images : [],
+            ambulanceContact: ambulanceContact || "",
+            phoneNumbers: Array.isArray(phoneNumbers) ? phoneNumbers : [],
+            description: description || `${name} - Multi-specialty care in ${city}`,
+            isOpen24Hours: Boolean(isOpen24Hours),
+            isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
+            doctors: Array.isArray(doctors) ? doctors : [],
             rating: 4.0
         });
 
