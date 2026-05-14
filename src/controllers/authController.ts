@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import Session from '../models/Session';
 import axios from 'axios';
-const { authenticator } = require('otplib');
+import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
 
@@ -177,10 +177,10 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
 
                 // If MFA is NOT set up → force MFA setup
                 if (!user.mfaSecret) {
-                    const secret = authenticator.generateSecret();
+                    const secret = generateSecret();
                     user.mfaSecret = secret;
                     await user.save();
-                    const otpauthUrl = authenticator.keyuri(user.email, 'Pillora Admin', secret);
+                    const otpauthUrl = generateURI({ secret, label: user.email, issuer: 'Pillora Admin' });
                     const qrCode = await QRCode.toDataURL(otpauthUrl);
 
                     res.json({
@@ -250,7 +250,7 @@ export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const isValid = authenticator.verify({ token: mfaCode, secret: user.mfaSecret });
+        const { valid: isValid } = verifySync({ token: mfaCode, secret: user.mfaSecret });
 
         if (!isValid) {
             await AuditLog.create({
@@ -318,11 +318,11 @@ export const setupMfa = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const secret = authenticator.generateSecret();
+        const secret = generateSecret();
         user.mfaSecret = secret;
         await user.save();
 
-        const otpauthUrl = authenticator.keyuri(user.email, 'Pillora Admin', secret);
+        const otpauthUrl = generateURI({ secret, label: user.email, issuer: 'Pillora Admin' });
         const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
 
         res.json({ secret, qrCode: qrCodeDataUrl });
