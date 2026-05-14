@@ -12,6 +12,9 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
             token = req.headers.authorization.split(' ')[1];
+            if (!process.env.JWT_SECRET) {
+                console.warn('[AuthMiddleware] WARNING: JWT_SECRET is not defined in environment variables! Using defaultSecret fallback.');
+            }
             const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'defaultSecret');
 
             // Fetch user from DB to check status
@@ -32,7 +35,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 
             next();
         } catch (error) {
-            console.error(error);
+            console.error('[AuthMiddleware] Token Verification Failed:', error);
             res.status(401).json({ message: 'Not authorized, token failed' });
             return;
         }

@@ -13,7 +13,7 @@ const generateToken = (id: string, role: string, sessionId?: string) => {
     const payload: any = { id, role };
     if (sessionId) payload.sessionId = sessionId;
     return jwt.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
-        expiresIn: '30m',
+        expiresIn: '8h',
     });
 };
 
