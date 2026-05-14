@@ -23,11 +23,11 @@ const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
-    const payload = { id, role };
+    const payload = { id: id.toString(), role };
     if (sessionId)
         payload.sessionId = sessionId;
     return jsonwebtoken_1.default.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
-        expiresIn: '8h',
+        expiresIn: '30d', // Increased to 30 days for better UX
     });
 };
 // ─── Helper: get IP and User-Agent ──────────────────────────────────────────

@@ -68,8 +68,8 @@ router.get('/google/callback',
             }
 
             const token = jwt.sign(
-                { id: user._id, role: user.role },
-                process.env.JWT_SECRET!,
+                { id: user._id.toString(), role: user.role },
+                process.env.JWT_SECRET || 'defaultSecret',
                 { expiresIn: '30d' }
             );
 
@@ -126,8 +126,8 @@ router.get('/google/seller/callback',
             }
 
             const token = jwt.sign(
-                { id: user._id, role: user.role },
-                process.env.JWT_SECRET!,
+                { id: user._id.toString(), role: user.role },
+                process.env.JWT_SECRET || 'defaultSecret',
                 { expiresIn: '30d' }
             );
 
@@ -184,8 +184,8 @@ router.get('/google/delivery/callback',
             }
 
             const token = jwt.sign(
-                { id: user._id, role: user.role },
-                process.env.JWT_SECRET!,
+                { id: user._id.toString(), role: user.role },
+                process.env.JWT_SECRET || 'defaultSecret',
                 { expiresIn: '30d' }
             );
 

@@ -10,10 +10,10 @@ import AuditLog from '../models/AuditLog';
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
-    const payload: any = { id, role };
+    const payload: any = { id: id.toString(), role };
     if (sessionId) payload.sessionId = sessionId;
     return jwt.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
-        expiresIn: '8h',
+        expiresIn: '30d', // Increased to 30 days for better UX
     });
 };
 
