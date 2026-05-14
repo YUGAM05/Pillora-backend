@@ -37,6 +37,13 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
                 res.status(403).json({ message: 'Seller account pending approval' });
                 return;
             }
+            if (req.user.isPasswordResetRequired && req.path !== '/change-password' && req.path !== '/logout') {
+                res.status(403).json({
+                    message: 'Password reset required before continuing',
+                    code: 'PASSWORD_RESET_REQUIRED'
+                });
+                return;
+            }
             next();
         }
         catch (error) {

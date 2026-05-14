@@ -195,9 +195,15 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
         const { doctorId, hospitalId, slotId, slotTime } = req.body;
         const patientId = req.user?.id;
 
-        const slot = await Slot.findById(slotId);
-        if (!slot || slot.status !== 'available') {
-            res.status(400).json({ message: 'Slot is no longer available' });
+        // Atomic check and update of slot status to prevent race conditions
+        const slot = await Slot.findOneAndUpdate(
+            { _id: slotId, status: 'available' },
+            { status: 'booked' },
+            { new: true }
+        );
+
+        if (!slot) {
+            res.status(400).json({ message: 'Slot is no longer available or already booked' });
             return;
         }
 
@@ -210,8 +216,7 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
             status: 'pending'
         });
 
-        // Update slot
-        slot.status = 'booked';
+        // Link appointment back to slot
         slot.appointment = appointment._id as mongoose.Types.ObjectId;
         await slot.save();
 

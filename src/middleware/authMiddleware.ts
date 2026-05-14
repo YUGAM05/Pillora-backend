@@ -33,6 +33,14 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
                 return;
             }
 
+            if (req.user.isPasswordResetRequired && req.path !== '/change-password' && req.path !== '/logout') {
+                res.status(403).json({ 
+                    message: 'Password reset required before continuing', 
+                    code: 'PASSWORD_RESET_REQUIRED' 
+                });
+                return;
+            }
+
             next();
         } catch (error: any) {
             console.error('[AuthMiddleware] Token Verification Failed:', error.message);

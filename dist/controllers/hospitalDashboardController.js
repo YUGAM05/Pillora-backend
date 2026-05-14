@@ -187,9 +187,10 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
     try {
         const { doctorId, hospitalId, slotId, slotTime } = req.body;
         const patientId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
-        const slot = yield Slot_1.default.findById(slotId);
-        if (!slot || slot.status !== 'available') {
-            res.status(400).json({ message: 'Slot is no longer available' });
+        // Atomic check and update of slot status to prevent race conditions
+        const slot = yield Slot_1.default.findOneAndUpdate({ _id: slotId, status: 'available' }, { status: 'booked' }, { new: true });
+        if (!slot) {
+            res.status(400).json({ message: 'Slot is no longer available or already booked' });
             return;
         }
         const appointment = yield Appointment_1.default.create({
@@ -200,8 +201,7 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             slotTime: new Date(slotTime),
             status: 'pending'
         });
-        // Update slot
-        slot.status = 'booked';
+        // Link appointment back to slot
         slot.appointment = appointment._id;
         yield slot.save();
         res.status(201).json({ message: 'Appointment booked successfully', appointment });

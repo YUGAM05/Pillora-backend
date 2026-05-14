@@ -6,7 +6,7 @@ export interface IAppointment extends Document {
     hospital: mongoose.Types.ObjectId;
     slot: mongoose.Types.ObjectId;
     slotTime: Date;
-    status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
+    status: 'pending' | 'confirmed' | 'checked-in' | 'in-consultation' | 'completed' | 'cancelled';
     paymentStatus: 'pending' | 'paid' | 'failed';
     bookingDate: Date;
     notes?: string;
@@ -20,7 +20,7 @@ const AppointmentSchema: Schema = new Schema({
     slotTime: { type: Date, required: true },
     status: { 
         type: String, 
-        enum: ['pending', 'confirmed', 'cancelled', 'completed'], 
+        enum: ['pending', 'confirmed', 'checked-in', 'in-consultation', 'completed', 'cancelled'], 
         default: 'pending' 
     },
     paymentStatus: { 
