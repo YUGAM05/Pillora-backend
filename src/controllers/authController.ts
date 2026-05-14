@@ -135,13 +135,51 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 //  LOGIN — with session creation + MFA enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
 export const loginUser = async (req: Request, res: Response): Promise<void> => {
-    const { email, password } = req.body;
+    const { email, password, googleToken, name, profilePicture } = req.body;
     const { ip, ua } = getClientInfo(req);
-    console.log(`[LoginRequest] Attempt for: ${email} from IP: ${ip}`);
+    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
 
     try {
-        const user = await User.findOne({ email: email.toLowerCase() });
+        let user = await User.findOne({ email: email.toLowerCase() });
 
+        // ── Google Login Flow ───────────────────────────────────────────────
+        if (googleToken) {
+            if (!user) {
+                // Create new user if they don't exist
+                user = await User.create({
+                    name: name || email.split('@')[0],
+                    email: email.toLowerCase(),
+                    profilePicture: profilePicture,
+                    role: 'customer',
+                    status: 'approved',
+                }) as any;
+                console.log(`[GoogleLogin] Created new user: ${email}`);
+            } else {
+                // Update existing user if they don't have profile info
+                let updated = false;
+                if (!user.profilePicture && profilePicture) {
+                    user.profilePicture = profilePicture;
+                    updated = true;
+                }
+                if (updated) await user.save();
+                console.log(`[GoogleLogin] Existing user logged in: ${email}`);
+            }
+
+            res.json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status,
+                phone: user.phone,
+                address: user.address,
+                location: user.location,
+                token: generateToken(user._id as unknown as string, user.role),
+            });
+            return;
+        }
+
+        // ── Regular Password Login Flow ──────────────────────────────────────
         if (user && user.passwordHash && (await bcrypt.compare(password, user.passwordHash))) {
             console.log(`Login for ${email}: Role=${user.role}, Status=${user.status}`);
 
