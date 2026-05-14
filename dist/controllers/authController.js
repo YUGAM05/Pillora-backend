@@ -18,7 +18,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Session_1 = __importDefault(require("../models/Session"));
 const axios_1 = __importDefault(require("axios"));
-const { authenticator } = require('otplib');
+const otplib_1 = require("otplib");
 const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
@@ -27,7 +27,7 @@ const generateToken = (id, role, sessionId) => {
     if (sessionId)
         payload.sessionId = sessionId;
     return jsonwebtoken_1.default.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
-        expiresIn: '30m',
+        expiresIn: '8h',
     });
 };
 // ─── Helper: get IP and User-Agent ──────────────────────────────────────────
@@ -143,11 +143,55 @@ exports.registerUser = registerUser;
 //  LOGIN — with session creation + MFA enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
 const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { email, password } = req.body;
+    const { email, password, googleToken, name, profilePicture } = req.body;
     const { ip, ua } = getClientInfo(req);
-    console.log(`[LoginRequest] Attempt for: ${email} from IP: ${ip}`);
+    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
     try {
-        const user = yield User_1.default.findOne({ email: email.toLowerCase() });
+        const userEmail = email === null || email === void 0 ? void 0 : email.toLowerCase();
+        let user = userEmail ? yield User_1.default.findOne({ email: userEmail }) : null;
+        // ── Google Login Flow ───────────────────────────────────────────────
+        if (googleToken) {
+            if (!userEmail) {
+                res.status(400).json({ message: 'Email is required for Google login' });
+                return;
+            }
+            if (!user) {
+                // Create new user if they don't exist
+                user = (yield User_1.default.create({
+                    name: name || userEmail.split('@')[0],
+                    email: userEmail,
+                    profilePicture: profilePicture,
+                    role: 'customer',
+                    status: 'approved',
+                }));
+                console.log(`[GoogleLogin] Created new user: ${userEmail}`);
+            }
+            else {
+                // Update existing user if they don't have profile info
+                let updated = false;
+                if (!user.profilePicture && profilePicture) {
+                    user.profilePicture = profilePicture;
+                    updated = true;
+                }
+                if (updated)
+                    yield user.save();
+                console.log(`[GoogleLogin] Existing user logged in: ${userEmail}`);
+            }
+            res.json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status,
+                phone: user.phone,
+                address: user.address,
+                location: user.location,
+                isPasswordResetRequired: user.isPasswordResetRequired,
+                token: generateToken(user._id, user.role),
+            });
+            return;
+        }
+        // ── Regular Password Login Flow ──────────────────────────────────────
         if (user && user.passwordHash && (yield bcryptjs_1.default.compare(password, user.passwordHash))) {
             console.log(`Login for ${email}: Role=${user.role}, Status=${user.status}`);
             // Block rejected non-admin users
@@ -179,10 +223,10 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 }
                 // If MFA is NOT set up → force MFA setup
                 if (!user.mfaSecret) {
-                    const secret = authenticator.generateSecret();
+                    const secret = (0, otplib_1.generateSecret)();
                     user.mfaSecret = secret;
                     yield user.save();
-                    const otpauthUrl = authenticator.keyuri(user.email, 'Pillora Admin', secret);
+                    const otpauthUrl = (0, otplib_1.generateURI)({ secret, label: user.email, issuer: 'Pillora Admin' });
                     const qrCode = yield qrcode_1.default.toDataURL(otpauthUrl);
                     res.json({
                         mfaSetupRequired: true,
@@ -248,7 +292,7 @@ const verifyMfa = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.status(400).json({ message: 'MFA not configured for this user' });
             return;
         }
-        const isValid = authenticator.verify({ token: mfaCode, secret: user.mfaSecret });
+        const { valid: isValid } = (0, otplib_1.verifySync)({ token: mfaCode, secret: user.mfaSecret });
         if (!isValid) {
             yield AuditLog_1.default.create({
                 action: 'mfa_failed',
@@ -306,10 +350,10 @@ const setupMfa = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.status(404).json({ message: 'User not found' });
             return;
         }
-        const secret = authenticator.generateSecret();
+        const secret = (0, otplib_1.generateSecret)();
         user.mfaSecret = secret;
         yield user.save();
-        const otpauthUrl = authenticator.keyuri(user.email, 'Pillora Admin', secret);
+        const otpauthUrl = (0, otplib_1.generateURI)({ secret, label: user.email, issuer: 'Pillora Admin' });
         const qrCodeDataUrl = yield qrcode_1.default.toDataURL(otpauthUrl);
         res.json({ secret, qrCode: qrCodeDataUrl });
     }

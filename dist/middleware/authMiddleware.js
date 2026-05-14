@@ -20,6 +20,9 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
             token = req.headers.authorization.split(' ')[1];
+            if (!process.env.JWT_SECRET) {
+                console.warn('[AuthMiddleware] WARNING: JWT_SECRET is not defined in environment variables! Using defaultSecret fallback.');
+            }
             const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'defaultSecret');
             // Fetch user from DB to check status
             // Support both 'id' (new standard) and 'userId' (legacy) token payloads
@@ -37,7 +40,7 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
             next();
         }
         catch (error) {
-            console.error(error);
+            console.error('[AuthMiddleware] Token Verification Failed:', error);
             res.status(401).json({ message: 'Not authorized, token failed' });
             return;
         }

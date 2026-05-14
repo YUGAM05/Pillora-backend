@@ -140,20 +140,26 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
 
     try {
-        let user = await User.findOne({ email: email.toLowerCase() });
+        const userEmail = email?.toLowerCase();
+        let user = userEmail ? await User.findOne({ email: userEmail }) : null;
 
         // ── Google Login Flow ───────────────────────────────────────────────
         if (googleToken) {
+            if (!userEmail) {
+                res.status(400).json({ message: 'Email is required for Google login' });
+                return;
+            }
+
             if (!user) {
                 // Create new user if they don't exist
                 user = await User.create({
-                    name: name || email.split('@')[0],
-                    email: email.toLowerCase(),
+                    name: name || userEmail.split('@')[0],
+                    email: userEmail,
                     profilePicture: profilePicture,
                     role: 'customer',
                     status: 'approved',
                 }) as any;
-                console.log(`[GoogleLogin] Created new user: ${email}`);
+                console.log(`[GoogleLogin] Created new user: ${userEmail}`);
             } else {
                 // Update existing user if they don't have profile info
                 let updated = false;
@@ -162,7 +168,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                     updated = true;
                 }
                 if (updated) await user.save();
-                console.log(`[GoogleLogin] Existing user logged in: ${email}`);
+                console.log(`[GoogleLogin] Existing user logged in: ${userEmail}`);
             }
 
             res.json({
@@ -174,6 +180,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 phone: user.phone,
                 address: user.address,
                 location: user.location,
+                isPasswordResetRequired: user.isPasswordResetRequired,
                 token: generateToken(user._id as unknown as string, user.role),
             });
             return;
