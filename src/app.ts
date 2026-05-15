@@ -63,7 +63,7 @@ app.use((req, res, next) => {
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
@@ -115,6 +115,7 @@ import medicineRoutes from './routes/medicineRoutes';
 import uploadRoutes from './routes/uploadRoutes';
 import partnerRoutes from './routes/partnerRoutes';
 import hospitalDashboardRoutes from './routes/hospitalDashboardRoutes';
+import analyticsRoutes from './routes/analyticsRoutes';
 
 app.use(async (req, res, next) => {
     if (mongoose.connection.readyState === 0) {
@@ -143,6 +144,7 @@ app.use('/api/medicines', medicineRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/partners', partnerRoutes);
 app.use('/api/hospital/dashboard', hospitalDashboardRoutes);
+app.use('/api/metrics', analyticsRoutes);
 
 app.get('/', (req, res) => {
     res.status(200).json({
