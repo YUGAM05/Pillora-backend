@@ -414,7 +414,7 @@ export const deleteRequest = async (req: Request, res: Response): Promise<void> 
         const request = await BloodRequest.findByIdAndDelete(id);
 
         if (!request) {
-            res.status(404).json({ message: 'Request not found' });
+            res.status(404).json({ message: 'Request document not found in database (404)' });
             return;
         }
 
