@@ -12,7 +12,7 @@ const seedAdmin = async () => {
         await mongoose.connect(uri);
         console.log('Connected! Creating Admin...');
 
-        const email = 'admin@life-link.com';
+        const email = 'admin@pillora.in';
         const password = 'admin';
 
         const salt = await bcrypt.genSalt(10);
@@ -24,7 +24,8 @@ const seedAdmin = async () => {
                 name: 'Super Admin',
                 email,
                 passwordHash,
-                role: 'admin'
+                role: 'admin',
+                status: 'approved'
             },
             { upsert: true, new: true }
         );
