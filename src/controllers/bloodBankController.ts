@@ -400,6 +400,22 @@ export const deleteDonor = async (req: Request, res: Response): Promise<void> =>
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
     }
+// @desc    Delete a request
+// @route   DELETE /api/blood-bank/admin/requests/:id
+// @access  Private/Admin
+export const deleteRequest = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const request = await BloodRequest.findByIdAndDelete(req.params.id);
+
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+
+        res.json({ message: 'Request removed successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
 };
 
 // @desc    Verify blood request KYC with Local AI Agent

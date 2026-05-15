@@ -11,7 +11,7 @@ export interface IBloodRequest extends Document {
     city: string;
     contactNumber: string;
     reason?: string;
-    status: 'Open' | 'Fulfilled' | 'Urgent' | 'Closed';
+    status: 'Open' | 'Fulfilled' | 'Urgent' | 'Closed' | 'Fake';
     isUrgent: boolean;
     kycDocumentType: 'Aadhar Card' | 'PAN Card' | 'Driving License';
     kycDocumentId?: string;
@@ -37,7 +37,7 @@ const BloodRequestSchema: Schema = new Schema({
     reason: { type: String },
     status: {
         type: String,
-        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed'],
+        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed', 'Fake'],
         default: 'Open'
     },
     isUrgent: { type: Boolean, default: false },
