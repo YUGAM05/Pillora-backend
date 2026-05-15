@@ -277,10 +277,54 @@ export const getRequests = async (req: Request, res: Response): Promise<void> =>
 // @desc    Get all donors (Admin)
 // @route   GET /api/blood-bank/admin/donors
 // @access  Private/Admin
+// @desc    Get all donors for admin
+// @route   GET /api/blood-bank/admin/donors
+// @access  Private/Admin
 export const getAllDonors = async (req: Request, res: Response): Promise<void> => {
     try {
-        const donors = await BloodDonor.find({}).sort({ createdAt: -1 }).populate('user', 'name email');
-        res.json(donors);
+        const [donors1, donors2] = await Promise.all([
+            BloodDonor.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
+            Donor.find({}).sort({ createdAt: -1 })
+        ]);
+
+        // Standardize the format for the admin table
+        const combinedDonors = [
+            ...donors1.map(d => ({
+                _id: d._id,
+                name: d.name,
+                email: d.email,
+                bloodGroup: d.bloodGroup,
+                age: d.age,
+                gender: d.gender,
+                phone: d.phone,
+                city: d.city,
+                area: d.area,
+                address: d.address,
+                isAvailable: d.isAvailable,
+                source: d.source || 'user_panel',
+                createdAt: d.createdAt
+            })),
+            ...donors2.map((d: any) => ({
+                _id: d._id,
+                name: d.donor_name,
+                email: 'N/A',
+                bloodGroup: d.blood_group,
+                age: 25, // Default for legacy data
+                gender: 'Other',
+                phone: d.donor_phone,
+                city: d.city,
+                area: d.area,
+                address: 'Imported Record',
+                isAvailable: true,
+                source: 'imported',
+                createdAt: d.createdAt
+            }))
+        ];
+
+        // Sort combined list by date
+        combinedDonors.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        res.json(combinedDonors);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
     }
