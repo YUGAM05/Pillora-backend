@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import Analytics from '../models/Analytics';
-import UAParser from 'ua-parser-js';
+import { UAParser } from 'ua-parser-js';
 import crypto from 'crypto';
 
 export const trackEvent = async (req: Request, res: Response) => {
@@ -12,7 +12,9 @@ export const trackEvent = async (req: Request, res: Response) => {
         const parser = new UAParser(ua);
         const result = parser.getResult();
         
-        const ip = (req.headers['x-forwarded-for'] as string || req.ip || '0.0.0.0').split(',')[0].trim();
+        // Robust IP detection
+        const forwarded = req.headers['x-forwarded-for'];
+        const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : req.ip || '0.0.0.0').trim();
         const dateStr = new Date().toISOString().split('T')[0];
         
         // Create an anonymous visitor hash (IP + User Agent + Date)
