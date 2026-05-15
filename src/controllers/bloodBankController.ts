@@ -304,6 +304,8 @@ export const getAllDonors = async (req: Request, res: Response): Promise<void> =
             Donor.find({}).sort({ createdAt: -1 })
         ]);
 
+        console.log(`[AdminDonors] BloodDonor: ${donors1.length}, LegacyDonor: ${donors2.length}`);
+
         // Standardize the format for the admin table
         const combinedDonors = [
             ...donors1.map(d => ({
