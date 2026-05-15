@@ -52,9 +52,10 @@ const allowedOrigins = [
 app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
-    // Allow all local origins (localhost and 127.0.0.1) or any origin in the allowed list
+    // Allow all local origins, Vercel deployments, or allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
-    if (origin && (isLocal || allowedOrigins.includes(origin))) {
+    const isVercel = origin && origin.endsWith('.vercel.app');
+    if (origin && (isLocal || isVercel || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
         // Fallback for tools/non-browser requests
