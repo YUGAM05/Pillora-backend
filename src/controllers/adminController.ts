@@ -10,6 +10,9 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import axios from 'axios';
 import slugify from 'slugify';
+import Doctor from '../models/Doctor';
+import Slot from '../models/Slot';
+import mongoose from 'mongoose';
 
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
@@ -517,5 +520,87 @@ export const toggleHospitalManagement = async (req: Request, res: Response): Pro
         res.json(hospital);
     } catch (error: any) {
         res.status(500).json({ message: 'Error updating management type', error: error.message });
+    }
+};
+// @desc    Get all doctors for any hospital (Admin)
+// @route   GET /api/admin/hospitals/:id/doctors
+// @access  Private/Admin
+export const getAdminHospitalDoctors = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const doctors = await Doctor.find({ hospital: id });
+        res.json(doctors);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching doctors', error: error.message });
+    }
+};
+
+// @desc    Add a doctor to a hospital (Admin)
+// @route   POST /api/admin/hospitals/:id/doctors
+// @access  Private/Admin
+export const adminAddDoctor = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const { name, specialty, fee, availability } = req.body;
+
+        const doctor = await Doctor.create({
+            hospital: id,
+            name,
+            specialty,
+            fee,
+            availability: availability || []
+        });
+
+        res.status(201).json(doctor);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error adding doctor', error: error.message });
+    }
+};
+
+// @desc    Bulk Generate Slots for a doctor (Admin)
+// @route   POST /api/admin/slots/generate
+// @access  Private/Admin
+export const adminBulkGenerateSlots = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { doctorId, hospitalId, date, startTime, endTime, duration } = req.body;
+
+        if (!doctorId || !hospitalId || !date || !startTime || !endTime || !duration) {
+            res.status(400).json({ message: 'Missing required fields' });
+            return;
+        }
+
+        const start = new Date(`${date}T${startTime}:00`);
+        const end = new Date(`${date}T${endTime}:00`);
+
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            res.status(400).json({ message: 'Invalid date or time format' });
+            return;
+        }
+
+        const slots = [];
+        let current = new Date(start);
+
+        while (current < end) {
+            const next = new Date(current.getTime() + Number(duration) * 60000);
+            if (next > end) break;
+
+            slots.push({
+                doctor: doctorId,
+                hospital: hospitalId,
+                startTime: new Date(current),
+                endTime: new Date(next),
+                status: 'available'
+            });
+
+            current = next;
+        }
+
+        if (slots.length > 0) {
+            await Slot.insertMany(slots);
+        }
+
+        res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error generating slots', error: error.message });
     }
 };

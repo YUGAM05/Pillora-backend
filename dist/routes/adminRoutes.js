@@ -21,6 +21,9 @@ router.get('/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, admi
 router.post('/hospitals/register', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.registerHospital);
 router.get('/hospitals', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitals);
 router.put('/hospitals/:id/management', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.toggleHospitalManagement);
+router.get('/hospitals/:id/doctors', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitalDoctors);
+router.post('/hospitals/:id/doctors', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminAddDoctor);
+router.post('/slots/generate', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminBulkGenerateSlots);
 // Product Management
 router.get('/inventory', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminProducts);
 router.put('/inventory/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.updateProductStatus);

@@ -9,7 +9,24 @@ router.get('/stats', protect, adminOnly, getSystemStats);
 router.get('/trends', protect, adminOnly, getAdminTrends); // NEW: Trend data for graphs
 
 // User Management
-import { getUsers, updateUserStatus, getAdminProducts, updateProductStatus, deleteProduct, toggleDealStatus, getUserOrders, updateProduct, getAllOrders, verifyUserAadhaar, registerHospital, getAdminHospitals, toggleHospitalManagement } from '../controllers/adminController';
+import { 
+    getUsers, 
+    updateUserStatus, 
+    getAdminProducts, 
+    updateProductStatus, 
+    deleteProduct, 
+    toggleDealStatus, 
+    getUserOrders, 
+    updateProduct, 
+    getAllOrders, 
+    verifyUserAadhaar, 
+    registerHospital, 
+    getAdminHospitals, 
+    toggleHospitalManagement,
+    getAdminHospitalDoctors,
+    adminAddDoctor,
+    adminBulkGenerateSlots
+} from '../controllers/adminController';
 router.get('/users', protect, adminOnly, getUsers);
 router.put('/users/:id/status', protect, adminOnly, updateUserStatus);
 router.post('/users/:id/verify-aadhaar', protect, adminOnly, verifyUserAadhaar);
@@ -20,6 +37,9 @@ router.get('/orders', protect, adminOnly, getAllOrders); // NEW: Get all system 
 router.post('/hospitals/register', protect, adminOnly, registerHospital);
 router.get('/hospitals', protect, adminOnly, getAdminHospitals);
 router.put('/hospitals/:id/management', protect, adminOnly, toggleHospitalManagement);
+router.get('/hospitals/:id/doctors', protect, adminOnly, getAdminHospitalDoctors);
+router.post('/hospitals/:id/doctors', protect, adminOnly, adminAddDoctor);
+router.post('/slots/generate', protect, adminOnly, adminBulkGenerateSlots);
 
 // Product Management
 router.get('/inventory', protect, adminOnly, getAdminProducts);

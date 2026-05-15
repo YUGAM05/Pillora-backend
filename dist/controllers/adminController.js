@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
+exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
@@ -24,6 +24,8 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
 const slugify_1 = __importDefault(require("slugify"));
+const Doctor_1 = __importDefault(require("../models/Doctor"));
+const Slot_1 = __importDefault(require("../models/Slot"));
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
 // @access  Private/Admin
@@ -486,3 +488,79 @@ const toggleHospitalManagement = (req, res) => __awaiter(void 0, void 0, void 0,
     }
 });
 exports.toggleHospitalManagement = toggleHospitalManagement;
+// @desc    Get all doctors for any hospital (Admin)
+// @route   GET /api/admin/hospitals/:id/doctors
+// @access  Private/Admin
+const getAdminHospitalDoctors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const doctors = yield Doctor_1.default.find({ hospital: id });
+        res.json(doctors);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching doctors', error: error.message });
+    }
+});
+exports.getAdminHospitalDoctors = getAdminHospitalDoctors;
+// @desc    Add a doctor to a hospital (Admin)
+// @route   POST /api/admin/hospitals/:id/doctors
+// @access  Private/Admin
+const adminAddDoctor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { name, specialty, fee, availability } = req.body;
+        const doctor = yield Doctor_1.default.create({
+            hospital: id,
+            name,
+            specialty,
+            fee,
+            availability: availability || []
+        });
+        res.status(201).json(doctor);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error adding doctor', error: error.message });
+    }
+});
+exports.adminAddDoctor = adminAddDoctor;
+// @desc    Bulk Generate Slots for a doctor (Admin)
+// @route   POST /api/admin/slots/generate
+// @access  Private/Admin
+const adminBulkGenerateSlots = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { doctorId, hospitalId, date, startTime, endTime, duration } = req.body;
+        if (!doctorId || !hospitalId || !date || !startTime || !endTime || !duration) {
+            res.status(400).json({ message: 'Missing required fields' });
+            return;
+        }
+        const start = new Date(`${date}T${startTime}:00`);
+        const end = new Date(`${date}T${endTime}:00`);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            res.status(400).json({ message: 'Invalid date or time format' });
+            return;
+        }
+        const slots = [];
+        let current = new Date(start);
+        while (current < end) {
+            const next = new Date(current.getTime() + Number(duration) * 60000);
+            if (next > end)
+                break;
+            slots.push({
+                doctor: doctorId,
+                hospital: hospitalId,
+                startTime: new Date(current),
+                endTime: new Date(next),
+                status: 'available'
+            });
+            current = next;
+        }
+        if (slots.length > 0) {
+            yield Slot_1.default.insertMany(slots);
+        }
+        res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error generating slots', error: error.message });
+    }
+});
+exports.adminBulkGenerateSlots = adminBulkGenerateSlots;
