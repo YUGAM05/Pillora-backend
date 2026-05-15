@@ -22,8 +22,8 @@ router.get('/requests', getRequests);
 router.get('/my-requests', protect, getMyRequests);
 router.get('/my-donor', protect, getMyDonorProfile);
 router.get('/admin/requests', protect, adminOnly, getAllRequestsAdmin);
-router.patch('/admin/requests/:id/status', protect, adminOnly, updateRequestStatus);
 router.delete('/admin/requests/:id', protect, adminOnly, deleteRequest);
+router.patch('/admin/requests/:id/status', protect, adminOnly, updateRequestStatus);
 router.patch('/admin/requests/:id/kyc', protect, adminOnly, updateKycStatus);
 router.post('/admin/requests/:id/verify-ai', protect, adminOnly, verifyRequestWithAI);
 

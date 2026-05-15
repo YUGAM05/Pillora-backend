@@ -389,9 +389,12 @@ export const updateRequestStatus = async (req: Request, res: Response): Promise<
 // @access  Private/Admin
 export const deleteDonor = async (req: Request, res: Response): Promise<void> => {
     try {
-        const donor = await BloodDonor.findByIdAndDelete(req.params.id);
+        const { id } = req.params;
+        // Try deleting from both collections
+        const donor1 = await BloodDonor.findByIdAndDelete(id);
+        const donor2 = await Donor.findByIdAndDelete(id);
 
-        if (!donor) {
+        if (!donor1 && !donor2) {
             res.status(404).json({ message: 'Donor not found' });
             return;
         }
@@ -400,12 +403,15 @@ export const deleteDonor = async (req: Request, res: Response): Promise<void> =>
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
     }
+};
+
 // @desc    Delete a request
 // @route   DELETE /api/blood-bank/admin/requests/:id
 // @access  Private/Admin
 export const deleteRequest = async (req: Request, res: Response): Promise<void> => {
     try {
-        const request = await BloodRequest.findByIdAndDelete(req.params.id);
+        const { id } = req.params;
+        const request = await BloodRequest.findByIdAndDelete(id);
 
         if (!request) {
             res.status(404).json({ message: 'Request not found' });
