@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { v2 as cloudinary } from 'cloudinary'; // ✅ Added
 import slugify from 'slugify';
 import mongoose from 'mongoose';
+import { logActivity } from '../utils/activityLogger';
 
 // ✅ Cloudinary config
 cloudinary.config({
@@ -206,6 +207,14 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
         });
 
         res.status(201).json(hospital);
+
+        // Log Platform Activity
+        const io = req.app.get('io');
+        logActivity(io, {
+            title: 'New Hospital Registered',
+            description: `${name} has been added to the network in ${city}.`,
+            type: 'hospital'
+        });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Server Error', error });
     }

@@ -7,6 +7,7 @@ import axios from 'axios';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
+import { logActivity } from '../utils/activityLogger';
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
@@ -98,6 +99,15 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 
         if (user) {
             console.log('User created successfully:', user._id);
+            
+            // Log Platform Activity
+            const io = req.app.get('io');
+            logActivity(io, {
+                title: 'New User Registered',
+                description: `${user.name} joined the platform as a ${user.role}.`,
+                type: 'user'
+            });
+
             if (user.status === 'pending') {
                 res.status(201).json({
                     _id: user._id,

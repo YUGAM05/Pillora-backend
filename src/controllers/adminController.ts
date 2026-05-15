@@ -10,9 +10,23 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import axios from 'axios';
 import slugify from 'slugify';
+import AuditLog from '../models/AuditLog';
+import PlatformActivity from '../models/PlatformActivity';
 import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
 import mongoose from 'mongoose';
+
+// @desc    Get platform activities
+// @route   GET /api/admin/activities
+// @access  Private/Admin
+export const getPlatformActivities = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const activities = await PlatformActivity.find().sort({ timestamp: -1 }).limit(20);
+        res.json(activities);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+};
 
 // @desc    Get system statistics
 // @route   GET /api/admin/stats

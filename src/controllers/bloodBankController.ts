@@ -6,6 +6,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { getCompatibleDonors } from '../utils/bloodCompatibility';
 import { sendWhatsAppMessage } from '../utils/whatsappService';
 import { verifyAadhaarLocal, validateVerhoeff } from '../utils/aadhaarVerifier';
+import { logActivity } from '../utils/activityLogger';
 
 
 
@@ -52,6 +53,14 @@ export const registerDonor = async (req: AuthRequest, res: Response): Promise<vo
         );
 
         res.status(201).json(donor);
+
+        // Log Platform Activity
+        const io = req.app.get('io');
+        logActivity(io, {
+            title: 'New Blood Donor',
+            description: `${name || 'A user'} registered as a ${bloodGroup} donor in ${area}, ${city}.`,
+            type: 'blood_donor'
+        });
     } catch (error: any) {
         console.error("Blood Bank Registration Error:", error);
         if (error.code === 11000) {
@@ -203,6 +212,14 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
 
         // 2. Instant Response: Return 201 Created to the frontend
         res.status(201).json(request);
+
+        // Log Platform Activity
+        const io = req.app.get('io');
+        logActivity(io, {
+            title: isUrgent ? 'Urgent Blood Request' : 'New Blood Request',
+            description: `${patientName} needs ${units} units of ${bloodGroup} at ${hospitalAddress}.`,
+            type: 'blood_request'
+        });
 
         // 3. Background Processing: Matching & notifications safe out of flow
         (async () => {

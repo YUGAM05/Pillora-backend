@@ -1,11 +1,21 @@
 import { Request, Response } from 'express';
 import PartnerRequest from '../models/PartnerRequest';
+import { logActivity } from '../utils/activityLogger';
+import { AuthRequest } from '../middleware/authMiddleware';
 
-export const submitPartnerRequest = async (req: Request, res: Response) => {
+export const submitPartnerRequest = async (req: any, res: Response) => {
     try {
         const partnerRequest = new PartnerRequest(req.body);
         await partnerRequest.save();
         res.status(201).json({ success: true, message: 'Partner request submitted successfully' });
+
+        // Log Platform Activity
+        const io = req.app.get('io');
+        logActivity(io, {
+            title: 'New Partnership Inquiry',
+            description: `${req.body.name} from ${req.body.organization || 'an organization'} wants to partner with us.`,
+            type: 'partner'
+        });
     } catch (error: any) {
         console.error('Error submitting partner request:', error);
         res.status(500).json({ success: false, message: error.message || 'Internal server error' });
