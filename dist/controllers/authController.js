@@ -26,7 +26,7 @@ const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
     if (sessionId)
         payload.sessionId = sessionId;
-    return jsonwebtoken_1.default.sign(payload, process.env.JWT_SECRET || 'defaultSecret', {
+    return jsonwebtoken_1.default.sign(payload, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', {
         expiresIn: '30d', // Increased to 30 days for better UX
     });
 };
@@ -413,7 +413,7 @@ const validateSession = (req, res) => __awaiter(void 0, void 0, void 0, function
         return;
     }
     try {
-        const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+        const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
         if (decoded.role !== 'admin') {
             res.status(403).json({ authenticated: false, reason: 'not_admin' });
             return;
@@ -445,7 +445,7 @@ const logoutAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : null;
     try {
         if (token) {
-            const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+            const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
             if (decoded.sessionId) {
                 yield Session_1.default.findOneAndUpdate({ sessionId: decoded.sessionId }, { isRevoked: true });
                 yield AuditLog_1.default.create({

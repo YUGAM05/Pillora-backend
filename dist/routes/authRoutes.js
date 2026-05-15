@@ -61,7 +61,7 @@ router.get('/google/callback', passport_1.default.authenticate('google', {
         if (!user) {
             return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_user`);
         }
-        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'defaultSecret', { expiresIn: '30d' });
+        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', { expiresIn: '30d' });
         const userData = {
             id: user._id,
             name: user.name,
@@ -103,7 +103,7 @@ router.get('/google/seller/callback', passport_1.default.authenticate('google', 
             user.role = 'seller';
             yield user.save();
         }
-        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'defaultSecret', { expiresIn: '30d' });
+        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', { expiresIn: '30d' });
         const userData = {
             id: user._id,
             name: user.name,
@@ -145,7 +145,7 @@ router.get('/google/delivery/callback', passport_1.default.authenticate('google'
             user.role = 'delivery';
             yield user.save();
         }
-        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'defaultSecret', { expiresIn: '30d' });
+        const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', { expiresIn: '30d' });
         const userData = {
             id: user._id,
             name: user.name,

@@ -31,7 +31,7 @@ const requireAdminAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, f
         // 2. Verify JWT signature and decode
         let decoded;
         try {
-            decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'defaultSecret');
+            decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
         }
         catch (err) {
             if (err.name === 'TokenExpiredError') {
