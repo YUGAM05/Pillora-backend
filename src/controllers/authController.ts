@@ -628,7 +628,7 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
 // ═══════════════════════════════════════════════════════════════════════════════
 export const setupAdmin = async (req: Request, res: Response): Promise<void> => {
     try {
-        const email = 'admin@life-link.com';
+        const email = 'admin@pillora.in';
         const password = 'admin';
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
@@ -640,7 +640,7 @@ export const setupAdmin = async (req: Request, res: Response): Promise<void> => 
         );
 
         console.log("Admin setup complete via API.");
-        res.json({ message: "Admin Account Created Successfully! Login with admin@life-link.com / admin" });
+        res.json({ message: "Admin Account Created Successfully! Login with admin@pillora.in / admin" });
     } catch (error: any) {
         console.error('Setup Admin Error:', error);
         res.status(500).json({ message: 'Setup Failed', error: error.message || error });
