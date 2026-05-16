@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import BloodDonor from '../models/BloodDonor';
+import Donor from '../models/Donor';
 import ExcelJS from 'exceljs';
 import { AuthRequest } from '../middleware/authMiddleware';
 

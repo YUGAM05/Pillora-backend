@@ -18,6 +18,8 @@ export interface IBloodDonor extends Document {
         type: string;
         coordinates: number[]; // [longitude, latitude]
     };
+    createdAt: Date;
+    updatedAt: Date;
 }
 
 const BloodDonorSchema: Schema = new Schema({
