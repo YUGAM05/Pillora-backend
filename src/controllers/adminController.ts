@@ -464,6 +464,7 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             address,
             consultationFee: Number(consultationFee),
             management_type: management_type || 'SELF',
+            plan: req.body.plan || 'Standard',
             user: user._id,
             is_verified: true,
             image: image || "",
