@@ -411,13 +411,17 @@ export const deleteDonor = async (req: Request, res: Response): Promise<void> =>
 export const deleteRequest = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
+        console.log(`[BloodBankController] DELETE request received for ID: ${id}`);
+        
         const request = await BloodRequest.findByIdAndDelete(id);
 
         if (!request) {
+            console.warn(`[BloodBankController] Request with ID ${id} NOT found for deletion.`);
             res.status(404).json({ message: 'Request document not found in database (404)' });
             return;
         }
 
+        console.log(`[BloodBankController] Successfully deleted request ID: ${id}`);
         res.json({ message: 'Request removed successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
