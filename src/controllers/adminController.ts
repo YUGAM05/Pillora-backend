@@ -465,8 +465,14 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             consultationFee: Number(consultationFee),
             management_type: management_type || 'SELF',
             plan: req.body.plan || 'Standard',
+            // Plan-based feature mapping
+            is_verified: true, // All plans get verified badge
+            is_featured: req.body.plan === 'Premium' || req.body.plan === 'Enterprise',
+            has_govt_schemes: req.body.plan === 'Premium' || req.body.plan === 'Enterprise',
+            has_custom_page: req.body.plan === 'Enterprise',
+            is_spotlight: req.body.plan === 'Enterprise',
+            priority_support: req.body.plan === 'Enterprise',
             user: user._id,
-            is_verified: true,
             image: image || "",
             images: Array.isArray(images) ? images : [],
             ambulanceContact: ambulanceContact || "",

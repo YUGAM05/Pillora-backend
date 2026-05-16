@@ -27,6 +27,11 @@ export interface IHospital extends Document {
     management_type: 'SELF' | 'PILLORA';
     is_verified: boolean;
     plan: 'Standard' | 'Premium' | 'Enterprise';
+    is_featured: boolean;
+    has_govt_schemes: boolean;
+    has_custom_page: boolean;
+    is_spotlight: boolean;
+    priority_support: boolean;
     user?: mongoose.Types.ObjectId;
 }
 
@@ -61,6 +66,12 @@ const HospitalSchema: Schema = new Schema({
         enum: ['Standard', 'Premium', 'Enterprise'], 
         default: 'Standard' 
     },
+    // Plan Benefits
+    is_featured: { type: Boolean, default: false }, // For "Top of Search"
+    has_govt_schemes: { type: Boolean, default: false }, // For "Government Schemes Tag"
+    has_custom_page: { type: Boolean, default: false }, // For "Custom landing page"
+    is_spotlight: { type: Boolean, default: false }, // For "Homepage banner & spotlight"
+    priority_support: { type: Boolean, default: false },
     user: { type: Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
