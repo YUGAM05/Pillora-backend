@@ -412,6 +412,7 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             address, 
             consultationFee, 
             management_type,
+            plan,
             image,
             images,
             ambulanceContact,
@@ -423,13 +424,21 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
         } = req.body;
 
         if (!name || !city || !email || !address || !consultationFee) {
-            res.status(400).json({ message: 'Missing required fields' });
+            console.error('Registration failed: Missing required fields', { name, city, email, address, consultationFee });
+            res.status(400).json({ message: 'Missing required fields: Name, City, Email, Address, and Fee are mandatory.' });
             return;
         }
 
-        const userExists = await User.findOne({ email: email.toLowerCase() });
+        const validPlans = ['Standard', 'Premium', 'Enterprise'];
+        if (plan && !validPlans.includes(plan)) {
+            res.status(400).json({ message: 'Invalid subscription plan selected.' });
+            return;
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const userExists = await User.findOne({ email: normalizedEmail });
         if (userExists) {
-            res.status(400).json({ message: 'User with this email already exists' });
+            res.status(400).json({ message: 'A partner account with this email already exists.' });
             return;
         }
 
@@ -441,7 +450,7 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
         // 2. Create User account for Hospital
         const user = await User.create({
             name,
-            email: email.toLowerCase(),
+            email: normalizedEmail,
             passwordHash,
             role: 'hospital',
             status: 'approved',
