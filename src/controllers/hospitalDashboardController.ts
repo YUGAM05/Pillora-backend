@@ -110,6 +110,12 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
 
         if (slots.length > 0) {
             await Slot.insertMany(slots);
+            
+            // Emit socket event for real-time update
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('slotsUpdated', { doctorId, date });
+            }
         }
 
         res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
@@ -219,6 +225,16 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
         // Link appointment back to slot
         slot.appointment = appointment._id as mongoose.Types.ObjectId;
         await slot.save();
+
+        // Emit socket event for real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('slotBooked', { 
+                slotId, 
+                doctorId, 
+                date: new Date(slotTime).toISOString().split('T')[0] 
+            });
+        }
 
         res.status(201).json({ message: 'Appointment booked successfully', appointment });
     } catch (error: any) {

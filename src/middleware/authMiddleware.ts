@@ -122,3 +122,12 @@ export const deliveryOnly = (req: AuthRequest, res: Response, next: NextFunction
         return;
     }
 };
+
+export const hospitalOnly = (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (req.user && (req.user.role === 'hospital' || req.user.role === 'admin')) {
+        next();
+    } else {
+        res.status(403).json({ message: 'Not authorized as hospital partner' });
+        return;
+    }
+};
