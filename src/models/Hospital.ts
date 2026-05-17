@@ -33,6 +33,7 @@ export interface IHospital extends Document {
     is_spotlight: boolean;
     priority_support: boolean;
     user?: mongoose.Types.ObjectId;
+    tempPassword?: string;
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -73,6 +74,7 @@ const HospitalSchema: Schema = new Schema({
     is_spotlight: { type: Boolean, default: false }, // For "Homepage banner & spotlight"
     priority_support: { type: Boolean, default: false },
     user: { type: Schema.Types.ObjectId, ref: 'User' },
+    tempPassword: { type: String },
 }, { timestamps: true });
 
 export default mongoose.model<IHospital>('Hospital', HospitalSchema);

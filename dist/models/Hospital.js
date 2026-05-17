@@ -71,5 +71,6 @@ const HospitalSchema = new mongoose_1.Schema({
     is_spotlight: { type: Boolean, default: false }, // For "Homepage banner & spotlight"
     priority_support: { type: Boolean, default: false },
     user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    tempPassword: { type: String },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Hospital', HospitalSchema);

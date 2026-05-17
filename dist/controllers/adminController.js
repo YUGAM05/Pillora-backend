@@ -452,7 +452,8 @@ const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, functio
             isOpen24Hours: Boolean(isOpen24Hours),
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             doctors: Array.isArray(doctors) ? doctors : [],
-            rating: 4.0
+            rating: 4.0,
+            tempPassword: tempPassword
         });
         // 4. Trigger "Welcome Kit" email via external Node.js service
         try {
