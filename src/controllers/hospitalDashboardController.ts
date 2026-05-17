@@ -90,11 +90,28 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
+        const durationMinutes = parseInt(duration.toString(), 10);
+        if (isNaN(durationMinutes) || durationMinutes <= 0) {
+            res.status(400).json({ message: 'Invalid slot duration' });
+            return;
+        }
+
+        // Check for existing slots for this doctor in the time range to prevent duplicate slots
+        const existingSlots = await Slot.countDocuments({
+            doctor: doctorId,
+            startTime: { $gte: start, $lt: end }
+        });
+
+        if (existingSlots > 0) {
+            res.status(400).json({ message: 'Slots have already been generated for this doctor within this time range.' });
+            return;
+        }
+
         const slots = [];
         let current = new Date(start);
 
         while (current < end) {
-            const next = new Date(current.getTime() + duration * 60000);
+            const next = new Date(current.getTime() + durationMinutes * 60000);
             if (next > end) break;
 
             slots.push({
@@ -184,8 +201,7 @@ export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<v
 
         const slots = await Slot.find({
             doctor: id,
-            startTime: { $gte: startOfDay, $lte: endOfDay },
-            status: 'available'
+            startTime: { $gte: startOfDay, $lte: endOfDay }
         }).sort({ startTime: 1 });
 
         res.json(slots);

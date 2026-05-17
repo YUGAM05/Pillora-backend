@@ -50,6 +50,17 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
             return;
         }
 
+        // Check for existing slots to prevent duplication
+        const existingSlotsCount = await Slot.countDocuments({
+            doctor: doctorId,
+            startTime: { $gte: start, $lt: end }
+        });
+
+        if (existingSlotsCount > 0) {
+            res.status(400).json({ message: 'Slots have already been generated for this doctor in this time range.' });
+            return;
+        }
+
         const slots = [];
         let current = new Date(start);
 
