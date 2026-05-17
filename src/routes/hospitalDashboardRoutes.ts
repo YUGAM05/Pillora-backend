@@ -11,7 +11,10 @@ import {
     updateAppointmentStatus,
     getDoctorSlots,
     createAppointment,
-    getMyBookings
+    getMyBookings,
+    getHospitalSlots,
+    addSingleSlot,
+    cancelSlot
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -28,10 +31,13 @@ router.get('/stats', protect, isHospital, attachHospital, getHospitalStats);
 router.get('/doctors', protect, isHospital, attachHospital, getHospitalDoctors);
 router.get('/appointments', protect, isHospital, attachHospital, getHospitalAppointments);
 router.put('/appointments/:id/status', protect, isHospital, attachHospital, updateAppointmentStatus);
+router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
 router.put('/doctors/:id', protect, isHospital, selfManagedOnly, updateDoctor);
 router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
+router.post('/slots/add', protect, isHospital, selfManagedOnly, addSingleSlot);
+router.post('/slots/:id/cancel', protect, isHospital, selfManagedOnly, cancelSlot);
 
 export default router;

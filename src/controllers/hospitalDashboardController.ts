@@ -315,3 +315,186 @@ export const getMyBookings = async (req: AuthRequest, res: Response): Promise<vo
         res.status(500).json({ message: 'Error fetching patient bookings', error: error.message });
     }
 };
+
+// ─── Slot Management Controllers ───────────────────────────────────────────────
+
+// @desc    Get all slots for the authenticated hospital
+// @route   GET /api/hospital/dashboard/slots
+export const getHospitalSlots = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const slots = await Slot.find({ hospital: hospital._id })
+            .populate('doctor', 'name specialty isSpecialtyGroup department')
+            .sort({ startTime: 1 });
+
+        // Query active appointments to count booking occurrences per slot
+        const appointments = await Appointment.find({ hospital: hospital._id, status: { $ne: 'cancelled' } });
+        
+        const slotsWithCount = slots.map(slot => {
+            const bookingCount = appointments.filter(app => app.slot.toString() === slot._id.toString()).length;
+            return {
+                ...slot.toObject(),
+                bookingCount
+            };
+        });
+
+        res.json(slotsWithCount);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching hospital slots', error: error.message });
+    }
+};
+
+// @desc    Add individual or recurrent slot(s) for a doctor/specialty group
+// @route   POST /api/hospital/dashboard/slots/add
+export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { doctorId, date, startTime, endTime, recurrence } = req.body;
+
+        if (!doctorId || !date || !startTime || !endTime) {
+            res.status(400).json({ message: 'Missing required fields' });
+            return;
+        }
+
+        const now = new Date();
+
+        // Helper to generate target dates based on recurrence pattern
+        const generateDates = (baseDateStr: string, recPattern: any): Date[] => {
+            const datesList: Date[] = [new Date(baseDateStr)];
+            if (!recPattern || recPattern.type === 'none') {
+                return datesList;
+            }
+
+            const startDate = new Date(baseDateStr);
+            const endDate = recPattern.until ? new Date(recPattern.until) : new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+            if (endDate < startDate) return datesList;
+
+            const current = new Date(startDate);
+            current.setDate(current.getDate() + 1); // Move past baseDate
+
+            while (current <= endDate) {
+                if (recPattern.type === 'daily') {
+                    datesList.push(new Date(current));
+                } else if (recPattern.type === 'weekly') {
+                    const dayOfWeek = current.toLocaleDateString('en-US', { weekday: 'long' });
+                    if (recPattern.days && recPattern.days.includes(dayOfWeek)) {
+                        datesList.push(new Date(current));
+                    }
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return datesList;
+        };
+
+        const targetDates = generateDates(date, recurrence);
+        const slotsToInsert = [];
+
+        for (const targetDate of targetDates) {
+            const dateStr = targetDate.toISOString().split('T')[0];
+            const start = new Date(`${dateStr}T${startTime}:00`);
+            const end = new Date(`${dateStr}T${endTime}:00`);
+
+            // Past date/time validation
+            if (start < now) {
+                if (targetDates.length === 1) {
+                    res.status(400).json({ message: 'Cannot create a slot for a past date or past time on today\'s date' });
+                    return;
+                }
+                continue; // Skip past dates silently in batch recurrences
+            }
+
+            // Check overlap
+            const overlap = await Slot.findOne({
+                doctor: doctorId,
+                status: { $ne: 'cancelled' },
+                startTime: { $lt: end },
+                endTime: { $gt: start }
+            }).populate('doctor', 'name');
+
+            if (overlap) {
+                const overlapStartStr = new Date(overlap.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                const overlapEndStr = new Date(overlap.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                res.status(400).json({ 
+                    message: `Conflict warning: An overlapping slot already exists on ${dateStr} from ${overlapStartStr} to ${overlapEndStr} for ${(overlap.doctor as any).name || 'this specialty'}.` 
+                });
+                return;
+            }
+
+            slotsToInsert.push({
+                doctor: doctorId,
+                hospital: hospital._id,
+                startTime: start,
+                endTime: end,
+                status: 'available'
+            });
+        }
+
+        if (slotsToInsert.length > 0) {
+            await Slot.insertMany(slotsToInsert);
+
+            // Emit socket update event for first date in slots
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('slotsUpdated', { doctorId, date });
+            }
+        }
+
+        res.status(201).json({ message: `Successfully created ${slotsToInsert.length} slots`, count: slotsToInsert.length });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error creating slot', error: error.message });
+    }
+};
+
+// @desc    Cancel a specific slot with booking cancellations
+// @route   POST /api/hospital/dashboard/slots/:id/cancel
+export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        const slot = await Slot.findOne({ _id: id, hospital: hospital._id });
+        if (!slot) {
+            res.status(404).json({ message: 'Slot not found' });
+            return;
+        }
+
+        const now = new Date();
+
+        // Restriction check: Cannot cancel a slot in history
+        if (slot.endTime < now) {
+            res.status(400).json({ message: 'Cannot cancel a slot that has already passed' });
+            return;
+        }
+
+        // Restriction check: Cannot cancel slot currently in progress
+        if (slot.startTime < now && slot.endTime > now) {
+            res.status(400).json({ message: 'Cannot cancel a slot that is currently in progress' });
+            return;
+        }
+
+        // Mark slot as cancelled and store metadata
+        slot.status = 'cancelled';
+        slot.cancelledAt = now;
+        slot.cancellationReason = reason || 'Doctor unavailable';
+        slot.cancelledBy = (req.user?._id || req.user?.id) as any;
+        await slot.save();
+
+        // Update affected bookings to cancelled
+        await Appointment.updateMany({ slot: slot._id }, { status: 'cancelled' });
+
+        // Emit socket update for real-time lists
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('slotsUpdated', { 
+                doctorId: slot.doctor, 
+                date: new Date(slot.startTime).toISOString().split('T')[0] 
+            });
+        }
+
+        res.json({ message: 'Slot and all associated bookings cancelled successfully.' });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error cancelling slot', error: error.message });
+    }
+};
