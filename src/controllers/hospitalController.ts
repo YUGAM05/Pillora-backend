@@ -57,7 +57,7 @@ export const getHospitalById = async (req: Request, res: Response): Promise<void
 
         if (hospital) {
             // Fetch real doctors from Doctor model that are linked to this hospital
-            const dbDoctors = await Doctor.find({ hospital: hospital._id });
+            const dbDoctors = await Doctor.find({ hospital: hospital._id, is_active: { $ne: false } });
             
             // Convert Mongoose document to plain object to allow modifying
             const hospitalObj = hospital.toObject();
@@ -71,7 +71,12 @@ export const getHospitalById = async (req: Request, res: Response): Promise<void
                 daysAvailable: doc.availability?.map(a => a.day) || [],
                 timing: doc.availability && doc.availability.length > 0
                     ? `${doc.availability[0].startTime} - ${doc.availability[0].endTime}`
-                    : 'Flexible timings'
+                    : 'Flexible timings',
+                isSpecialtyGroup: doc.isSpecialtyGroup,
+                department: doc.department,
+                maxAppointmentsPerSlot: doc.maxAppointmentsPerSlot,
+                doctorsCount: doc.doctorsCount,
+                description: doc.description
             }));
 
             res.json(hospitalObj);

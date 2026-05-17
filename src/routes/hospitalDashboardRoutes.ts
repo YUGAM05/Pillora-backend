@@ -5,6 +5,7 @@ import {
     getHospitalStats,
     getHospitalDoctors,
     addDoctor,
+    updateDoctor,
     bulkGenerateSlots,
     getHospitalAppointments,
     updateAppointmentStatus,
@@ -30,6 +31,7 @@ router.put('/appointments/:id/status', protect, isHospital, attachHospital, upda
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
+router.put('/doctors/:id', protect, isHospital, selfManagedOnly, updateDoctor);
 router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
 
 export default router;

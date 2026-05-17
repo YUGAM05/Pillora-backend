@@ -11,6 +11,11 @@ export interface IDoctor extends Document {
         endTime: string; // e.g., '17:00'
     }[];
     is_active: boolean;
+    isSpecialtyGroup?: boolean;
+    department?: string;
+    maxAppointmentsPerSlot?: number;
+    doctorsCount?: number;
+    description?: string;
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -24,6 +29,11 @@ const DoctorSchema: Schema = new Schema({
         endTime: { type: String, required: true },
     }],
     is_active: { type: Boolean, default: true },
+    isSpecialtyGroup: { type: Boolean, default: false },
+    department: { type: String },
+    maxAppointmentsPerSlot: { type: Number, default: 1 },
+    doctorsCount: { type: Number, default: 1 },
+    description: { type: String },
 }, { timestamps: true });
 
 export default mongoose.model<IDoctor>('Doctor', DoctorSchema);

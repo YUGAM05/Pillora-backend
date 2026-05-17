@@ -49,24 +49,60 @@ export const getHospitalDoctors = async (req: AuthRequest, res: Response): Promi
     }
 };
 
-// @desc    Add a doctor (Self-Managed only)
+// @desc    Add a doctor or specialty group (Self-Managed only)
 // @route   POST /api/hospital/doctors
 export const addDoctor = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
-        const { name, specialty, fee, availability } = req.body;
+        const { name, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
 
         const doctor = await Doctor.create({
             hospital: hospital._id,
             name,
             specialty,
             fee,
-            availability: availability || []
+            availability: availability || [],
+            isSpecialtyGroup: Boolean(isSpecialtyGroup),
+            department,
+            maxAppointmentsPerSlot: maxAppointmentsPerSlot ? Number(maxAppointmentsPerSlot) : 1,
+            doctorsCount: doctorsCount ? Number(doctorsCount) : 1,
+            description
         });
 
         res.status(201).json(doctor);
     } catch (error: any) {
         res.status(500).json({ message: 'Error adding doctor', error: error.message });
+    }
+};
+
+// @desc    Update doctor or specialty group (Self-Managed only)
+// @route   PUT /api/hospital/doctors/:id
+export const updateDoctor = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const updateData = { ...req.body };
+
+        if (updateData.fee !== undefined) updateData.fee = Number(updateData.fee);
+        if (updateData.maxAppointmentsPerSlot !== undefined) updateData.maxAppointmentsPerSlot = Number(updateData.maxAppointmentsPerSlot);
+        if (updateData.doctorsCount !== undefined) updateData.doctorsCount = Number(updateData.doctorsCount);
+        if (updateData.isSpecialtyGroup !== undefined) updateData.isSpecialtyGroup = Boolean(updateData.isSpecialtyGroup);
+        if (updateData.is_active !== undefined) updateData.is_active = Boolean(updateData.is_active);
+
+        const doctor = await Doctor.findOneAndUpdate(
+            { _id: id, hospital: hospital._id },
+            updateData,
+            { new: true }
+        );
+
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor or Specialty Group not found' });
+            return;
+        }
+
+        res.json(doctor);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating doctor', error: error.message });
     }
 };
 
