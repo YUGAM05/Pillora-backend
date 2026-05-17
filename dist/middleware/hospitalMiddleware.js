@@ -31,12 +31,6 @@ const selfManagedOnly = (req, res, next) => __awaiter(void 0, void 0, void 0, fu
             res.status(404).json({ message: 'Hospital profile not found' });
             return;
         }
-        if (hospital.management_type !== 'SELF') {
-            res.status(403).json({
-                message: 'This hospital is managed by Pillora. You cannot modify records directly. Please contact admin to switch to Self-Managed mode.'
-            });
-            return;
-        }
         req.hospital = hospital;
         next();
     }

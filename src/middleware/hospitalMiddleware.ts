@@ -18,13 +18,6 @@ export const selfManagedOnly = async (req: AuthRequest, res: Response, next: Nex
             return;
         }
         
-        if (hospital.management_type !== 'SELF') {
-            res.status(403).json({ 
-                message: 'This hospital is managed by Pillora. You cannot modify records directly. Please contact admin to switch to Self-Managed mode.' 
-            });
-            return;
-        }
-        
         (req as any).hospital = hospital;
         next();
     } catch (error) {

@@ -16,7 +16,8 @@ import {
     addSingleSlot,
     cancelSlot,
     holdSlot,
-    releaseSlotHold
+    releaseSlotHold,
+    deleteSlot
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -43,5 +44,6 @@ router.put('/doctors/:id', protect, isHospital, selfManagedOnly, updateDoctor);
 router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
 router.post('/slots/add', protect, isHospital, selfManagedOnly, addSingleSlot);
 router.post('/slots/:id/cancel', protect, isHospital, selfManagedOnly, cancelSlot);
+router.delete('/slots/:id', protect, isHospital, selfManagedOnly, deleteSlot);
 
 export default router;

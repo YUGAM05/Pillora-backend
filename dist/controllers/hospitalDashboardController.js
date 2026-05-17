@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.releaseSlotHold = exports.holdSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
@@ -585,6 +585,36 @@ const cancelSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.cancelSlot = cancelSlot;
+// @desc    Delete a specific slot completely
+// @route   DELETE /api/hospital/dashboard/slots/:id
+const deleteSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const slot = yield Slot_1.default.findOne({ _id: id, hospital: hospital._id });
+        if (!slot) {
+            res.status(404).json({ message: 'Slot not found' });
+            return;
+        }
+        // Delete associated bookings
+        yield Appointment_1.default.deleteMany({ slot: slot._id });
+        // Delete the slot document itself
+        yield Slot_1.default.deleteOne({ _id: slot._id });
+        // Emit socket update for real-time lists
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('slotsUpdated', {
+                doctorId: slot.doctor,
+                date: new Date(slot.startTime).toISOString().split('T')[0]
+            });
+        }
+        res.json({ message: 'Slot deleted successfully.' });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error deleting slot', error: error.message });
+    }
+});
+exports.deleteSlot = deleteSlot;
 // @desc    Create temporary hold on a slot
 // @route   POST /api/hospital/dashboard/slots/hold
 const holdSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {

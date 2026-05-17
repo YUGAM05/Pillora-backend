@@ -652,6 +652,40 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
     }
 };
 
+// @desc    Delete a specific slot completely
+// @route   DELETE /api/hospital/dashboard/slots/:id
+export const deleteSlot = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+
+        const slot = await Slot.findOne({ _id: id, hospital: hospital._id });
+        if (!slot) {
+            res.status(404).json({ message: 'Slot not found' });
+            return;
+        }
+
+        // Delete associated bookings
+        await Appointment.deleteMany({ slot: slot._id });
+
+        // Delete the slot document itself
+        await Slot.deleteOne({ _id: slot._id });
+
+        // Emit socket update for real-time lists
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('slotsUpdated', { 
+                doctorId: slot.doctor, 
+                date: new Date(slot.startTime).toISOString().split('T')[0] 
+            });
+        }
+
+        res.json({ message: 'Slot deleted successfully.' });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error deleting slot', error: error.message });
+    }
+};
+
 // @desc    Create temporary hold on a slot
 // @route   POST /api/hospital/dashboard/slots/hold
 export const holdSlot = async (req: AuthRequest, res: Response): Promise<void> => {

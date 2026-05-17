@@ -27,4 +27,5 @@ router.put('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHosp
 router.post('/slots/generate', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.bulkGenerateSlots);
 router.post('/slots/add', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addSingleSlot);
 router.post('/slots/:id/cancel', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.cancelSlot);
+router.delete('/slots/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.deleteSlot);
 exports.default = router;
