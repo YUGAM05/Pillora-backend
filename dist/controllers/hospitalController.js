@@ -68,7 +68,7 @@ const getHospitalById = (req, res) => __awaiter(void 0, void 0, void 0, function
         }
         if (hospital) {
             // Fetch real doctors from Doctor model that are linked to this hospital
-            const dbDoctors = yield Doctor_1.default.find({ hospital: hospital._id });
+            const dbDoctors = yield Doctor_1.default.find({ hospital: hospital._id, is_active: { $ne: false } });
             // Convert Mongoose document to plain object to allow modifying
             const hospitalObj = hospital.toObject();
             // Map the Doctor collection fields to match the structure expected by the frontend
@@ -82,7 +82,12 @@ const getHospitalById = (req, res) => __awaiter(void 0, void 0, void 0, function
                     daysAvailable: ((_a = doc.availability) === null || _a === void 0 ? void 0 : _a.map(a => a.day)) || [],
                     timing: doc.availability && doc.availability.length > 0
                         ? `${doc.availability[0].startTime} - ${doc.availability[0].endTime}`
-                        : 'Flexible timings'
+                        : 'Flexible timings',
+                    isSpecialtyGroup: doc.isSpecialtyGroup,
+                    department: doc.department,
+                    maxAppointmentsPerSlot: doc.maxAppointmentsPerSlot,
+                    doctorsCount: doc.doctorsCount,
+                    description: doc.description
                 });
             });
             res.json(hospitalObj);

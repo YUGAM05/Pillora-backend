@@ -14,7 +14,9 @@ import {
     getMyBookings,
     getHospitalSlots,
     addSingleSlot,
-    cancelSlot
+    cancelSlot,
+    holdSlot,
+    releaseSlotHold
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -25,6 +27,8 @@ router.get('/doctors/:id/slots', getDoctorSlots);
 // ─── Patient / Booking Routes (Requires login) ──────────────────────────────────
 router.get('/appointments/my-bookings', protect, getMyBookings);
 router.post('/appointments', protect, createAppointment);
+router.post('/slots/hold', protect, holdSlot);
+router.post('/slots/release-hold', protect, releaseSlotHold);
 
 // ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─
 router.get('/stats', protect, isHospital, attachHospital, getHospitalStats);

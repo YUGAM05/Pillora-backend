@@ -39,8 +39,14 @@ const SlotSchema = new mongoose_1.Schema({
     hospital: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
-    status: { type: String, enum: ['available', 'booked', 'blocked'], default: 'available' },
+    status: { type: String, enum: ['available', 'booked', 'blocked', 'cancelled'], default: 'available' },
     appointment: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment' },
+    cancelledAt: { type: Date },
+    cancellationReason: { type: String },
+    cancelledBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    booked_count: { type: Number, default: 0 },
+    max_appointments: { type: Number, default: 1 },
+    hold_count: { type: Number, default: 0 },
 }, { timestamps: true });
 // Index for quick availability lookups
 SlotSchema.index({ doctor: 1, startTime: 1 });

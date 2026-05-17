@@ -45,5 +45,10 @@ const DoctorSchema = new mongoose_1.Schema({
             endTime: { type: String, required: true },
         }],
     is_active: { type: Boolean, default: true },
+    isSpecialtyGroup: { type: Boolean, default: false },
+    department: { type: String },
+    maxAppointmentsPerSlot: { type: Number, default: 1 },
+    doctorsCount: { type: Number, default: 1 },
+    description: { type: String },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Doctor', DoctorSchema);

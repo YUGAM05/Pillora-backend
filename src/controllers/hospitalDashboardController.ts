@@ -5,6 +5,8 @@ import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
 import Appointment from '../models/Appointment';
 import mongoose from 'mongoose';
+import redis from '../utils/redisMock';
+import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -143,6 +145,10 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
+        // Get maxAppointmentsPerSlot from Doctor model
+        const doctorDoc = await Doctor.findById(doctorId);
+        const maxAppts = doctorDoc?.maxAppointmentsPerSlot || 1;
+
         const slots = [];
         let current = new Date(start);
 
@@ -155,7 +161,10 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
                 hospital: hospital._id,
                 startTime: new Date(current),
                 endTime: new Date(next),
-                status: 'available'
+                status: 'available',
+                max_appointments: maxAppts,
+                booked_count: 0,
+                hold_count: 0
             });
 
             current = next;
@@ -246,53 +255,191 @@ export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<v
     }
 };
 
-// @desc    Create appointment (Book slot)
+// @desc    Create appointment (Book slot with Transaction & SELECT FOR UPDATE protection)
 // @route   POST /api/hospital/dashboard/appointments
 export const createAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
+    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId } = req.body;
+    const patientId = req.user?.id || req.user?._id;
+
+    if (!patientId) {
+        res.status(401).json({ message: 'User not authenticated' });
+        return;
+    }
+
+    if (!slotId || !doctorId || !hospitalId || !slotTime) {
+        res.status(400).json({ message: 'Missing required booking fields' });
+        return;
+    }
+
+    // 4. DUPLICATE BOOKING PREVENTION
     try {
-        const { doctorId, hospitalId, slotId, slotTime } = req.body;
-        const patientId = req.user?.id;
+        const existingActiveBooking = await Appointment.findOne({
+            patient: patientId,
+            slot: slotId,
+            status: { $ne: 'cancelled' }
+        });
 
-        // Atomic check and update of slot status to prevent race conditions
-        const slot = await Slot.findOneAndUpdate(
-            { _id: slotId, status: 'available' },
-            { status: 'booked' },
-            { new: true }
-        );
-
-        if (!slot) {
-            res.status(400).json({ message: 'Slot is no longer available or already booked' });
+        if (existingActiveBooking) {
+            res.status(400).json({ 
+                code: 'ALREADY_BOOKED',
+                message: 'You already have an appointment for this slot.' 
+            });
             return;
         }
 
-        const appointment = await Appointment.create({
-            patient: patientId as any,
-            doctor: doctorId as any,
-            hospital: hospitalId as any,
-            slot: slotId as any,
-            slotTime: new Date(slotTime),
-            status: 'pending'
-        });
-
-        // Link appointment back to slot
-        slot.appointment = appointment._id as mongoose.Types.ObjectId;
-        await slot.save();
-
-        // Emit socket event for real-time update
-        const io = req.app.get('io');
-        if (io) {
-            io.emit('slotBooked', { 
-                slotId, 
-                doctorId, 
-                date: new Date(slotTime).toISOString().split('T')[0] 
-            });
+        // Idempotency check: prevent duplicate submissions from network retries
+        if (bookingRequestId) {
+            const idempotencyKey = `idempotency:${bookingRequestId}`;
+            const existingKey = await redis.get(idempotencyKey);
+            if (existingKey) {
+                res.status(409).json({ 
+                    code: 'DUPLICATE_SUBMISSION',
+                    message: 'Your booking is already being processed. Please wait.' 
+                });
+                return;
+            }
+            // Set idempotency lock for 10 seconds
+            await redis.setex(idempotencyKey, 10, 'processing');
         }
 
-        res.status(201).json({ message: 'Appointment booked successfully', appointment });
+        // Start MongoDB Session for Transaction
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            // Step 1: Lock the slot row (SELECT FOR UPDATE row-level locking equivalent)
+            const slot = await Slot.findById(slotId).session(session);
+            if (!slot) {
+                throw new Error('SLOT_NOT_FOUND');
+            }
+
+            if (slot.status === 'cancelled') {
+                throw new Error('SLOT_CANCELLED');
+            }
+
+            // Resolve max appointments
+            const doctor = await Doctor.findById(doctorId).session(session);
+            const maxAppts = slot.max_appointments || (doctor?.maxAppointmentsPerSlot) || 1;
+
+            // Step 2: Check booked_count < max_appointments
+            // Verify if slot has active holds or general space
+            const userHasHold = await isHeldByUser(slotId.toString(), patientId.toString());
+
+            if (slot.booked_count >= maxAppts) {
+                throw new Error('SLOT_FULL');
+            }
+
+            // Step 3: Insert appointment record (Generate unique token number as Step 5)
+            const activeAppointmentsCount = await Appointment.countDocuments({
+                slot: slotId,
+                status: { $ne: 'cancelled' }
+            }).session(session);
+
+            // Step 5: Generate unique token number
+            const tokenNumber = activeAppointmentsCount + 1;
+
+            const appointment = new Appointment({
+                patient: patientId,
+                doctor: doctorId,
+                hospital: hospitalId,
+                slot: slotId,
+                slotTime: new Date(slotTime),
+                status: 'confirmed',
+                tokenNumber
+            });
+
+            await appointment.save({ session });
+
+            // Step 4: Increment booked_count atomically only if booked_count < max_appointments
+            const updatedSlot = await Slot.findOneAndUpdate(
+                { 
+                    _id: slotId, 
+                    booked_count: { $lt: maxAppts } 
+                },
+                { 
+                    $inc: { booked_count: 1, hold_count: userHasHold ? -1 : 0 },
+                    $set: { 
+                        status: (slot.booked_count + 1 >= maxAppts) ? 'booked' : 'available',
+                        appointment: appointment._id
+                    }
+                },
+                { session, new: true }
+            );
+
+            if (!updatedSlot) {
+                throw new Error('SLOT_FULL'); // If 0 rows affected, reject with SLOT_FULL
+            }
+
+            // Step 6: Commit transaction
+            await session.commitTransaction();
+            session.endSession();
+
+            // Release the temporary hold
+            if (userHasHold) {
+                await redis.del(`hold:${slotId}:${patientId}`);
+            }
+
+            // Real-time socket updates for availability
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('slotBooked', {
+                    slotId,
+                    doctorId,
+                    date: new Date(slotTime).toISOString().split('T')[0],
+                    bookedCount: updatedSlot.booked_count,
+                    holdCount: updatedSlot.hold_count,
+                    maxAppointments: maxAppts
+                });
+            }
+
+            res.status(201).json({
+                success: true,
+                message: 'Appointment booked successfully',
+                appointment: {
+                    ...appointment.toObject(),
+                    tokenNumber
+                }
+            });
+
+        } catch (error: any) {
+            await session.abortTransaction();
+            session.endSession();
+
+            if (bookingRequestId) {
+                await redis.del(`idempotency:${bookingRequestId}`);
+            }
+            throw error;
+        }
+
     } catch (error: any) {
-        res.status(500).json({ message: 'Error booking appointment', error: error.message });
+        console.error('[BookingTransactionError]', error.message);
+
+        // 5. USER-FACING ERROR MESSAGES based on scenario
+        if (error.message === 'SLOT_FULL') {
+            res.status(400).json({
+                code: 'SLOT_FULL',
+                message: 'Sorry, this slot was just booked by someone else. Please choose another slot.'
+            });
+        } else if (error.message === 'SLOT_CANCELLED') {
+            res.status(400).json({
+                code: 'SLOT_CANCELLED',
+                message: 'This slot has been cancelled by the hospital. Please choose another.'
+            });
+        } else if (error.message === 'SLOT_NOT_FOUND') {
+            res.status(404).json({
+                code: 'NOT_FOUND',
+                message: 'Slot not found. Please choose another.'
+            });
+        } else {
+            res.status(500).json({
+                code: 'SERVER_ERROR',
+                message: 'An unexpected booking error occurred. Please try again.',
+                error: error.message
+            });
+        }
     }
 };
+
 
 // @desc    Get current user's (patient's) bookings
 // @route   GET /api/hospital/dashboard/appointments/my-bookings
@@ -421,12 +568,18 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
                 return;
             }
 
+            const doctorDoc = await Doctor.findById(doctorId);
+            const maxAppts = doctorDoc?.maxAppointmentsPerSlot || 1;
+
             slotsToInsert.push({
                 doctor: doctorId,
                 hospital: hospital._id,
                 startTime: start,
                 endTime: end,
-                status: 'available'
+                status: 'available',
+                max_appointments: maxAppts,
+                booked_count: 0,
+                hold_count: 0
             });
         }
 
@@ -498,3 +651,103 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         res.status(500).json({ message: 'Error cancelling slot', error: error.message });
     }
 };
+
+// @desc    Create temporary hold on a slot
+// @route   POST /api/hospital/dashboard/slots/hold
+export const holdSlot = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { slotId } = req.body;
+        const patientId = req.user?.id || req.user?._id;
+
+        if (!patientId) {
+            res.status(401).json({ message: 'User not authenticated' });
+            return;
+        }
+
+        if (!slotId) {
+            res.status(400).json({ message: 'Slot ID is required' });
+            return;
+        }
+
+        // Check if already booked
+        const existingActiveBooking = await Appointment.findOne({
+            patient: patientId,
+            slot: slotId,
+            status: { $ne: 'cancelled' }
+        });
+
+        if (existingActiveBooking) {
+            res.status(400).json({
+                code: 'ALREADY_BOOKED',
+                message: 'You already have an appointment for this slot.'
+            });
+            return;
+        }
+
+        const io = req.app.get('io');
+        const holdResult = await createHold(slotId, patientId.toString(), io);
+
+        if (!holdResult.success) {
+            if (holdResult.message === 'Slot just became full') {
+                res.status(400).json({
+                    code: 'SLOT_FULL',
+                    message: 'Sorry, this slot was just booked by someone else. Please choose another slot.'
+                });
+            } else if (holdResult.message === 'Slot on temporary hold') {
+                res.status(400).json({
+                    code: 'SLOT_ON_HOLD',
+                    message: 'This slot is temporarily held. Please try again in a few minutes or choose another.'
+                });
+            } else if (holdResult.message === 'Slot cancelled by admin') {
+                res.status(400).json({
+                    code: 'SLOT_CANCELLED',
+                    message: 'This slot has been cancelled by the hospital. Please choose another.'
+                });
+            } else {
+                res.status(400).json({
+                    code: 'HOLD_FAILED',
+                    message: holdResult.message
+                });
+            }
+            return;
+        }
+
+        res.json({
+            success: true,
+            message: holdResult.message,
+            expiryMs: holdResult.expiryMs
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error holding slot', error: error.message });
+    }
+};
+
+// @desc    Release temporary hold on a slot
+// @route   POST /api/hospital/dashboard/slots/release-hold
+export const releaseSlotHold = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { slotId } = req.body;
+        const patientId = req.user?.id || req.user?._id;
+
+        if (!patientId) {
+            res.status(401).json({ message: 'User not authenticated' });
+            return;
+        }
+
+        if (!slotId) {
+            res.status(400).json({ message: 'Slot ID is required' });
+            return;
+        }
+
+        const io = req.app.get('io');
+        const released = await releaseHold(slotId, patientId.toString(), io);
+
+        res.json({
+            success: true,
+            released
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error releasing slot hold', error: error.message });
+    }
+};
+

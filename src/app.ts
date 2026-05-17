@@ -175,16 +175,27 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     res.status(err.status || 500).json({ message: err.message || 'Internal Server Error' });
 });
 
+import { runHoldCleanup } from './utils/holdManager';
+
 if (process.env.NODE_ENV !== 'production') {
     httpServer.listen(PORT, () => {
         console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
         // Connect to DB in background so server stays alive even if DB is slow
         connectDB().then(() => {
             console.log('✅ Background DB connection established');
+            // Start the 60 seconds cron fallback job for expired holds
+            setInterval(() => {
+                runHoldCleanup(io);
+            }, 60000);
         }).catch(err => {
             console.error('❌ Background DB connection failed:', err);
         });
     });
+} else {
+    // Start interval in production or serverless environments if active
+    setInterval(() => {
+        runHoldCleanup(io);
+    }, 60000);
 }
 
 export default app;
