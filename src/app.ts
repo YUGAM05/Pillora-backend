@@ -15,8 +15,12 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: '*', // Adjust for production
-        methods: ['GET', 'POST']
+        origin: (origin, callback) => {
+            // Allow all origins dynamically
+            callback(null, true);
+        },
+        methods: ['GET', 'POST'],
+        credentials: true
     }
 });
 
