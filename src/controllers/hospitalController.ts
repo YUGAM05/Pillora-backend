@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
+import Doctor from '../models/Doctor'; // ✅ Added
 import { AuthRequest } from '../middleware/authMiddleware';
 import { v2 as cloudinary } from 'cloudinary'; // ✅ Added
 import slugify from 'slugify';
@@ -55,7 +56,25 @@ export const getHospitalById = async (req: Request, res: Response): Promise<void
         }
 
         if (hospital) {
-            res.json(hospital);
+            // Fetch real doctors from Doctor model that are linked to this hospital
+            const dbDoctors = await Doctor.find({ hospital: hospital._id });
+            
+            // Convert Mongoose document to plain object to allow modifying
+            const hospitalObj = hospital.toObject();
+            
+            // Map the Doctor collection fields to match the structure expected by the frontend
+            hospitalObj.doctors = dbDoctors.map(doc => ({
+                _id: doc._id,
+                name: doc.name,
+                specialization: doc.specialty,
+                fee: doc.fee,
+                daysAvailable: doc.availability?.map(a => a.day) || [],
+                timing: doc.availability && doc.availability.length > 0
+                    ? `${doc.availability[0].startTime} - ${doc.availability[0].endTime}`
+                    : 'Flexible timings'
+            }));
+
+            res.json(hospitalObj);
         } else {
             res.status(404).json({ message: 'Hospital not found' });
         }

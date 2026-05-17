@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deliveryOnly = exports.sellerOnly = exports.adminOnly = exports.protect = void 0;
+exports.hospitalOnly = exports.deliveryOnly = exports.sellerOnly = exports.adminOnly = exports.protect = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
@@ -122,3 +122,13 @@ const deliveryOnly = (req, res, next) => {
     }
 };
 exports.deliveryOnly = deliveryOnly;
+const hospitalOnly = (req, res, next) => {
+    if (req.user && (req.user.role === 'hospital' || req.user.role === 'admin')) {
+        next();
+    }
+    else {
+        res.status(403).json({ message: 'Not authorized as hospital partner' });
+        return;
+    }
+};
+exports.hospitalOnly = hospitalOnly;

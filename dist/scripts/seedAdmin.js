@@ -23,7 +23,7 @@ const seedAdmin = () => __awaiter(void 0, void 0, void 0, function* () {
         console.log('Connecting to MongoDB at:', uri);
         yield mongoose_1.default.connect(uri);
         console.log('Connected! Creating Admin...');
-        const email = 'admin@life-link.com';
+        const email = 'admin@pillora.in';
         const password = 'admin';
         const salt = yield bcryptjs_1.default.genSalt(10);
         const passwordHash = yield bcryptjs_1.default.hash(password, salt);
@@ -31,7 +31,8 @@ const seedAdmin = () => __awaiter(void 0, void 0, void 0, function* () {
             name: 'Super Admin',
             email,
             passwordHash,
-            role: 'admin'
+            role: 'admin',
+            status: 'approved'
         }, { upsert: true, new: true });
         console.log('-----------------------------------');
         console.log('✅ Admin Account Ready');

@@ -28,8 +28,12 @@ const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: '*', // Adjust for production
-        methods: ['GET', 'POST']
+        origin: (origin, callback) => {
+            // Allow all origins dynamically
+            callback(null, true);
+        },
+        methods: ['GET', 'POST'],
+        credentials: true
     }
 });
 // Make io accessible in controllers
@@ -58,9 +62,10 @@ const allowedOrigins = [
 app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
-    // Allow all local origins (localhost and 127.0.0.1) or any origin in the allowed list
+    // Allow all local origins, Vercel deployments, or allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
-    if (origin && (isLocal || allowedOrigins.includes(origin))) {
+    const isVercel = origin && origin.endsWith('.vercel.app');
+    if (origin && (isLocal || isVercel || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     }
     else if (!origin) {
@@ -68,7 +73,7 @@ app.use((req, res, next) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
@@ -114,6 +119,7 @@ const medicineRoutes_1 = __importDefault(require("./routes/medicineRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
 const partnerRoutes_1 = __importDefault(require("./routes/partnerRoutes"));
 const hospitalDashboardRoutes_1 = __importDefault(require("./routes/hospitalDashboardRoutes"));
+const analyticsRoutes_1 = __importDefault(require("./routes/analyticsRoutes"));
 app.use((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     if (mongoose_1.default.connection.readyState === 0) {
         yield (0, exports.connectDB)();
@@ -140,6 +146,7 @@ app.use('/api/medicines', medicineRoutes_1.default);
 app.use('/api/upload', uploadRoutes_1.default);
 app.use('/api/partners', partnerRoutes_1.default);
 app.use('/api/hospital/dashboard', hospitalDashboardRoutes_1.default);
+app.use('/api/metrics', analyticsRoutes_1.default);
 app.get('/', (req, res) => {
     res.status(200).json({
         message: 'Apex Care API is running with Sockets',

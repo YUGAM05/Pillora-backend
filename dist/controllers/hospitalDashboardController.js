@@ -94,10 +94,24 @@ const bulkGenerateSlots = (req, res) => __awaiter(void 0, void 0, void 0, functi
             res.status(400).json({ message: 'Invalid date or time format' });
             return;
         }
+        const durationMinutes = parseInt(duration.toString(), 10);
+        if (isNaN(durationMinutes) || durationMinutes <= 0) {
+            res.status(400).json({ message: 'Invalid slot duration' });
+            return;
+        }
+        // Check for existing slots for this doctor in the time range to prevent duplicate slots
+        const existingSlots = yield Slot_1.default.countDocuments({
+            doctor: doctorId,
+            startTime: { $gte: start, $lt: end }
+        });
+        if (existingSlots > 0) {
+            res.status(400).json({ message: 'Slots have already been generated for this doctor within this time range.' });
+            return;
+        }
         const slots = [];
         let current = new Date(start);
         while (current < end) {
-            const next = new Date(current.getTime() + duration * 60000);
+            const next = new Date(current.getTime() + durationMinutes * 60000);
             if (next > end)
                 break;
             slots.push({
@@ -111,6 +125,11 @@ const bulkGenerateSlots = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         if (slots.length > 0) {
             yield Slot_1.default.insertMany(slots);
+            // Emit socket event for real-time update
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('slotsUpdated', { doctorId, date });
+            }
         }
         res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
     }
@@ -170,8 +189,7 @@ const getDoctorSlots = (req, res) => __awaiter(void 0, void 0, void 0, function*
         endOfDay.setHours(23, 59, 59, 999);
         const slots = yield Slot_1.default.find({
             doctor: id,
-            startTime: { $gte: startOfDay, $lte: endOfDay },
-            status: 'available'
+            startTime: { $gte: startOfDay, $lte: endOfDay }
         }).sort({ startTime: 1 });
         res.json(slots);
     }
@@ -204,6 +222,15 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         // Link appointment back to slot
         slot.appointment = appointment._id;
         yield slot.save();
+        // Emit socket event for real-time update
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('slotBooked', {
+                slotId,
+                doctorId,
+                date: new Date(slotTime).toISOString().split('T')[0]
+            });
+        }
         res.status(201).json({ message: 'Appointment booked successfully', appointment });
     }
     catch (error) {

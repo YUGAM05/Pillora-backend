@@ -14,11 +14,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updatePartnerRequestStatus = exports.getPartnerRequests = exports.submitPartnerRequest = void 0;
 const PartnerRequest_1 = __importDefault(require("../models/PartnerRequest"));
+const activityLogger_1 = require("../utils/activityLogger");
 const submitPartnerRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const partnerRequest = new PartnerRequest_1.default(req.body);
         yield partnerRequest.save();
         res.status(201).json({ success: true, message: 'Partner request submitted successfully' });
+        // Log Platform Activity
+        const io = req.app.get('io');
+        (0, activityLogger_1.logActivity)(io, {
+            title: 'New Partnership Inquiry',
+            description: `${req.body.name} from ${req.body.organization || 'an organization'} wants to partner with us.`,
+            type: 'partner'
+        });
     }
     catch (error) {
         console.error('Error submitting partner request:', error);

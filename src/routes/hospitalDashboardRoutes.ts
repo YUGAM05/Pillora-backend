@@ -14,21 +14,20 @@ import {
 
 const router = express.Router();
 
-// All routes require authentication and hospital role
-router.use(protect, isHospital);
+// ─── Public Routes (No authentication required to view slots) ───────────────────
+router.get('/doctors/:id/slots', getDoctorSlots);
 
-// Stats and basic info (attach hospital info to req)
-router.get('/stats', attachHospital, getHospitalStats);
-router.get('/doctors', attachHospital, getHospitalDoctors);
-router.get('/appointments', attachHospital, getHospitalAppointments);
-router.put('/appointments/:id/status', attachHospital, updateAppointmentStatus);
+// ─── Patient / Booking Routes (Requires login) ──────────────────────────────────
+router.post('/appointments', protect, createAppointment);
+
+// ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─
+router.get('/stats', protect, isHospital, attachHospital, getHospitalStats);
+router.get('/doctors', protect, isHospital, attachHospital, getHospitalDoctors);
+router.get('/appointments', protect, isHospital, attachHospital, getHospitalAppointments);
+router.put('/appointments/:id/status', protect, isHospital, attachHospital, updateAppointmentStatus);
 
 // Management restricted routes (only if SELF managed)
-router.post('/doctors', selfManagedOnly, addDoctor);
-router.post('/slots/generate', selfManagedOnly, bulkGenerateSlots);
-
-// Public / User Booking routes (accessible by patients too, so we just check protect)
-router.get('/doctors/:id/slots', getDoctorSlots);
-router.post('/appointments', createAppointment);
+router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
+router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
 
 export default router;

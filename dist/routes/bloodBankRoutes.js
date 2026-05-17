@@ -23,6 +23,7 @@ router.get('/requests', bloodBankController_1.getRequests);
 router.get('/my-requests', authMiddleware_1.protect, bloodBankController_1.getMyRequests);
 router.get('/my-donor', authMiddleware_1.protect, bloodBankController_1.getMyDonorProfile);
 router.get('/admin/requests', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.getAllRequestsAdmin);
+router.delete('/admin/requests/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.deleteRequest);
 router.patch('/admin/requests/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.updateRequestStatus);
 router.patch('/admin/requests/:id/kyc', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.updateKycStatus);
 router.post('/admin/requests/:id/verify-ai', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.verifyRequestWithAI);

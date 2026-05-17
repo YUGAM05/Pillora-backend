@@ -12,13 +12,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Donor_1 = __importDefault(require("../models/Donor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const bloodCompatibility_1 = require("../utils/bloodCompatibility");
 const whatsappService_1 = require("../utils/whatsappService");
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
+const activityLogger_1 = require("../utils/activityLogger");
 // @desc    Register as a blood donor
 // @route   POST /api/blood-bank/donors
 // @access  Private
@@ -55,6 +56,13 @@ const registerDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         }, { upsert: true, new: true, setDefaultsOnInsert: true });
         res.status(201).json(donor);
+        // Log Platform Activity
+        const io = req.app.get('io');
+        (0, activityLogger_1.logActivity)(io, {
+            title: 'New Blood Donor',
+            description: `${name || 'A user'} registered as a ${bloodGroup} donor in ${area}, ${city}.`,
+            type: 'blood_donor'
+        });
     }
     catch (error) {
         console.error("Blood Bank Registration Error:", error);
@@ -197,6 +205,13 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         });
         // 2. Instant Response: Return 201 Created to the frontend
         res.status(201).json(request);
+        // Log Platform Activity
+        const io = req.app.get('io');
+        (0, activityLogger_1.logActivity)(io, {
+            title: isUrgent ? 'Urgent Blood Request' : 'New Blood Request',
+            description: `${patientName} needs ${units} units of ${bloodGroup} at ${hospitalAddress}.`,
+            type: 'blood_request'
+        });
         // 3. Background Processing: Matching & notifications safe out of flow
         (() => __awaiter(void 0, void 0, void 0, function* () {
             try {
@@ -275,10 +290,52 @@ exports.getRequests = getRequests;
 // @desc    Get all donors (Admin)
 // @route   GET /api/blood-bank/admin/donors
 // @access  Private/Admin
+// @desc    Get all donors for admin
+// @route   GET /api/blood-bank/admin/donors
+// @access  Private/Admin
 const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const donors = yield BloodDonor_1.default.find({}).sort({ createdAt: -1 }).populate('user', 'name email');
-        res.json(donors);
+        const [donors1, donors2] = yield Promise.all([
+            BloodDonor_1.default.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
+            Donor_1.default.find({}).sort({ createdAt: -1 })
+        ]);
+        console.log(`[AdminDonors] BloodDonor: ${donors1.length}, LegacyDonor: ${donors2.length}`);
+        // Standardize the format for the admin table
+        const combinedDonors = [
+            ...donors1.map(d => ({
+                _id: d._id,
+                name: d.name,
+                email: d.email,
+                bloodGroup: d.bloodGroup,
+                age: d.age,
+                gender: d.gender,
+                phone: d.phone,
+                city: d.city,
+                area: d.area,
+                address: d.address,
+                isAvailable: d.isAvailable,
+                source: d.source || 'user_panel',
+                createdAt: d.createdAt
+            })),
+            ...donors2.map((d) => ({
+                _id: d._id,
+                name: d.donor_name,
+                email: 'N/A',
+                bloodGroup: d.blood_group,
+                age: 25, // Default for legacy data
+                gender: 'Other',
+                phone: d.donor_phone,
+                city: d.city,
+                area: d.area,
+                address: 'Imported Record',
+                isAvailable: true,
+                source: 'imported',
+                createdAt: d.createdAt
+            }))
+        ];
+        // Sort combined list by date
+        combinedDonors.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        res.json(combinedDonors);
     }
     catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -321,8 +378,11 @@ exports.updateRequestStatus = updateRequestStatus;
 // @access  Private/Admin
 const deleteDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const donor = yield BloodDonor_1.default.findByIdAndDelete(req.params.id);
-        if (!donor) {
+        const { id } = req.params;
+        // Try deleting from both collections
+        const donor1 = yield BloodDonor_1.default.findByIdAndDelete(id);
+        const donor2 = yield Donor_1.default.findByIdAndDelete(id);
+        if (!donor1 && !donor2) {
             res.status(404).json({ message: 'Donor not found' });
             return;
         }
@@ -333,6 +393,27 @@ const deleteDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.deleteDonor = deleteDonor;
+// @desc    Delete a request
+// @route   DELETE /api/blood-bank/admin/requests/:id
+// @access  Private/Admin
+const deleteRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        console.log(`[BloodBankController] DELETE request received for ID: ${id}`);
+        const request = yield BloodRequest_1.default.findByIdAndDelete(id);
+        if (!request) {
+            console.warn(`[BloodBankController] Request with ID ${id} NOT found for deletion.`);
+            res.status(404).json({ message: 'Request document not found in database (404)' });
+            return;
+        }
+        console.log(`[BloodBankController] Successfully deleted request ID: ${id}`);
+        res.json({ message: 'Request removed successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.deleteRequest = deleteRequest;
 // @desc    Verify blood request KYC with Local AI Agent
 // @route   POST /api/blood-bank/admin/requests/:id/verify-ai
 // @access  Private/Admin

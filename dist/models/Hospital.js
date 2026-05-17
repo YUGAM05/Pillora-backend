@@ -59,6 +59,17 @@ const HospitalSchema = new mongoose_1.Schema({
     doctors: [DoctorSchema],
     management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
     is_verified: { type: Boolean, default: false },
+    plan: {
+        type: String,
+        enum: ['Standard', 'Premium', 'Enterprise'],
+        default: 'Standard'
+    },
+    // Plan Benefits
+    is_featured: { type: Boolean, default: false }, // For "Top of Search"
+    has_govt_schemes: { type: Boolean, default: false }, // For "Government Schemes Tag"
+    has_custom_page: { type: Boolean, default: false }, // For "Custom landing page"
+    is_spotlight: { type: Boolean, default: false }, // For "Homepage banner & spotlight"
+    priority_support: { type: Boolean, default: false },
     user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Hospital', HospitalSchema);

@@ -12,9 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = void 0;
+exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
+const Donor_1 = __importDefault(require("../models/Donor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
@@ -24,8 +25,22 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
 const slugify_1 = __importDefault(require("slugify"));
+const PlatformActivity_1 = __importDefault(require("../models/PlatformActivity"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
+// @desc    Get platform activities
+// @route   GET /api/admin/activities
+// @access  Private/Admin
+const getPlatformActivities = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const activities = yield PlatformActivity_1.default.find().sort({ timestamp: -1 }).limit(20);
+        res.json(activities);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.getPlatformActivities = getPlatformActivities;
 // @desc    Get system statistics
 // @route   GET /api/admin/stats
 // @access  Private/Admin
@@ -33,7 +48,11 @@ const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
     try {
         const totalUsers = yield User_1.default.countDocuments({ role: 'customer' });
         const totalSellers = yield User_1.default.countDocuments({ role: 'seller', status: 'approved' });
-        const totalDonors = yield BloodDonor_1.default.countDocuments();
+        const [donorCount1, donorCount2] = yield Promise.all([
+            BloodDonor_1.default.countDocuments(),
+            Donor_1.default.countDocuments()
+        ]);
+        const totalDonors = donorCount1 + donorCount2;
         const totalOrders = yield Order_1.default.countDocuments();
         const pendingProducts = yield Inventory_1.default.countDocuments({ status: 'pending' });
         // Calculate Revenue
@@ -371,14 +390,21 @@ exports.verifyUserAadhaar = verifyUserAadhaar;
 // @access  Private/Admin
 const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, city, email, address, consultationFee, management_type, image, images, ambulanceContact, phoneNumbers, description, isOpen24Hours, isOnlinePaymentAvailable, doctors } = req.body;
+        const { name, city, email, address, consultationFee, management_type, plan, image, images, ambulanceContact, phoneNumbers, description, isOpen24Hours, isOnlinePaymentAvailable, doctors } = req.body;
         if (!name || !city || !email || !address || !consultationFee) {
-            res.status(400).json({ message: 'Missing required fields' });
+            console.error('Registration failed: Missing required fields', { name, city, email, address, consultationFee });
+            res.status(400).json({ message: 'Missing required fields: Name, City, Email, Address, and Fee are mandatory.' });
             return;
         }
-        const userExists = yield User_1.default.findOne({ email: email.toLowerCase() });
+        const validPlans = ['Standard', 'Premium', 'Enterprise'];
+        if (plan && !validPlans.includes(plan)) {
+            res.status(400).json({ message: 'Invalid subscription plan selected.' });
+            return;
+        }
+        const normalizedEmail = email.toLowerCase().trim();
+        const userExists = yield User_1.default.findOne({ email: normalizedEmail });
         if (userExists) {
-            res.status(400).json({ message: 'User with this email already exists' });
+            res.status(400).json({ message: 'A partner account with this email already exists.' });
             return;
         }
         // 1. Generate Credentials
@@ -388,7 +414,7 @@ const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, functio
         // 2. Create User account for Hospital
         const user = yield User_1.default.create({
             name,
-            email: email.toLowerCase(),
+            email: normalizedEmail,
             passwordHash,
             role: 'hospital',
             status: 'approved',
@@ -409,8 +435,15 @@ const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, functio
             address,
             consultationFee: Number(consultationFee),
             management_type: management_type || 'SELF',
+            plan: req.body.plan || 'Standard',
+            // Plan-based feature mapping
+            is_verified: true, // All plans get verified badge
+            is_featured: req.body.plan === 'Premium' || req.body.plan === 'Enterprise',
+            has_govt_schemes: req.body.plan === 'Premium' || req.body.plan === 'Enterprise',
+            has_custom_page: req.body.plan === 'Enterprise',
+            is_spotlight: req.body.plan === 'Enterprise',
+            priority_support: req.body.plan === 'Enterprise',
             user: user._id,
-            is_verified: true,
             image: image || "",
             images: Array.isArray(images) ? images : [],
             ambulanceContact: ambulanceContact || "",

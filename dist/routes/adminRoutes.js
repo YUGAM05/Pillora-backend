@@ -10,6 +10,7 @@ const router = express_1.default.Router();
 // Protect stats route with Admin check
 router.get('/stats', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getSystemStats);
 router.get('/trends', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getAdminTrends); // NEW: Trend data for graphs
+router.get('/activities', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getPlatformActivities); // NEW: Real-time platform activities
 // User Management
 const adminController_2 = require("../controllers/adminController");
 router.get('/users', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUsers);

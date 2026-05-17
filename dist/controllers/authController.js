@@ -21,6 +21,7 @@ const axios_1 = __importDefault(require("axios"));
 const otplib_1 = require("otplib");
 const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
+const activityLogger_1 = require("../utils/activityLogger");
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -102,6 +103,13 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const user = yield User_1.default.create(userData);
         if (user) {
             console.log('User created successfully:', user._id);
+            // Log Platform Activity
+            const io = req.app.get('io');
+            (0, activityLogger_1.logActivity)(io, {
+                title: 'New User Registered',
+                description: `${user.name} joined the platform as a ${user.role}.`,
+                type: 'user'
+            });
             if (user.status === 'pending') {
                 res.status(201).json({
                     _id: user._id,
@@ -589,13 +597,13 @@ exports.verifyOtp = verifyOtp;
 // ═══════════════════════════════════════════════════════════════════════════════
 const setupAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const email = 'admin@life-link.com';
+        const email = 'admin@pillora.in';
         const password = 'admin';
         const salt = yield bcryptjs_1.default.genSalt(10);
         const passwordHash = yield bcryptjs_1.default.hash(password, salt);
         yield User_1.default.findOneAndUpdate({ email }, { name: 'Super Admin', email, passwordHash, role: 'admin', status: 'approved' }, { upsert: true, new: true });
         console.log("Admin setup complete via API.");
-        res.json({ message: "Admin Account Created Successfully! Login with admin@life-link.com / admin" });
+        res.json({ message: "Admin Account Created Successfully! Login with admin@pillora.in / admin" });
     }
     catch (error) {
         console.error('Setup Admin Error:', error);

@@ -14,9 +14,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
+const Doctor_1 = __importDefault(require("../models/Doctor")); // ✅ Added
 const cloudinary_1 = require("cloudinary"); // ✅ Added
 const slugify_1 = __importDefault(require("slugify"));
 const mongoose_1 = __importDefault(require("mongoose"));
+const activityLogger_1 = require("../utils/activityLogger");
 // ✅ Cloudinary config
 cloudinary_1.v2.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -65,7 +67,25 @@ const getHospitalById = (req, res) => __awaiter(void 0, void 0, void 0, function
             }
         }
         if (hospital) {
-            res.json(hospital);
+            // Fetch real doctors from Doctor model that are linked to this hospital
+            const dbDoctors = yield Doctor_1.default.find({ hospital: hospital._id });
+            // Convert Mongoose document to plain object to allow modifying
+            const hospitalObj = hospital.toObject();
+            // Map the Doctor collection fields to match the structure expected by the frontend
+            hospitalObj.doctors = dbDoctors.map(doc => {
+                var _a;
+                return ({
+                    _id: doc._id,
+                    name: doc.name,
+                    specialization: doc.specialty,
+                    fee: doc.fee,
+                    daysAvailable: ((_a = doc.availability) === null || _a === void 0 ? void 0 : _a.map(a => a.day)) || [],
+                    timing: doc.availability && doc.availability.length > 0
+                        ? `${doc.availability[0].startTime} - ${doc.availability[0].endTime}`
+                        : 'Flexible timings'
+                });
+            });
+            res.json(hospitalObj);
         }
         else {
             res.status(404).json({ message: 'Hospital not found' });
@@ -195,6 +215,13 @@ const createHospital = (req, res) => __awaiter(void 0, void 0, void 0, function*
             doctors: Array.isArray(doctors) ? doctors : []
         });
         res.status(201).json(hospital);
+        // Log Platform Activity
+        const io = req.app.get('io');
+        (0, activityLogger_1.logActivity)(io, {
+            title: 'New Hospital Registered',
+            description: `${name} has been added to the network in ${city}.`,
+            type: 'hospital'
+        });
     }
     catch (error) {
         res.status(500).json({ message: error.message || 'Server Error', error });
