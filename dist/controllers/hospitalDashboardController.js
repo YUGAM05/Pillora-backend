@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
@@ -238,3 +238,25 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.createAppointment = createAppointment;
+// @desc    Get current user's (patient's) bookings
+// @route   GET /api/hospital/dashboard/appointments/my-bookings
+const getMyBookings = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const patientId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.id) || ((_b = req.user) === null || _b === void 0 ? void 0 : _b._id);
+        if (!patientId) {
+            res.status(401).json({ message: 'User not authenticated' });
+            return;
+        }
+        const appointments = yield Appointment_1.default.find({ patient: patientId })
+            .populate('doctor', 'name specialty specialization')
+            .populate('hospital', 'name address city')
+            .populate('slot', 'startTime endTime')
+            .sort({ slotTime: -1 });
+        res.json(appointments);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching patient bookings', error: error.message });
+    }
+});
+exports.getMyBookings = getMyBookings;

@@ -257,3 +257,25 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
         res.status(500).json({ message: 'Error booking appointment', error: error.message });
     }
 };
+
+// @desc    Get current user's (patient's) bookings
+// @route   GET /api/hospital/dashboard/appointments/my-bookings
+export const getMyBookings = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const patientId = req.user?.id || req.user?._id;
+        if (!patientId) {
+            res.status(401).json({ message: 'User not authenticated' });
+            return;
+        }
+
+        const appointments = await Appointment.find({ patient: patientId })
+            .populate('doctor', 'name specialty specialization')
+            .populate('hospital', 'name address city')
+            .populate('slot', 'startTime endTime')
+            .sort({ slotTime: -1 });
+
+        res.json(appointments);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching patient bookings', error: error.message });
+    }
+};

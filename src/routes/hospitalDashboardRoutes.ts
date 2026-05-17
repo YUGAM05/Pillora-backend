@@ -9,7 +9,8 @@ import {
     getHospitalAppointments,
     updateAppointmentStatus,
     getDoctorSlots,
-    createAppointment
+    createAppointment,
+    getMyBookings
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -18,6 +19,7 @@ const router = express.Router();
 router.get('/doctors/:id/slots', getDoctorSlots);
 
 // ─── Patient / Booking Routes (Requires login) ──────────────────────────────────
+router.get('/appointments/my-bookings', protect, getMyBookings);
 router.post('/appointments', protect, createAppointment);
 
 // ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─

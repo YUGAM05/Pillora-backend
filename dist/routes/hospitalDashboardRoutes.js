@@ -11,6 +11,7 @@ const router = express_1.default.Router();
 // ─── Public Routes (No authentication required to view slots) ───────────────────
 router.get('/doctors/:id/slots', hospitalDashboardController_1.getDoctorSlots);
 // ─── Patient / Booking Routes (Requires login) ──────────────────────────────────
+router.get('/appointments/my-bookings', authMiddleware_1.protect, hospitalDashboardController_1.getMyBookings);
 router.post('/appointments', authMiddleware_1.protect, hospitalDashboardController_1.createAppointment);
 // ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─
 router.get('/stats', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalStats);
