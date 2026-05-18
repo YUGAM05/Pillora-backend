@@ -246,7 +246,7 @@ exports.getDoctorSlots = getDoctorSlots;
 // @route   POST /api/hospital/dashboard/appointments
 const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId } = req.body;
+    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId, patientName, patientPhone, patientEmail, patientAge } = req.body;
     const patientId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.id) || ((_b = req.user) === null || _b === void 0 ? void 0 : _b._id);
     if (!patientId) {
         res.status(401).json({ message: 'User not authenticated' });
@@ -319,7 +319,11 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 slot: slotId,
                 slotTime: new Date(slotTime),
                 status: 'confirmed',
-                tokenNumber
+                tokenNumber,
+                patientName,
+                patientPhone,
+                patientEmail,
+                patientAge: patientAge ? Number(patientAge) : undefined
             });
             yield appointment.save({ session });
             // Step 4: Increment booked_count atomically only if booked_count < max_appointments

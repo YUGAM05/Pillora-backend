@@ -259,7 +259,7 @@ export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<v
 // @desc    Create appointment (Book slot with Transaction & SELECT FOR UPDATE protection)
 // @route   POST /api/hospital/dashboard/appointments
 export const createAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
-    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId } = req.body;
+    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId, patientName, patientPhone, patientEmail, patientAge } = req.body;
     const patientId = req.user?.id || req.user?._id;
 
     if (!patientId) {
@@ -346,7 +346,11 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
                 slot: slotId,
                 slotTime: new Date(slotTime),
                 status: 'confirmed',
-                tokenNumber
+                tokenNumber,
+                patientName,
+                patientPhone,
+                patientEmail,
+                patientAge: patientAge ? Number(patientAge) : undefined
             });
 
             await appointment.save({ session });

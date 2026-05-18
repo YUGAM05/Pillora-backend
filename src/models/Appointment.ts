@@ -11,6 +11,10 @@ export interface IAppointment extends Document {
     bookingDate: Date;
     notes?: string;
     tokenNumber?: number;
+    patientName?: string;
+    patientPhone?: string;
+    patientEmail?: string;
+    patientAge?: number;
 }
 
 const AppointmentSchema: Schema = new Schema({
@@ -32,6 +36,10 @@ const AppointmentSchema: Schema = new Schema({
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
     tokenNumber: { type: Number },
+    patientName: { type: String },
+    patientPhone: { type: String },
+    patientEmail: { type: String },
+    patientAge: { type: Number },
 }, { timestamps: true });
 
 export default mongoose.model<IAppointment>('Appointment', AppointmentSchema);

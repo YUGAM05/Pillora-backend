@@ -53,5 +53,9 @@ const AppointmentSchema = new mongoose_1.Schema({
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
     tokenNumber: { type: Number },
+    patientName: { type: String },
+    patientPhone: { type: String },
+    patientEmail: { type: String },
+    patientAge: { type: Number },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Appointment', AppointmentSchema);
