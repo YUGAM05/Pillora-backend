@@ -17,7 +17,8 @@ import {
     cancelSlot,
     holdSlot,
     releaseSlotHold,
-    deleteSlot
+    deleteSlot,
+    createManualAppointment
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -35,6 +36,7 @@ router.post('/slots/release-hold', protect, releaseSlotHold);
 router.get('/stats', protect, isHospital, attachHospital, getHospitalStats);
 router.get('/doctors', protect, isHospital, attachHospital, getHospitalDoctors);
 router.get('/appointments', protect, isHospital, attachHospital, getHospitalAppointments);
+router.post('/appointments/manual', protect, isHospital, attachHospital, createManualAppointment);
 router.put('/appointments/:id/status', protect, isHospital, attachHospital, updateAppointmentStatus);
 router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
 

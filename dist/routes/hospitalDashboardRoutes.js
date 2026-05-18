@@ -19,6 +19,7 @@ router.post('/slots/release-hold', authMiddleware_1.protect, hospitalDashboardCo
 router.get('/stats', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalStats);
 router.get('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalDoctors);
 router.get('/appointments', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalAppointments);
+router.post('/appointments/manual', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.createManualAppointment);
 router.put('/appointments/:id/status', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updateAppointmentStatus);
 router.get('/slots', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSlots);
 // Management restricted routes (only if SELF managed)

@@ -12,10 +12,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
+const User_1 = __importDefault(require("../models/User"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
 const holdManager_1 = require("../utils/holdManager");
@@ -710,3 +711,127 @@ const releaseSlotHold = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.releaseSlotHold = releaseSlotHold;
+// @desc    Create manual appointment by hospital admin
+// @route   POST /api/hospital/appointments/manual
+// @access  Private/Hospital
+const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { patientName, patientEmail, patientPhone, doctorId, slotId, slotTime, notes, paymentStatus } = req.body;
+        if (!patientName || !patientEmail || !doctorId || !slotId || !slotTime) {
+            res.status(400).json({ message: 'Missing required manual booking fields' });
+            return;
+        }
+        // 1. Find or create the patient
+        let patient = yield User_1.default.findOne({ email: patientEmail.toLowerCase() });
+        if (!patient) {
+            patient = yield User_1.default.create({
+                name: patientName,
+                email: patientEmail.toLowerCase(),
+                phone: patientPhone || '',
+                role: 'customer',
+                status: 'approved',
+                agreedToTerms: true
+            });
+        }
+        else if (patientPhone && !patient.phone) {
+            // Update phone if not previously set
+            patient.phone = patientPhone;
+            yield patient.save();
+        }
+        const patientId = patient._id;
+        // 2. Start Transaction to prevent double booking
+        const session = yield mongoose_1.default.startSession();
+        session.startTransaction();
+        try {
+            const slot = yield Slot_1.default.findById(slotId).session(session);
+            if (!slot) {
+                throw new Error('SLOT_NOT_FOUND');
+            }
+            if (slot.status === 'cancelled') {
+                throw new Error('SLOT_CANCELLED');
+            }
+            const doctor = yield Doctor_1.default.findById(doctorId).session(session);
+            const maxAppts = slot.max_appointments || (doctor === null || doctor === void 0 ? void 0 : doctor.maxAppointmentsPerSlot) || 1;
+            if (slot.booked_count >= maxAppts) {
+                throw new Error('SLOT_FULL');
+            }
+            // Generate Token Number
+            const activeAppointmentsCount = yield Appointment_1.default.countDocuments({
+                slot: slotId,
+                status: { $ne: 'cancelled' }
+            }).session(session);
+            const tokenNumber = activeAppointmentsCount + 1;
+            const appointment = new Appointment_1.default({
+                patient: patientId,
+                doctor: doctorId,
+                hospital: hospital._id,
+                slot: slotId,
+                slotTime: new Date(slotTime),
+                status: 'confirmed',
+                paymentStatus: paymentStatus || 'pending',
+                notes: notes || '',
+                tokenNumber
+            });
+            yield appointment.save({ session });
+            // Increment booked_count atomically
+            const updatedSlot = yield Slot_1.default.findOneAndUpdate({
+                _id: slotId,
+                booked_count: { $lt: maxAppts }
+            }, {
+                $inc: { booked_count: 1 },
+                $set: {
+                    status: (slot.booked_count + 1 >= maxAppts) ? 'booked' : 'available',
+                    appointment: appointment._id
+                }
+            }, { session, new: true });
+            if (!updatedSlot) {
+                throw new Error('SLOT_FULL');
+            }
+            yield session.commitTransaction();
+            session.endSession();
+            // Emit real-time socket updates for availability
+            const io = req.app.get('io');
+            if (io) {
+                io.emit('slotBooked', {
+                    slotId,
+                    doctorId,
+                    date: new Date(slotTime).toISOString().split('T')[0],
+                    bookedCount: updatedSlot.booked_count,
+                    maxAppointments: maxAppts
+                });
+                io.emit('appointmentsUpdated', { hospitalId: hospital._id });
+            }
+            res.status(201).json({
+                success: true,
+                message: 'Manual appointment booked successfully',
+                appointment: Object.assign(Object.assign({}, appointment.toObject()), { patient: {
+                        name: patient.name,
+                        email: patient.email,
+                        phone: patient.phone
+                    }, tokenNumber })
+            });
+        }
+        catch (error) {
+            yield session.abortTransaction();
+            session.endSession();
+            throw error;
+        }
+    }
+    catch (error) {
+        console.error('[ManualBookingError]', error.message);
+        if (error.message === 'SLOT_FULL') {
+            res.status(400).json({ code: 'SLOT_FULL', message: 'Sorry, this slot is fully booked.' });
+        }
+        else if (error.message === 'SLOT_CANCELLED') {
+            res.status(400).json({ code: 'SLOT_CANCELLED', message: 'This slot has been cancelled.' });
+        }
+        else if (error.message === 'SLOT_NOT_FOUND') {
+            res.status(404).json({ code: 'NOT_FOUND', message: 'Slot not found.' });
+        }
+        else {
+            res.status(500).json({ code: 'SERVER_ERROR', message: 'An unexpected booking error occurred.', error: error.message });
+        }
+    }
+});
+exports.createManualAppointment = createManualAppointment;
