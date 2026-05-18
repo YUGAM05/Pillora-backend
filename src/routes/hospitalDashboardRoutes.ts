@@ -18,7 +18,8 @@ import {
     holdSlot,
     releaseSlotHold,
     deleteSlot,
-    createManualAppointment
+    createManualAppointment,
+    deleteDoctor
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -43,6 +44,7 @@ router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
 router.put('/doctors/:id', protect, isHospital, selfManagedOnly, updateDoctor);
+router.delete('/doctors/:id', protect, isHospital, selfManagedOnly, deleteDoctor);
 router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
 router.post('/slots/add', protect, isHospital, selfManagedOnly, addSingleSlot);
 router.post('/slots/:id/cancel', protect, isHospital, selfManagedOnly, cancelSlot);

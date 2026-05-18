@@ -931,3 +931,37 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
     }
 };
 
+// @desc    Delete doctor or specialty group (Self-Managed only)
+// @route   DELETE /api/hospital/doctors/:id
+export const deleteDoctor = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+
+        const doctor = await Doctor.findOne({ _id: id, hospital: hospital._id });
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor or Specialty Group not found' });
+            return;
+        }
+
+        // Delete associated appointments
+        await Appointment.deleteMany({ doctor: doctor._id });
+
+        // Delete associated slots
+        await Slot.deleteMany({ doctor: doctor._id });
+
+        // Delete doctor document itself
+        await Doctor.deleteOne({ _id: doctor._id });
+
+        // Emit socket update for real-time list refreshing
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('doctorsUpdated', { hospitalId: hospital._id });
+        }
+
+        res.json({ message: 'Doctor and all associated slots/appointments deleted successfully.' });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error deleting doctor', error: error.message });
+    }
+};
+

@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
@@ -835,3 +835,32 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.createManualAppointment = createManualAppointment;
+// @desc    Delete doctor or specialty group (Self-Managed only)
+// @route   DELETE /api/hospital/doctors/:id
+const deleteDoctor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const doctor = yield Doctor_1.default.findOne({ _id: id, hospital: hospital._id });
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor or Specialty Group not found' });
+            return;
+        }
+        // Delete associated appointments
+        yield Appointment_1.default.deleteMany({ doctor: doctor._id });
+        // Delete associated slots
+        yield Slot_1.default.deleteMany({ doctor: doctor._id });
+        // Delete doctor document itself
+        yield Doctor_1.default.deleteOne({ _id: doctor._id });
+        // Emit socket update for real-time list refreshing
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('doctorsUpdated', { hospitalId: hospital._id });
+        }
+        res.json({ message: 'Doctor and all associated slots/appointments deleted successfully.' });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error deleting doctor', error: error.message });
+    }
+});
+exports.deleteDoctor = deleteDoctor;
