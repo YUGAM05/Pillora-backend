@@ -9,9 +9,9 @@ import { logActivity } from '../utils/activityLogger';
 
 // ✅ Cloudinary config
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
+    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
 });
 
 // @desc    Get all hospitals
