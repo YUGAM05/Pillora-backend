@@ -18,9 +18,9 @@ const cloudinary_1 = require("cloudinary");
 const router = (0, express_1.Router)();
 // ✅ Configure Cloudinary
 cloudinary_1.v2.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
+    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
 });
 // ✅ Use memoryStorage — no local disk needed
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });

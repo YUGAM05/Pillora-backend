@@ -5,7 +5,7 @@ export interface ISlot extends Document {
     hospital: mongoose.Types.ObjectId;
     startTime: Date;
     endTime: Date;
-    status: 'available' | 'booked' | 'blocked' | 'cancelled';
+    status: 'available' | 'locked' | 'booked' | 'blocked' | 'cancelled';
     appointment?: mongoose.Types.ObjectId;
     cancelledAt?: Date;
     cancellationReason?: string;
@@ -20,7 +20,7 @@ const SlotSchema: Schema = new Schema({
     hospital: { type: Schema.Types.ObjectId, ref: 'Hospital', required: true },
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
-    status: { type: String, enum: ['available', 'booked', 'blocked', 'cancelled'], default: 'available' },
+    status: { type: String, enum: ['available', 'locked', 'booked', 'blocked', 'cancelled'], default: 'available' },
     appointment: { type: Schema.Types.ObjectId, ref: 'Appointment' },
     cancelledAt: { type: Date },
     cancellationReason: { type: String },

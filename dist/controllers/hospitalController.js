@@ -21,9 +21,9 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const activityLogger_1 = require("../utils/activityLogger");
 // ✅ Cloudinary config
 cloudinary_1.v2.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
+    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
 });
 // @desc    Get all hospitals
 // @route   GET /api/hospitals

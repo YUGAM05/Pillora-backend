@@ -39,7 +39,7 @@ const SlotSchema = new mongoose_1.Schema({
     hospital: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
-    status: { type: String, enum: ['available', 'booked', 'blocked', 'cancelled'], default: 'available' },
+    status: { type: String, enum: ['available', 'locked', 'booked', 'blocked', 'cancelled'], default: 'available' },
     appointment: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment' },
     cancelledAt: { type: Date },
     cancellationReason: { type: String },

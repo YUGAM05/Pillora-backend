@@ -299,11 +299,13 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             // Resolve max appointments
             const doctor = yield Doctor_1.default.findById(doctorId).session(session);
             const maxAppts = slot.max_appointments || (doctor === null || doctor === void 0 ? void 0 : doctor.maxAppointmentsPerSlot) || 1;
-            // Step 2: Check booked_count < max_appointments
-            // Verify if slot has active holds or general space
+            // Step 2: Check booked_count < max_appointments & active holds
             const userHasHold = yield (0, holdManager_1.isHeldByUser)(slotId.toString(), patientId.toString());
-            if (slot.booked_count >= maxAppts) {
+            if (slot.status === 'booked' || slot.booked_count >= maxAppts) {
                 throw new Error('SLOT_FULL');
+            }
+            if (slot.status === 'locked' && !userHasHold) {
+                throw new Error('SLOT_ON_HOLD');
             }
             // Step 3: Insert appointment record (Generate unique token number as Step 5)
             const activeAppointmentsCount = yield Appointment_1.default.countDocuments({
@@ -326,14 +328,15 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 patientAge: patientAge ? Number(patientAge) : undefined
             });
             yield appointment.save({ session });
-            // Step 4: Increment booked_count atomically only if booked_count < max_appointments
+            // Step 4: Increment booked_count atomically only if booked_count < max_appointments and is available/locked
             const updatedSlot = yield Slot_1.default.findOneAndUpdate({
                 _id: slotId,
+                status: { $in: ['available', 'locked'] },
                 booked_count: { $lt: maxAppts }
             }, {
                 $inc: { booked_count: 1, hold_count: userHasHold ? -1 : 0 },
                 $set: {
-                    status: (slot.booked_count + 1 >= maxAppts) ? 'booked' : 'available',
+                    status: 'booked',
                     appointment: appointment._id
                 }
             }, { session, new: true });
@@ -356,7 +359,8 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     date: new Date(slotTime).toISOString().split('T')[0],
                     bookedCount: updatedSlot.booked_count,
                     holdCount: updatedSlot.hold_count,
-                    maxAppointments: maxAppts
+                    maxAppointments: maxAppts,
+                    status: 'booked'
                 });
             }
             res.status(201).json({
@@ -381,6 +385,12 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             res.status(400).json({
                 code: 'SLOT_FULL',
                 message: 'Sorry, this slot was just booked by someone else. Please choose another slot.'
+            });
+        }
+        else if (error.message === 'SLOT_ON_HOLD') {
+            res.status(400).json({
+                code: 'SLOT_ON_HOLD',
+                message: 'This slot is temporarily held by another user. Please choose another slot.'
             });
         }
         else if (error.message === 'SLOT_CANCELLED') {
