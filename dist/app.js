@@ -192,7 +192,8 @@ app.use((err, req, res, next) => {
     res.status(err.status || 500).json({ message: err.message || 'Internal Server Error' });
 });
 const holdManager_1 = require("./utils/holdManager");
-if (process.env.NODE_ENV !== 'production') {
+const isServerless = process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME;
+if (process.env.NODE_ENV !== 'production' && !isServerless) {
     httpServer.listen(PORT, () => {
         console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
         // Connect to DB in background so server stays alive even if DB is slow
@@ -209,7 +210,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 else {
     // Only run persistent intervals in production if NOT running in a serverless environment like Vercel
-    if (!process.env.VERCEL) {
+    if (!isServerless) {
         const cleanUpInterval = setInterval(() => {
             (0, holdManager_1.runHoldCleanup)(io);
         }, 60000);

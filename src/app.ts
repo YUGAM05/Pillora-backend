@@ -198,7 +198,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 import { runHoldCleanup } from './utils/holdManager';
 
-if (process.env.NODE_ENV !== 'production') {
+const isServerless = process.env.VERCEL || process.env.NOW_REGION || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+if (process.env.NODE_ENV !== 'production' && !isServerless) {
     httpServer.listen(PORT, () => {
         console.log(`🚀 Server (HTTP + WS) ready on port ${PORT}`);
         // Connect to DB in background so server stays alive even if DB is slow
@@ -214,7 +216,7 @@ if (process.env.NODE_ENV !== 'production') {
     });
 } else {
     // Only run persistent intervals in production if NOT running in a serverless environment like Vercel
-    if (!process.env.VERCEL) {
+    if (!isServerless) {
         const cleanUpInterval = setInterval(() => {
             runHoldCleanup(io);
         }, 60000);
