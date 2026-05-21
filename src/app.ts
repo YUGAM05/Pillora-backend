@@ -7,6 +7,9 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import mongoose from 'mongoose';
 import session from 'express-session';
+
+// Disable command buffering globally so queries fail immediately in case of database disconnection
+mongoose.set('bufferCommands', false);
 import passport from './config/passport';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
