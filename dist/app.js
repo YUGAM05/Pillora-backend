@@ -175,7 +175,10 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
         return;
     try {
         const uri = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
-        yield mongoose_1.default.connect(uri);
+        yield mongoose_1.default.connect(uri, {
+            serverSelectionTimeoutMS: 4000,
+            connectTimeoutMS: 4000,
+        });
         console.log('[DB] Connected to MongoDB');
     }
     catch (error) {
