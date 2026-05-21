@@ -79,6 +79,20 @@ app.use((req, res, next) => {
     next();
 });
 
+// Ensure Database connection is fully established before processing requests (critical for serverless with bufferCommands: false)
+app.use(async (req, res, next) => {
+    try {
+        await connectDB();
+        next();
+    } catch (err: any) {
+        console.error('[DBMiddleware] Database connection failed:', err.message);
+        res.status(500).json({ 
+            message: 'Database connection failed', 
+            error: process.env.NODE_ENV === 'production' ? undefined : err.message 
+        });
+    }
+});
+
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static('uploads')); // Serve uploaded files
@@ -162,14 +176,17 @@ app.get('/', (req, res) => {
 });
 
 export const connectDB = async () => {
-    if (mongoose.connection.readyState >= 1) return;
+    if (mongoose.connection.readyState === 1) return;
     try {
         const uri = process.env.MONGO_URI;
-        if (!uri) return;
+        if (!uri) {
+            throw new Error('MONGO_URI is not defined in environment variables');
+        }
         await mongoose.connect(uri);
         console.log('[DB] Connected to MongoDB');
     } catch (error: any) {
         console.error('[DB] Connection Error:', error.message);
+        throw error;
     }
 };
 
