@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/handler.js"
+      "destination": "/api/index"
     }
   ]
 }
