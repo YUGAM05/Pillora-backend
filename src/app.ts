@@ -144,12 +144,7 @@ import partnerRoutes from './routes/partnerRoutes';
 import hospitalDashboardRoutes from './routes/hospitalDashboardRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 
-app.use(async (req, res, next) => {
-    if (mongoose.connection.readyState === 0) {
-        await connectDB();
-    }
-    next();
-});
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/blood-bank', bloodBankRoutes);
@@ -215,10 +210,15 @@ if (process.env.NODE_ENV !== 'production') {
         });
     });
 } else {
-    // Start interval in production or serverless environments if active
-    setInterval(() => {
-        runHoldCleanup(io);
-    }, 60000);
+    // Only run persistent intervals in production if NOT running in a serverless environment like Vercel
+    if (!process.env.VERCEL) {
+        const cleanUpInterval = setInterval(() => {
+            runHoldCleanup(io);
+        }, 60000);
+        if (cleanUpInterval && typeof cleanUpInterval.unref === 'function') {
+            cleanUpInterval.unref();
+        }
+    }
 }
 
 export default app;

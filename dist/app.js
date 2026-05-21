@@ -142,12 +142,6 @@ const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
 const partnerRoutes_1 = __importDefault(require("./routes/partnerRoutes"));
 const hospitalDashboardRoutes_1 = __importDefault(require("./routes/hospitalDashboardRoutes"));
 const analyticsRoutes_1 = __importDefault(require("./routes/analyticsRoutes"));
-app.use((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    if (mongoose_1.default.connection.readyState === 0) {
-        yield (0, exports.connectDB)();
-    }
-    next();
-}));
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/blood-bank', bloodBankRoutes_1.default);
 app.use('/api/safety', safetyRoutes_1.default);
@@ -211,9 +205,14 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 else {
-    // Start interval in production or serverless environments if active
-    setInterval(() => {
-        (0, holdManager_1.runHoldCleanup)(io);
-    }, 60000);
+    // Only run persistent intervals in production if NOT running in a serverless environment like Vercel
+    if (!process.env.VERCEL) {
+        const cleanUpInterval = setInterval(() => {
+            (0, holdManager_1.runHoldCleanup)(io);
+        }, 60000);
+        if (cleanUpInterval && typeof cleanUpInterval.unref === 'function') {
+            cleanUpInterval.unref();
+        }
+    }
 }
 exports.default = app;
