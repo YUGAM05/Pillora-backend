@@ -106,62 +106,173 @@ exports.getHospitalById = getHospitalById;
 // @access  Public (Should be private in prod)
 const seedHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        // Clear both Hospital and Doctor collections for a clean, deterministic seeding state
         yield Hospital_1.default.deleteMany({});
-        const placeholder = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480"><rect width="100%" height="100%" fill="%23e5e7eb"/><text x="50%" y="50%" fill="%236b7280" font-size="24" text-anchor="middle" dominant-baseline="middle" font-family="Arial">Image unavailable</text></svg>';
+        yield Doctor_1.default.deleteMany({});
         const hospitals = [
             {
-                name: "City General Hospital",
-                address: "123 Medical Drive, Downtown",
-                city: "New York",
-                image: placeholder,
-                isOpen24Hours: true,
-                consultationFee: 500,
-                governmentSchemes: ["Ayushman Bharat", "CGHS"],
-                isOnlinePaymentAvailable: true,
-                ambulanceContact: "+91 911-123-4567",
-                description: "A premier multi-specialty hospital providing world-class healthcare services.",
-                rating: 4.5
-            },
-            {
-                name: "Sunshine Care Center",
-                address: "45 Green Avenue, Westside",
-                city: "New York",
-                image: placeholder,
-                isOpen24Hours: true,
-                consultationFee: 800,
-                governmentSchemes: ["ECHS"],
-                isOnlinePaymentAvailable: true,
-                ambulanceContact: "+91 911-987-6543",
-                description: "Specialized in cardiac and orthopedic care with state-of-the-art facilities.",
-                rating: 4.8
-            },
-            {
-                name: "Community Health Hub",
-                address: "89 Local Lane, Suburbia",
-                city: "New York",
-                image: placeholder,
+                _id: new mongoose_1.default.Types.ObjectId("69e4a708fe1c90e1721baf78"),
+                name: "Vrundavan Children Hospital",
+                slug: "vrundavan-children-hospital",
+                address: "2nd Floor, Ashirwad Avenue,Beside Dipak Petrol Pump, Opp. Kocharab Ashram, Pritamnagar, Ahmedabad",
+                city: "Ahmedabad",
+                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
+                images: [
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/mn7byimzu9lnrctxlxje.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/dfmqwsgxrmhutvw8cifq.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/xckxelhbfnt931f9eozt.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/klwhiregoc53wfkkscxt.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/woc17ilxgnq1rmh4r1ib.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/eutvwe5eufldnms7qndn.jpg"
+                ],
                 isOpen24Hours: false,
-                consultationFee: 200,
-                governmentSchemes: ["Ayushman Bharat", "State Health Scheme"],
-                isOnlinePaymentAvailable: false,
-                ambulanceContact: "+91 888-888-8888",
-                description: "Affordable healthcare for the community with a focus on primary care.",
-                rating: 4.0
+                consultationFee: 1000,
+                governmentSchemes: [],
+                isOnlinePaymentAvailable: true,
+                ambulanceContact: "",
+                contactNumber: "",
+                phoneNumbers: ["94096 54006", "95589 51408"],
+                description: "🏥  <b>Vrundavan Children Hospital</b>\n<br><div><b>Hospital Type : </b>Private \n\n<b>Departments &amp; Services</b>\n\n1).🩺 General Pediatrics\n2).💉 Vaccination\n3).🧠 Epilepsy in Children\n4).🦠 Infectious Disease\n5).🫁 Respiratory Disease<div><br></div><div><b>Charges</b></div><div><b>Charges for Old Case :</b> 500\n<b>Charges for New Case :</b> 1000</div><div><br></div><div>Emergency OPD is Available on Sunday </div><div> </div><div><b>Total beds :</b> 19 Beds\n\n<br><div><br></div></div></div>",
+                rating: 4.4,
+                doctors: [
+                    {
+                        name: "Dr. Hashmukh D Shah",
+                        specialization: "M.D(Gold Medalist)",
+                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                        timing: "10AM – 1PM"
+                    },
+                    {
+                        name: "Dr. JIgnesh Modi",
+                        specialization: "M.D.D.Ped.DNB",
+                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                        timing: "10AM - 1PM and 5PM- 7.30PM"
+                    }
+                ],
+                management_type: "SELF",
+                is_verified: false,
+                plan: "Standard",
+                is_featured: false,
+                has_govt_schemes: false,
+                has_custom_page: false,
+                is_spotlight: false,
+                priority_support: false,
+                user: new mongoose_1.default.Types.ObjectId("6a06d7b6036cb833da973567")
+            },
+            {
+                _id: new mongoose_1.default.Types.ObjectId("6a0dd6a76d74f8c578796822"),
+                name: "Sahaj Clinic ",
+                slug: "sahaj-clinic",
+                address: " I, Block 240, TITANIUM CITY CENTER BUSINESS PARK, Mall, 100 Feet Anand Nagar Rd, Satellite, Ahmedabad, Gujarat 380015",
+                city: "Ahmedabad",
+                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1779291416/apex-care-seller/bhwjckvornjkfjzdzfp0.webp",
+                images: [
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/apex-care-seller/o7ri6k5tjz4dxi3zskbd.webp",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/apex-care-seller/wijvfokghllnwkvnlig1.webp"
+                ],
+                isOpen24Hours: false,
+                consultationFee: 700,
+                governmentSchemes: [],
+                isOnlinePaymentAvailable: true,
+                ambulanceContact: " 63513 53722",
+                phoneNumbers: [],
+                description: "Sahaj Clinic Description(about their Clinic)\nDaily OPD Timings (Monday – Friday, excluding Wednesday evening alterations)\nMorning: 10:30 AM to 1:00 PM\nEvening: 5:00 PM to 7:30 PM\n\nWednesday \"Corporate Friendly\" Timings\nEvening: 5:00 PM to 8:30 PM (Extended for working professionals)\n\nSaturday Timings:\n   Morning: 10:30 AM to 3:00 PM\n   Evening: Closed (No Saturday evening OPD)\n\nEmergency charges apply for any patient requiring a consultation after 7:45 PM\n\nConsultation Fees & Diagnostic Charges\n(Effective from April 1, 2025)\nNew Case:* ₹700\nOld Case (Follow-up): ₹400 (Valid up to 3 months from the date of the new case registration)\n\nService Charges\nECG 350₹\n2D Echocardiography 2,000₹\nNeuropathy Check-up 800₹",
+                rating: 4,
+                doctors: [
+                    {
+                        name: "Dr Dhaivat Desai",
+                        specialization: "M.D.MEDICINE",
+                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                        timing: "10:30 AM to 1:00 PM and 5:00 PM to 7:30 PM"
+                    }
+                ],
+                management_type: "SELF",
+                is_verified: true,
+                plan: "Standard",
+                is_featured: false,
+                has_govt_schemes: false,
+                has_custom_page: false,
+                is_spotlight: false,
+                priority_support: false,
+                user: new mongoose_1.default.Types.ObjectId("6a0dd6a76d74f8c57879681f"),
+                tempPassword: "2cce11e57859be5b"
             }
         ];
-        const seededHospitals = [];
-        for (const h of hospitals) {
-            let baseSlug = (0, slugify_1.default)(h.name, { lower: true, strict: true, trim: true });
-            let currentSlug = baseSlug;
-            let counter = 2;
-            while (seededHospitals.some((s) => s.slug === currentSlug)) {
-                currentSlug = `${baseSlug}-${counter}`;
-                counter++;
+        // Seed Hospitals
+        yield Hospital_1.default.insertMany(hospitals);
+        // Seed separate Doctors in Doctor collection
+        const doctorsToSeed = [
+            {
+                _id: new mongoose_1.default.Types.ObjectId("6a0e94371ab452da0a38e301"),
+                hospital: new mongoose_1.default.Types.ObjectId("69e4a708fe1c90e1721baf78"), // Vrundavan
+                name: "Dr. Hashmukh D Shah",
+                specialty: "M.D(Gold Medalist)",
+                fee: 1000,
+                availability: [
+                    { day: 'Monday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Tuesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Wednesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Thursday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Friday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Saturday', startTime: '10:00', endTime: '13:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 1,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose_1.default.Types.ObjectId("6a0e94371ab452da0a38e302"),
+                hospital: new mongoose_1.default.Types.ObjectId("69e4a708fe1c90e1721baf78"), // Vrundavan
+                name: "Dr. JIgnesh Modi",
+                specialty: "M.D.D.Ped.DNB",
+                fee: 1000,
+                availability: [
+                    { day: 'Monday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Monday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Tuesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Tuesday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Wednesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Wednesday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Thursday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Thursday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Friday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Friday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Saturday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Saturday', startTime: '17:00', endTime: '19:30' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 1,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose_1.default.Types.ObjectId("6a0e94371ab452da0a38e2f4"),
+                hospital: new mongoose_1.default.Types.ObjectId("6a0dd6a76d74f8c578796822"), // Sahaj Clinic
+                name: "Dr Dhaivat Desai",
+                specialty: "M.D.MEDICINE",
+                fee: 700,
+                availability: [
+                    { day: 'Monday', startTime: '10:30', endTime: '13:00' },
+                    { day: 'Monday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Tuesday', startTime: '10:30', endTime: '13:00' },
+                    { day: 'Tuesday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Wednesday', startTime: '10:30', endTime: '13:00' },
+                    { day: 'Wednesday', startTime: '17:00', endTime: '20:30' },
+                    { day: 'Thursday', startTime: '10:30', endTime: '13:00' },
+                    { day: 'Thursday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Friday', startTime: '10:30', endTime: '13:00' },
+                    { day: 'Friday', startTime: '17:00', endTime: '19:30' },
+                    { day: 'Saturday', startTime: '10:30', endTime: '15:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 1,
+                doctorsCount: 1
             }
-            seededHospitals.push(Object.assign(Object.assign({}, h), { slug: currentSlug }));
-        }
-        yield Hospital_1.default.insertMany(seededHospitals);
-        res.json({ message: 'Hospitals seeded successfully' });
+        ];
+        yield Doctor_1.default.insertMany(doctorsToSeed);
+        res.json({ message: 'Hospitals and Doctors seeded successfully' });
     }
     catch (error) {
         res.status(500).json({ message: 'Server Error', error });

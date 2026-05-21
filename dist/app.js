@@ -21,6 +21,8 @@ const helmet_1 = __importDefault(require("helmet"));
 const morgan_1 = __importDefault(require("morgan"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const express_session_1 = __importDefault(require("express-session"));
+// Disable command buffering globally so queries fail immediately in case of database disconnection
+mongoose_1.default.set('bufferCommands', false);
 const passport_1 = __importDefault(require("./config/passport"));
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
@@ -52,6 +54,8 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
     'https://pillora.in', // ✅ added
     'https://www.pillora.in', // ✅ added
+    'https://pillora-admin.vercel.app', // ✅ added
+    'https://www.pillora-admin.vercel.app', // ✅ added
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
@@ -65,7 +69,8 @@ app.use((req, res, next) => {
     // Allow all local origins, Vercel deployments, or allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
     const isVercel = origin && origin.endsWith('.vercel.app');
-    if (origin && (isLocal || isVercel || allowedOrigins.includes(origin))) {
+    const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
+    if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     }
     else if (!origin) {
@@ -80,6 +85,23 @@ app.use((req, res, next) => {
     }
     next();
 });
+// Ensure Database connection is fully established before processing requests (critical for serverless with bufferCommands: false)
+app.use((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    if (req.method === 'OPTIONS') {
+        return next();
+    }
+    try {
+        yield (0, exports.connectDB)();
+        next();
+    }
+    catch (err) {
+        console.error('[DBMiddleware] Database connection failed:', err.message);
+        res.status(500).json({
+            message: 'Database connection failed',
+            error: process.env.NODE_ENV === 'production' ? undefined : err.message
+        });
+    }
+}));
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express_1.default.static('uploads')); // Serve uploaded files
@@ -155,17 +177,16 @@ app.get('/', (req, res) => {
     });
 });
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
-    if (mongoose_1.default.connection.readyState >= 1)
+    if (mongoose_1.default.connection.readyState === 1)
         return;
     try {
-        const uri = process.env.MONGO_URI;
-        if (!uri)
-            return;
+        const uri = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
         yield mongoose_1.default.connect(uri);
         console.log('[DB] Connected to MongoDB');
     }
     catch (error) {
         console.error('[DB] Connection Error:', error.message);
+        throw error;
     }
 });
 exports.connectDB = connectDB;

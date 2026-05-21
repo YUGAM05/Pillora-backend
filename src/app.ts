@@ -48,6 +48,8 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
     'https://pillora.in',        // ✅ added
     'https://www.pillora.in',    // ✅ added
+    'https://pillora-admin.vercel.app', // ✅ added
+    'https://www.pillora-admin.vercel.app', // ✅ added
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
@@ -62,7 +64,8 @@ app.use((req, res, next) => {
     // Allow all local origins, Vercel deployments, or allowed list
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
     const isVercel = origin && origin.endsWith('.vercel.app');
-    if (origin && (isLocal || isVercel || allowedOrigins.includes(origin))) {
+    const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
+    if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
         // Fallback for tools/non-browser requests
@@ -81,6 +84,9 @@ app.use((req, res, next) => {
 
 // Ensure Database connection is fully established before processing requests (critical for serverless with bufferCommands: false)
 app.use(async (req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        return next();
+    }
     try {
         await connectDB();
         next();
@@ -178,10 +184,7 @@ app.get('/', (req, res) => {
 export const connectDB = async () => {
     if (mongoose.connection.readyState === 1) return;
     try {
-        const uri = process.env.MONGO_URI;
-        if (!uri) {
-            throw new Error('MONGO_URI is not defined in environment variables');
-        }
+        const uri = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
         await mongoose.connect(uri);
         console.log('[DB] Connected to MongoDB');
     } catch (error: any) {
