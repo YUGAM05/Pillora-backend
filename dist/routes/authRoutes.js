@@ -30,8 +30,11 @@ const loginLimiter = (0, express_rate_limit_1.default)({
 const router = express_1.default.Router();
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
-router.options('*', (_req, res) => {
-    res.status(200).end();
+router.use((req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
 });
 // CORS middleware specifically for login route
 const loginCors = (req, res, next) => {

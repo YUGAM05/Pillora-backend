@@ -24,8 +24,11 @@ const router = express.Router();
 
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
-router.options('*', (_req, res) => {
-    res.status(200).end();
+router.use((req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
 });
 
 // CORS middleware specifically for login route
