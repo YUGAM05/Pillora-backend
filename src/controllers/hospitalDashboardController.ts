@@ -814,11 +814,11 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
         }
 
         // 1. Find or create the patient
-        let patient = await User.findOne({ email: patientEmail.toLowerCase() });
+        let patient = await User.findOne({ email: patientEmail.toLowerCase().trim() });
         if (!patient) {
             patient = await User.create({
                 name: patientName,
-                email: patientEmail.toLowerCase(),
+                email: patientEmail.toLowerCase().trim(),
                 phone: patientPhone || '',
                 role: 'customer',
                 status: 'approved',

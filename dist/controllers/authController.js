@@ -46,7 +46,7 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     const { name, email, password, role, bankDetails, pharmacyCertificate, aadhaarCardUrl, phone, address } = req.body;
     try {
         console.log(`Registering user: ${email}, Role: ${role}`);
-        const userExists = yield User_1.default.findOne({ email: email.toLowerCase() });
+        const userExists = yield User_1.default.findOne({ email: email.toLowerCase().trim() });
         if (userExists) {
             console.log('Registration failed: User already exists');
             res.status(400).json({ message: 'User already exists' });
@@ -57,7 +57,7 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const initialStatus = (role === 'seller' || role === 'delivery') ? 'pending' : 'approved';
         const userData = {
             name,
-            email: email.toLowerCase(),
+            email: email.toLowerCase().trim(),
             passwordHash,
             role: role || 'customer',
             status: initialStatus,
@@ -155,7 +155,7 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { ip, ua } = getClientInfo(req);
     console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
     try {
-        const userEmail = email === null || email === void 0 ? void 0 : email.toLowerCase();
+        const userEmail = email === null || email === void 0 ? void 0 : email.toLowerCase().trim();
         let user = userEmail ? yield User_1.default.findOne({ email: userEmail }) : null;
         // ── Google Login Flow ───────────────────────────────────────────────
         if (googleToken) {

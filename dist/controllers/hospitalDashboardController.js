@@ -737,11 +737,11 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
             return;
         }
         // 1. Find or create the patient
-        let patient = yield User_1.default.findOne({ email: patientEmail.toLowerCase() });
+        let patient = yield User_1.default.findOne({ email: patientEmail.toLowerCase().trim() });
         if (!patient) {
             patient = yield User_1.default.create({
                 name: patientName,
-                email: patientEmail.toLowerCase(),
+                email: patientEmail.toLowerCase().trim(),
                 phone: patientPhone || '',
                 role: 'customer',
                 status: 'approved',

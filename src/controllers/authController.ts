@@ -35,7 +35,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 
     try {
         console.log(`Registering user: ${email}, Role: ${role}`);
-        const userExists = await User.findOne({ email: email.toLowerCase() });
+        const userExists = await User.findOne({ email: email.toLowerCase().trim() });
         if (userExists) {
             console.log('Registration failed: User already exists');
             res.status(400).json({ message: 'User already exists' });
@@ -49,7 +49,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 
         const userData: any = {
             name,
-            email: email.toLowerCase(),
+            email: email.toLowerCase().trim(),
             passwordHash,
             role: role || 'customer',
             status: initialStatus,
@@ -151,7 +151,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
 
     try {
-        const userEmail = email?.toLowerCase();
+        const userEmail = email?.toLowerCase().trim();
         let user = userEmail ? await User.findOne({ email: userEmail }) : null;
 
         // ── Google Login Flow ───────────────────────────────────────────────
