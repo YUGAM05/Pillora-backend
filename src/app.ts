@@ -67,19 +67,23 @@ app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
 
-    const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
-    const isVercel = origin && origin.endsWith('.vercel.app');
-    const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
+    if (origin === 'https://pillora-admin.vercel.app') {
+        res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    } else {
+        const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
+        const isVercel = origin && origin.endsWith('.vercel.app');
+        const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
 
-    if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else if (!origin) {
-        // Non-browser clients (curl, Postman, server-to-server)
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else if (!origin) {
+            // Non-browser clients (curl, Postman, server-to-server)
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
     }
 
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24 h
 

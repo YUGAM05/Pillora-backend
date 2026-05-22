@@ -28,9 +28,27 @@ const loginLimiter = (0, express_rate_limit_1.default)({
     legacyHeaders: false,
 });
 const router = express_1.default.Router();
+// ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
+// Belt-and-suspenders: handles any preflight that reaches the router layer.
+router.options('*', (_req, res) => {
+    res.status(200).end();
+});
+// CORS middleware specifically for login route
+const loginCors = (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+};
+// Handle OPTIONS and POST for /login explicitly with login CORS middleware
+router.options('/login', loginCors);
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', authController_1.registerUser);
-router.post('/login', loginLimiter, authController_1.loginUser);
+router.post('/login', loginCors, loginLimiter, authController_1.loginUser);
 router.post('/send-otp', authController_1.sendOtp);
 router.post('/verify-otp', authController_1.verifyOtp);
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────

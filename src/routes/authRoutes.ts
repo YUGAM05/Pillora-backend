@@ -28,9 +28,25 @@ router.options('*', (_req, res) => {
     res.status(200).end();
 });
 
+// CORS middleware specifically for login route
+const loginCors = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+};
+
+// Handle OPTIONS and POST for /login explicitly with login CORS middleware
+router.options('/login', loginCors);
+
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', registerUser);
-router.post('/login', loginLimiter, loginUser);
+router.post('/login', loginCors, loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 
