@@ -22,6 +22,12 @@ const loginLimiter = rateLimit({
 
 const router = express.Router();
 
+// ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
+// Belt-and-suspenders: handles any preflight that reaches the router layer.
+router.options('*', (_req, res) => {
+    res.status(200).end();
+});
+
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', registerUser);
 router.post('/login', loginLimiter, loginUser);

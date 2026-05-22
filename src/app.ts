@@ -46,10 +46,12 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = [
-    'https://pillora.in',        // ✅ added
-    'https://www.pillora.in',    // ✅ added
-    'https://pillora-admin.vercel.app', // ✅ added
-    'https://www.pillora-admin.vercel.app', // ✅ added
+    'https://pillora.in',
+    'https://www.pillora.in',
+    'https://pillora-admin.vercel.app',
+    'https://www.pillora-admin.vercel.app',
+    'https://pillora-hospital.vercel.app',
+    'https://pillora-seller.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
@@ -57,44 +59,47 @@ const allowedOrigins = [
     'http://localhost:5000',
 ];
 
-// ✅ Permissive CORS for development
+// ─── CORS — registered FIRST, before DB middleware and all routes ─────────────
+// OPTIONS preflight is short-circuited here with 200 so the DB middleware
+// never runs on preflight requests (a DB error would send a 500 with no CORS
+// headers, causing the browser to report a CORS failure instead of the real error).
 app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
-    // Allow all local origins, Vercel deployments, or allowed list
+
     const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
     const isVercel = origin && origin.endsWith('.vercel.app');
     const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
+
     if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
         res.setHeader('Access-Control-Allow-Origin', origin);
     } else if (!origin) {
-        // Fallback for tools/non-browser requests
+        // Non-browser clients (curl, Postman, server-to-server)
         res.setHeader('Access-Control-Allow-Origin', '*');
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24 h
 
+    // ✅ Return 200 immediately for OPTIONS — do NOT fall through to DB middleware
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
     next();
 });
 
-// Ensure Database connection is fully established before processing requests (critical for serverless with bufferCommands: false)
+// ─── DB middleware — only reached by non-OPTIONS requests ────────────────────
 app.use(async (req, res, next) => {
-    if (req.method === 'OPTIONS') {
-        return next();
-    }
     try {
         await connectDB();
         next();
     } catch (err: any) {
         console.error('[DBMiddleware] Database connection failed:', err.message);
-        res.status(500).json({ 
-            message: 'Database connection failed', 
-            error: process.env.NODE_ENV === 'production' ? undefined : err.message 
+        res.status(500).json({
+            message: 'Database connection failed',
+            error: process.env.NODE_ENV === 'production' ? undefined : err.message,
         });
     }
 });
