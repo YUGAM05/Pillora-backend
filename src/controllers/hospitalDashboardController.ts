@@ -8,7 +8,7 @@ import User from '../models/User';
 import mongoose from 'mongoose';
 import redis from '../utils/redisMock';
 import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
-import { sendBookingConfirmationEmail } from '../services/emailService';
+import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -417,6 +417,23 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
                     timeSlot: timeSlotStr,
                     bookingId: appointment._id.toString()
                 });
+
+                if (hospitalDoc && hospitalDoc.email) {
+                    try {
+                        await sendHospitalNotificationEmail({
+                            hospitalEmail: hospitalDoc.email,
+                            hospitalName: hospitalDoc.name,
+                            patientName: patientName,
+                            patientEmail: patientEmail,
+                            patientPhone: patientPhone,
+                            date: dateStr,
+                            timeSlot: timeSlotStr,
+                            bookingId: appointment._id.toString()
+                        });
+                    } catch (emailError: any) {
+                        console.error('Hospital email failed (non-critical):', emailError.message);
+                    }
+                }
             } catch (emailError: any) {
                 console.error('Email failed (non-critical):', emailError.message);
             }

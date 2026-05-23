@@ -12,6 +12,7 @@ export interface IHospital extends Document {
     slug: string;
     address: string;
     city: string;
+    email?: string;
     image?: string;
     images?: string[];
     isOpen24Hours: boolean;
@@ -48,6 +49,7 @@ const HospitalSchema: Schema = new Schema({
     slug: { type: String, unique: true, trim: true },
     address: { type: String, required: true },
     city: { type: String, required: true },
+    email: { type: String, required: false },
     image: { type: String, required: false },
     images: [{ type: String }],
     isOpen24Hours: { type: Boolean, default: false },
