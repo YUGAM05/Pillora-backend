@@ -67,8 +67,8 @@ app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
     const origin = req.headers.origin;
 
-    if (origin === 'https://pillora-admin.vercel.app') {
-        res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
     } else {
         const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
         const isVercel = origin && origin.endsWith('.vercel.app');
@@ -79,6 +79,9 @@ app.use((req, res, next) => {
         } else if (!origin) {
             // Non-browser clients (curl, Postman, server-to-server)
             res.setHeader('Access-Control-Allow-Origin', '*');
+        } else {
+            // Fallback: set origin dynamically if it exists to allow successful handshake
+            res.setHeader('Access-Control-Allow-Origin', origin);
         }
     }
 
@@ -93,6 +96,24 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// Explicit OPTIONS handler for all routes to ensure preflight always succeeds
+app.options(/.*/, (req, res) => {
+    const origin = req.headers.origin;
+    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.status(200).end();
+});
+
 
 // ─── DB middleware — only reached by non-OPTIONS requests ────────────────────
 app.use(async (req, res, next) => {

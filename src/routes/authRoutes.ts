@@ -26,6 +26,17 @@ const router = express.Router();
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
 router.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
+        const origin = req.headers.origin;
+        if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
         return res.status(200).end();
     }
     next();
@@ -33,7 +44,14 @@ router.use((req, res, next) => {
 
 // CORS middleware specifically for login route
 const loginCors = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    const origin = req.headers.origin;
+    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -49,7 +67,13 @@ router.options('/login', loginCors);
 
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', registerUser);
-router.post('/login', loginCors, loginLimiter, loginUser);
+router.post('/login', loginCors, (req, res, next) => {
+    // Skip rate limiting for OPTIONS preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+}, loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 
