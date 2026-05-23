@@ -1,7 +1,10 @@
 {
   "version": 2,
-  "buildCommand": "npm install --legacy-peer-deps && npx tsc",
-  "outputDirectory": "dist",
+  "functions": {
+    "api/index.ts": {
+      "runtime": "@vercel/node"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",

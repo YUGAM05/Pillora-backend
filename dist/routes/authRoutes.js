@@ -32,13 +32,35 @@ const router = express_1.default.Router();
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
 router.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
+        const origin = req.headers.origin;
+        if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
         return res.status(200).end();
     }
     next();
 });
 // CORS middleware specifically for login route
 const loginCors = (req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    const origin = req.headers.origin;
+    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    else if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    else {
+        res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -51,7 +73,13 @@ const loginCors = (req, res, next) => {
 router.options('/login', loginCors);
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', authController_1.registerUser);
-router.post('/login', loginCors, loginLimiter, authController_1.loginUser);
+router.post('/login', loginCors, (req, res, next) => {
+    // Skip rate limiting for OPTIONS preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+}, loginLimiter, authController_1.loginUser);
 router.post('/send-otp', authController_1.sendOtp);
 router.post('/verify-otp', authController_1.verifyOtp);
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────
