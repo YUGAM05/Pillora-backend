@@ -49,7 +49,7 @@ export const createHold = async (slotId: string, userId: string, io: any): Promi
     // Check if user already holds it
     const existingHold = await redis.get(holdKey);
     if (existingHold) {
-        return { success: true, message: 'Slot already held by you', expiryMs: 180 * 1000 };
+        return { success: true, message: 'Slot already held by you', expiryMs: 120 * 1000 };
     }
 
     // Resolve doctor and slot to check config
@@ -101,8 +101,8 @@ export const createHold = async (slotId: string, userId: string, io: any): Promi
         return { success: false, message: 'Slot not available' };
     }
 
-    // Set in Redis with 3 minutes (180 seconds) TTL
-    await redis.setex(holdKey, 180, 'active');
+    // Set in Redis with 2 minutes (120 seconds) TTL
+    await redis.setex(holdKey, 120, 'active');
 
     // Store global socket handle
     if (io) {
@@ -118,7 +118,7 @@ export const createHold = async (slotId: string, userId: string, io: any): Promi
         });
     }
 
-    return { success: true, message: 'Slot successfully held', expiryMs: 180 * 1000 };
+    return { success: true, message: 'Slot successfully held', expiryMs: 120 * 1000 };
 };
 
 export const releaseHold = async (slotId: string, userId: string, io: any): Promise<boolean> => {

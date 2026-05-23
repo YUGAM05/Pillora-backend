@@ -55,7 +55,7 @@ const createHold = (slotId, userId, io) => __awaiter(void 0, void 0, void 0, fun
     // Check if user already holds it
     const existingHold = yield redisMock_1.default.get(holdKey);
     if (existingHold) {
-        return { success: true, message: 'Slot already held by you', expiryMs: 180 * 1000 };
+        return { success: true, message: 'Slot already held by you', expiryMs: 120 * 1000 };
     }
     // Resolve doctor and slot to check config
     const tempSlot = yield Slot_1.default.findById(slotId).populate('doctor');
@@ -97,8 +97,8 @@ const createHold = (slotId, userId, io) => __awaiter(void 0, void 0, void 0, fun
         }
         return { success: false, message: 'Slot not available' };
     }
-    // Set in Redis with 3 minutes (180 seconds) TTL
-    yield redisMock_1.default.setex(holdKey, 180, 'active');
+    // Set in Redis with 2 minutes (120 seconds) TTL
+    yield redisMock_1.default.setex(holdKey, 120, 'active');
     // Store global socket handle
     if (io) {
         global.socketIO = io;
@@ -112,7 +112,7 @@ const createHold = (slotId, userId, io) => __awaiter(void 0, void 0, void 0, fun
             status: 'locked'
         });
     }
-    return { success: true, message: 'Slot successfully held', expiryMs: 180 * 1000 };
+    return { success: true, message: 'Slot successfully held', expiryMs: 120 * 1000 };
 });
 exports.createHold = createHold;
 const releaseHold = (slotId, userId, io) => __awaiter(void 0, void 0, void 0, function* () {
