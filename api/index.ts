@@ -5,7 +5,7 @@ try {
     console.error('CRITICAL BOOT ERROR:', error);
     const express = require('express');
     app = express();
-    app.all('*', (req: any, res: any) => {
+    app.all('(.*)', (req: any, res: any) => {
         res.status(500).json({
             message: 'CRITICAL BOOT ERROR',
             error: error.message || error,

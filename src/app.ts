@@ -1,6 +1,7 @@
 // Deployment Trigger: 2026-05-15 13:50
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import express from 'express';
 import helmet from 'helmet';
