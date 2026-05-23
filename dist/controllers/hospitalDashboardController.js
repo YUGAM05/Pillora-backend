@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
@@ -20,6 +21,7 @@ const User_1 = __importDefault(require("../models/User"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
 const holdManager_1 = require("../utils/holdManager");
+const emailService_1 = require("../services/emailService");
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -362,6 +364,23 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     maxAppointments: maxAppts,
                     status: 'booked'
                 });
+            }
+            try {
+                const hospitalDoc = yield Hospital_1.default.findById(hospitalId);
+                const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
+                const dateStr = new Date(slotTime).toLocaleDateString();
+                const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                yield (0, emailService_1.sendBookingConfirmationEmail)({
+                    toEmail: patientEmail,
+                    patientName: patientName,
+                    hospitalName: hospitalNameStr,
+                    date: dateStr,
+                    timeSlot: timeSlotStr,
+                    bookingId: appointment._id.toString()
+                });
+            }
+            catch (emailError) {
+                console.error('Email failed (non-critical):', emailError.message);
             }
             res.status(201).json({
                 success: true,

@@ -8,6 +8,7 @@ import User from '../models/User';
 import mongoose from 'mongoose';
 import redis from '../utils/redisMock';
 import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
+import { sendBookingConfirmationEmail } from '../services/emailService';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -400,6 +401,24 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
                     maxAppointments: maxAppts,
                     status: 'booked'
                 });
+            }
+
+            try {
+                const hospitalDoc = await Hospital.findById(hospitalId);
+                const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
+                const dateStr = new Date(slotTime).toLocaleDateString();
+                const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                
+                await sendBookingConfirmationEmail({
+                    toEmail: patientEmail,
+                    patientName: patientName,
+                    hospitalName: hospitalNameStr,
+                    date: dateStr,
+                    timeSlot: timeSlotStr,
+                    bookingId: appointment._id.toString()
+                });
+            } catch (emailError: any) {
+                console.error('Email failed (non-critical):', emailError.message);
             }
 
             res.status(201).json({
