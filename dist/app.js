@@ -15,12 +15,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.connectDB = void 0;
 // Deployment Trigger: 2026-05-15 13:50
 const dotenv_1 = __importDefault(require("dotenv"));
-dotenv_1.default.config();
+const path_1 = __importDefault(require("path"));
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../.env') });
 const express_1 = __importDefault(require("express"));
 const helmet_1 = __importDefault(require("helmet"));
 const morgan_1 = __importDefault(require("morgan"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const express_session_1 = __importDefault(require("express-session"));
+const connect_mongo_1 = __importDefault(require("connect-mongo"));
 // Disable command buffering globally so queries fail immediately in case of database disconnection
 mongoose_1.default.set('bufferCommands', false);
 const passport_1 = __importDefault(require("./config/passport"));
@@ -143,6 +145,10 @@ app.use((0, express_session_1.default)({
     secret: process.env.SESSION_SECRET || 'fallback_secret',
     resave: false,
     saveUninitialized: false,
+    store: connect_mongo_1.default.create({
+        mongoUrl: process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
+        collectionName: 'sessions',
+    }),
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',

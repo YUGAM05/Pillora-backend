@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import Session from '../models/Session';
 import axios from 'axios';
-import { generateSecret, generateURI, verifySync } from 'otplib';
+import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
 import { logActivity } from '../utils/activityLogger';
@@ -233,10 +233,15 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
 
                 // If MFA is NOT set up → force MFA setup
                 if (!user.mfaSecret) {
-                    const secret = generateSecret();
+                    const secret = new OTPAuth.Secret().base32;
                     user.mfaSecret = secret;
                     await user.save();
-                    const otpauthUrl = generateURI({ secret, label: user.email, issuer: 'Pillora Admin' });
+                    const totp = new OTPAuth.TOTP({
+                        issuer: 'Pillora Admin',
+                        label: user.email,
+                        secret: OTPAuth.Secret.fromBase32(secret)
+                    });
+                    const otpauthUrl = totp.toString();
                     const qrCode = await QRCode.toDataURL(otpauthUrl);
 
                     res.json({
@@ -306,7 +311,8 @@ export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const { valid: isValid } = verifySync({ token: mfaCode, secret: user.mfaSecret });
+        const totp = new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(user.mfaSecret) });
+        const isValid = totp.validate({ token: mfaCode, window: 1 }) !== null;
 
         if (!isValid) {
             await AuditLog.create({
@@ -374,11 +380,16 @@ export const setupMfa = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const secret = generateSecret();
+        const secret = new OTPAuth.Secret().base32;
         user.mfaSecret = secret;
         await user.save();
 
-        const otpauthUrl = generateURI({ secret, label: user.email, issuer: 'Pillora Admin' });
+        const totp = new OTPAuth.TOTP({
+            issuer: 'Pillora Admin',
+            label: user.email,
+            secret: OTPAuth.Secret.fromBase32(secret)
+        });
+        const otpauthUrl = totp.toString();
         const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
 
         res.json({ secret, qrCode: qrCodeDataUrl });

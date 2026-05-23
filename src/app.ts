@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import mongoose from 'mongoose';
 import session from 'express-session';
-
+import MongoStore from 'connect-mongo';
 // Disable command buffering globally so queries fail immediately in case of database disconnection
 mongoose.set('bufferCommands', false);
 import passport from './config/passport';
@@ -143,6 +143,10 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'fallback_secret',
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+        mongoUrl: process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
+        collectionName: 'sessions',
+    }),
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',

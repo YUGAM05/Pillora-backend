@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -18,7 +51,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Session_1 = __importDefault(require("../models/Session"));
 const axios_1 = __importDefault(require("axios"));
-const otplib_1 = require("otplib");
+const OTPAuth = __importStar(require("otpauth"));
 const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 const activityLogger_1 = require("../utils/activityLogger");
@@ -231,10 +264,15 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 }
                 // If MFA is NOT set up → force MFA setup
                 if (!user.mfaSecret) {
-                    const secret = (0, otplib_1.generateSecret)();
+                    const secret = new OTPAuth.Secret().base32;
                     user.mfaSecret = secret;
                     yield user.save();
-                    const otpauthUrl = (0, otplib_1.generateURI)({ secret, label: user.email, issuer: 'Pillora Admin' });
+                    const totp = new OTPAuth.TOTP({
+                        issuer: 'Pillora Admin',
+                        label: user.email,
+                        secret: OTPAuth.Secret.fromBase32(secret)
+                    });
+                    const otpauthUrl = totp.toString();
                     const qrCode = yield qrcode_1.default.toDataURL(otpauthUrl);
                     res.json({
                         mfaSetupRequired: true,
@@ -300,7 +338,8 @@ const verifyMfa = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.status(400).json({ message: 'MFA not configured for this user' });
             return;
         }
-        const { valid: isValid } = (0, otplib_1.verifySync)({ token: mfaCode, secret: user.mfaSecret });
+        const totp = new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(user.mfaSecret) });
+        const isValid = totp.validate({ token: mfaCode, window: 1 }) !== null;
         if (!isValid) {
             yield AuditLog_1.default.create({
                 action: 'mfa_failed',
@@ -358,10 +397,15 @@ const setupMfa = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.status(404).json({ message: 'User not found' });
             return;
         }
-        const secret = (0, otplib_1.generateSecret)();
+        const secret = new OTPAuth.Secret().base32;
         user.mfaSecret = secret;
         yield user.save();
-        const otpauthUrl = (0, otplib_1.generateURI)({ secret, label: user.email, issuer: 'Pillora Admin' });
+        const totp = new OTPAuth.TOTP({
+            issuer: 'Pillora Admin',
+            label: user.email,
+            secret: OTPAuth.Secret.fromBase32(secret)
+        });
+        const otpauthUrl = totp.toString();
         const qrCodeDataUrl = yield qrcode_1.default.toDataURL(otpauthUrl);
         res.json({ secret, qrCode: qrCodeDataUrl });
     }
