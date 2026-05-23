@@ -1,3 +1,17 @@
-import app from '../src/app';
+let app: any;
+try {
+    app = require('../src/app').default;
+} catch (error: any) {
+    console.error('CRITICAL BOOT ERROR:', error);
+    const express = require('express');
+    app = express();
+    app.all('*', (req: any, res: any) => {
+        res.status(500).json({
+            message: 'CRITICAL BOOT ERROR',
+            error: error.message || error,
+            stack: error.stack || 'No stack trace available'
+        });
+    });
+}
 
 export default app;
