@@ -19,7 +19,14 @@ import {
     releaseSlotHold,
     deleteSlot,
     createManualAppointment,
-    deleteDoctor
+    deleteDoctor,
+    getBookingHoursAnalytics,
+    getCancellationRate,
+    assignDoctorToAppointment,
+    getPatientNotes,
+    addPatientNote,
+    updateAppointmentPrescription,
+    generateAndSendInvoice
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -35,11 +42,19 @@ router.post('/slots/release-hold', protect, releaseSlotHold);
 
 // ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─
 router.get('/stats', protect, isHospital, attachHospital, getHospitalStats);
+router.get('/analytics/booking-hours', protect, isHospital, attachHospital, getBookingHoursAnalytics);
+router.get('/analytics/cancellation-rate', protect, isHospital, attachHospital, getCancellationRate);
 router.get('/doctors', protect, isHospital, attachHospital, getHospitalDoctors);
 router.get('/appointments', protect, isHospital, attachHospital, getHospitalAppointments);
 router.post('/appointments/manual', protect, isHospital, attachHospital, createManualAppointment);
 router.put('/appointments/:id/status', protect, isHospital, attachHospital, updateAppointmentStatus);
+router.put('/appointments/:id/assign-doctor', protect, isHospital, attachHospital, assignDoctorToAppointment);
+router.put('/appointments/:id/prescription', protect, isHospital, attachHospital, updateAppointmentPrescription);
+router.post('/appointments/:id/invoice', protect, isHospital, attachHospital, generateAndSendInvoice);
 router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
+
+router.get('/patients/:patientId/notes', protect, isHospital, attachHospital, getPatientNotes);
+router.post('/patients/:patientId/notes', protect, isHospital, attachHospital, addPatientNote);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);

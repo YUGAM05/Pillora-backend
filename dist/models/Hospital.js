@@ -45,6 +45,7 @@ const HospitalSchema = new mongoose_1.Schema({
     slug: { type: String, unique: true, trim: true },
     address: { type: String, required: true },
     city: { type: String, required: true },
+    email: { type: String, required: false },
     image: { type: String, required: false },
     images: [{ type: String }],
     isOpen24Hours: { type: Boolean, default: false },

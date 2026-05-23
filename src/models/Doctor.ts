@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IDoctor extends Document {
     hospital: mongoose.Types.ObjectId;
     name: string;
+    email?: string;
+    phone?: string;
     specialty: string;
     fee: number;
     availability: {
@@ -21,6 +23,8 @@ export interface IDoctor extends Document {
 const DoctorSchema: Schema = new Schema({
     hospital: { type: Schema.Types.ObjectId, ref: 'Hospital', required: true },
     name: { type: String, required: true },
+    email: { type: String },
+    phone: { type: String },
     specialty: { type: String, required: true },
     fee: { type: Number, required: true },
     availability: [{

@@ -131,3 +131,43 @@ export const sendHospitalNotificationEmail = async ({
   await transporter.sendMail(mailOptions);
   console.log('Hospital notification email sent to', hospitalEmail);
 };
+
+export interface InvoiceEmailProps {
+  toEmail: string;
+  patientName: string;
+  hospitalName: string;
+  invoiceUrl: string;
+  date: string;
+  amount: number;
+}
+
+export const sendInvoiceEmail = async ({
+  toEmail,
+  patientName,
+  hospitalName,
+  invoiceUrl,
+  date,
+  amount
+}: InvoiceEmailProps) => {
+  const mailOptions = {
+    from: `"Pillora" <team@pillora.in>`,
+    to: toEmail,
+    subject: `Your Invoice - ${hospitalName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+        <h2 style="color: #e63946;">Invoice Generated 📄</h2>
+        <p>Hi <strong>${patientName}</strong>,</p>
+        <p>Your invoice for the consultation at <strong>${hospitalName}</strong> on ${date} has been generated.</p>
+        <p><strong>Total Amount:</strong> ₹${amount}</p>
+        <p>You can view and download your invoice using the link below:</p>
+        <a href="${invoiceUrl}" style="display:inline-block; padding:10px 20px; color:#fff; background:#e63946; text-decoration:none; border-radius:5px; margin:20px 0;">Download Invoice</a>
+        <p style="color: #888; font-size: 12px;">This is an automated email from Pillora. Please do not reply.</p>
+        <hr/>
+        <p style="text-align:center; color:#e63946; font-weight:bold;">Pillora — Blood Donors & Hospital Network</p>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log('Invoice email sent to', toEmail);
+};

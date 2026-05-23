@@ -17,11 +17,18 @@ router.post('/slots/hold', authMiddleware_1.protect, hospitalDashboardController
 router.post('/slots/release-hold', authMiddleware_1.protect, hospitalDashboardController_1.releaseSlotHold);
 // ─── Hospital Staff Dashboard Routes (Requires authentication and hospital role) ─
 router.get('/stats', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalStats);
+router.get('/analytics/booking-hours', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getBookingHoursAnalytics);
+router.get('/analytics/cancellation-rate', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getCancellationRate);
 router.get('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalDoctors);
 router.get('/appointments', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalAppointments);
 router.post('/appointments/manual', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.createManualAppointment);
 router.put('/appointments/:id/status', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updateAppointmentStatus);
+router.put('/appointments/:id/assign-doctor', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.assignDoctorToAppointment);
+router.put('/appointments/:id/prescription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updateAppointmentPrescription);
+router.post('/appointments/:id/invoice', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.generateAndSendInvoice);
 router.get('/slots', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSlots);
+router.get('/patients/:patientId/notes', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPatientNotes);
+router.post('/patients/:patientId/notes', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.addPatientNote);
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addDoctor);
 router.put('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.updateDoctor);

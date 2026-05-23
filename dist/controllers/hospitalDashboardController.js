@@ -12,16 +12,25 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
 const User_1 = __importDefault(require("../models/User"));
+const PatientNote_1 = __importDefault(require("../models/PatientNote"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
 const holdManager_1 = require("../utils/holdManager");
+const pdfkit_1 = __importDefault(require("pdfkit"));
+const cloudinary_1 = require("cloudinary");
 const emailService_1 = require("../services/emailService");
+cloudinary_1.v2.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
+    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
+});
+const emailService_2 = require("../services/emailService");
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -69,10 +78,12 @@ exports.getHospitalDoctors = getHospitalDoctors;
 const addDoctor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const hospital = req.hospital;
-        const { name, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
+        const { name, email, phone, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
         const doctor = yield Doctor_1.default.create({
             hospital: hospital._id,
             name,
+            email,
+            phone,
             specialty,
             fee,
             availability: availability || [],
@@ -370,7 +381,7 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
                 const dateStr = new Date(slotTime).toLocaleDateString();
                 const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                yield (0, emailService_1.sendBookingConfirmationEmail)({
+                yield (0, emailService_2.sendBookingConfirmationEmail)({
                     toEmail: patientEmail,
                     patientName: patientName,
                     hospitalName: hospitalNameStr,
@@ -378,6 +389,23 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     timeSlot: timeSlotStr,
                     bookingId: appointment._id.toString()
                 });
+                if (hospitalDoc && hospitalDoc.email) {
+                    try {
+                        yield (0, emailService_2.sendHospitalNotificationEmail)({
+                            hospitalEmail: hospitalDoc.email,
+                            hospitalName: hospitalDoc.name,
+                            patientName: patientName,
+                            patientEmail: patientEmail,
+                            patientPhone: patientPhone,
+                            date: dateStr,
+                            timeSlot: timeSlotStr,
+                            bookingId: appointment._id.toString()
+                        });
+                    }
+                    catch (emailError) {
+                        console.error('Hospital email failed (non-critical):', emailError.message);
+                    }
+                }
             }
             catch (emailError) {
                 console.error('Email failed (non-critical):', emailError.message);
@@ -835,6 +863,25 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
                 });
                 io.emit('appointmentsUpdated', { hospitalId: hospital._id });
             }
+            if (patient.email) {
+                try {
+                    const hospitalNameStr = hospital.name || 'Pillora Hospital';
+                    const dateStr = new Date(slotTime).toLocaleDateString();
+                    const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    yield (0, emailService_2.sendBookingConfirmationEmail)({
+                        toEmail: patient.email,
+                        patientName: patient.name,
+                        hospitalName: hospitalNameStr,
+                        date: dateStr,
+                        timeSlot: timeSlotStr,
+                        bookingId: appointment._id.toString()
+                    });
+                    console.log('Walking appointment confirmation email sent to', patient.email);
+                }
+                catch (emailError) {
+                    console.error('Walking appointment email failed (non-critical):', emailError.message);
+                }
+            }
             res.status(201).json({
                 success: true,
                 message: 'Manual appointment booked successfully',
@@ -897,3 +944,247 @@ const deleteDoctor = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.deleteDoctor = deleteDoctor;
+// @desc    Get booking hours analytics for the current week
+// @route   GET /api/hospital/dashboard/analytics/booking-hours
+const getBookingHoursAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+        startOfWeek.setHours(0, 0, 0, 0);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
+        endOfWeek.setHours(23, 59, 59, 999);
+        const appointments = yield Appointment_1.default.find({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfWeek, $lte: endOfWeek }
+        });
+        const hourCounts = {};
+        appointments.forEach(app => {
+            const hour = new Date(app.slotTime).getHours();
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const formattedHour = `${hour % 12 || 12}${ampm}`;
+            hourCounts[formattedHour] = (hourCounts[formattedHour] || 0) + 1;
+        });
+        // Format as array
+        const result = Object.keys(hourCounts).map(hour => ({
+            hour,
+            count: hourCounts[hour]
+        }));
+        res.json(result);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching booking hours analytics', error: error.message });
+    }
+});
+exports.getBookingHoursAnalytics = getBookingHoursAnalytics;
+// @desc    Get cancellation rate for the current month
+// @route   GET /api/hospital/dashboard/analytics/cancellation-rate
+const getCancellationRate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        const totalAppointments = yield Appointment_1.default.countDocuments({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+        const cancelledAppointments = yield Appointment_1.default.countDocuments({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfMonth, $lte: endOfMonth },
+            status: 'cancelled'
+        });
+        const rate = totalAppointments > 0 ? ((cancelledAppointments / totalAppointments) * 100).toFixed(1) : 0;
+        res.json({
+            total: totalAppointments,
+            cancelled: cancelledAppointments,
+            rate: Number(rate)
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching cancellation rate', error: error.message });
+    }
+});
+exports.getCancellationRate = getCancellationRate;
+// @desc    Assign doctor to appointment
+// @route   PUT /api/hospital/dashboard/appointments/:id/assign-doctor
+const assignDoctorToAppointment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const { doctorId } = req.body;
+        if (!doctorId) {
+            res.status(400).json({ message: 'doctorId is required' });
+            return;
+        }
+        const doctor = yield Doctor_1.default.findOne({ _id: doctorId, hospital: hospital._id });
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor not found in this hospital' });
+            return;
+        }
+        const appointment = yield Appointment_1.default.findOneAndUpdate({ _id: id, hospital: hospital._id }, { doctor: doctor._id }, { new: true }).populate('doctor', 'name specialty');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        res.json({ message: 'Doctor assigned successfully', appointment });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error assigning doctor', error: error.message });
+    }
+});
+exports.assignDoctorToAppointment = assignDoctorToAppointment;
+// @desc    Get notes for a specific patient
+// @route   GET /api/hospital/dashboard/patients/:patientId/notes
+const getPatientNotes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { patientId } = req.params;
+        const notes = yield PatientNote_1.default.find({ patient: patientId, hospital: hospital._id })
+            .populate('doctor', 'name specialty')
+            .sort({ createdAt: -1 });
+        res.json(notes);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching patient notes', error: error.message });
+    }
+});
+exports.getPatientNotes = getPatientNotes;
+// @desc    Add a note for a patient
+// @route   POST /api/hospital/dashboard/patients/:patientId/notes
+const addPatientNote = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { patientId } = req.params;
+        const { note, doctorId } = req.body;
+        if (!note) {
+            res.status(400).json({ message: 'Note content is required' });
+            return;
+        }
+        const patientNote = yield PatientNote_1.default.create({
+            patient: patientId,
+            hospital: hospital._id,
+            doctor: doctorId || undefined,
+            note
+        });
+        const populatedNote = yield PatientNote_1.default.findById(patientNote._id).populate('doctor', 'name specialty');
+        res.status(201).json(populatedNote);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error adding patient note', error: error.message });
+    }
+});
+exports.addPatientNote = addPatientNote;
+// @desc    Upload Prescription URL
+// @route   PUT /api/hospital/dashboard/appointments/:id/prescription
+const updateAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const { prescriptionUrl } = req.body;
+        const appointment = yield Appointment_1.default.findOne({ _id: id, hospital: hospital._id });
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        appointment.prescriptionUrl = prescriptionUrl;
+        yield appointment.save();
+        res.json(appointment);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error updating prescription', error: error.message });
+    }
+});
+exports.updateAppointmentPrescription = updateAppointmentPrescription;
+// @desc    Generate and Send Invoice
+// @route   POST /api/hospital/dashboard/appointments/:id/invoice
+const generateAndSendInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const { amount } = req.body;
+        const appointment = yield Appointment_1.default.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        const patientName = appointment.patientName || ((_a = appointment.patient) === null || _a === void 0 ? void 0 : _a.name) || 'Patient';
+        const patientEmail = (_b = appointment.patient) === null || _b === void 0 ? void 0 : _b.email;
+        if (!patientEmail) {
+            res.status(400).json({ message: 'Patient email not found for sending invoice. Cannot send email.' });
+            return;
+        }
+        // Generate PDF
+        const doc = new pdfkit_1.default({ margin: 50 });
+        const buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        const invoiceName = `INV-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${appointment._id}`;
+        // Header
+        doc.fontSize(20).text(hospital.name, { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(16).text('INVOICE', { align: 'center', underline: true });
+        doc.moveDown();
+        // Invoice Details
+        doc.fontSize(12);
+        doc.text(`Invoice No: ${invoiceName}`);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`);
+        doc.text(`Patient: ${patientName}`);
+        doc.moveDown();
+        // Table Header
+        doc.text('Description', 50, doc.y, { continued: true });
+        doc.text('Amount', 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+        doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.5);
+        // Table Row
+        doc.text('Consultation Fee', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${amount}`, 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+        doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.5);
+        // Total
+        doc.fontSize(14).text('Total:', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${amount}`, 400, doc.y, { align: 'right' });
+        doc.end();
+        // Wait for PDF to finish
+        const pdfBuffer = yield new Promise((resolve, reject) => {
+            doc.on('end', () => {
+                resolve(Buffer.concat(buffers));
+            });
+            doc.on('error', reject);
+        });
+        const base64File = pdfBuffer.toString('base64');
+        const dataUri = `data:application/pdf;base64,${base64File}`;
+        // Upload to Cloudinary
+        const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
+            folder: 'apex-care-invoices',
+            resource_type: 'auto',
+            public_id: invoiceName
+        });
+        const invoiceUrl = result.secure_url;
+        appointment.invoiceUrl = invoiceUrl;
+        appointment.paymentStatus = 'paid';
+        yield appointment.save();
+        try {
+            yield (0, emailService_1.sendInvoiceEmail)({
+                toEmail: patientEmail,
+                patientName: patientName,
+                hospitalName: hospital.name,
+                invoiceUrl: invoiceUrl,
+                date: new Date(appointment.bookingDate).toLocaleDateString(),
+                amount: Number(amount)
+            });
+        }
+        catch (emailError) {
+            console.error('Invoice email failed (non-critical):', emailError.message);
+        }
+        res.json(appointment);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error generating invoice', error: error.message });
+    }
+});
+exports.generateAndSendInvoice = generateAndSendInvoice;

@@ -34,30 +34,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const AppointmentSchema = new mongoose_1.Schema({
+const PatientNoteSchema = new mongoose_1.Schema({
     patient: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    doctor: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Doctor', required: true },
     hospital: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
-    slot: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Slot', required: true },
-    slotTime: { type: Date, required: true },
-    status: {
-        type: String,
-        enum: ['pending', 'confirmed', 'checked-in', 'in-consultation', 'completed', 'cancelled'],
-        default: 'pending'
-    },
-    paymentStatus: {
-        type: String,
-        enum: ['pending', 'paid', 'failed'],
-        default: 'pending'
-    },
-    bookingDate: { type: Date, default: Date.now },
-    notes: { type: String },
-    prescriptionUrl: { type: String },
-    invoiceUrl: { type: String },
-    tokenNumber: { type: Number },
-    patientName: { type: String },
-    patientPhone: { type: String },
-    patientEmail: { type: String },
-    patientAge: { type: Number },
-}, { timestamps: true });
-exports.default = mongoose_1.default.model('Appointment', AppointmentSchema);
+    doctor: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Doctor' },
+    note: { type: String, required: true }
+}, {
+    timestamps: true
+});
+exports.default = mongoose_1.default.model('PatientNote', PatientNoteSchema);

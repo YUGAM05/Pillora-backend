@@ -10,6 +10,8 @@ export interface IAppointment extends Document {
     paymentStatus: 'pending' | 'paid' | 'failed';
     bookingDate: Date;
     notes?: string;
+    prescriptionUrl?: string;
+    invoiceUrl?: string;
     tokenNumber?: number;
     patientName?: string;
     patientPhone?: string;
@@ -35,6 +37,8 @@ const AppointmentSchema: Schema = new Schema({
     },
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
+    prescriptionUrl: { type: String },
+    invoiceUrl: { type: String },
     tokenNumber: { type: Number },
     patientName: { type: String },
     patientPhone: { type: String },
@@ -43,4 +47,3 @@ const AppointmentSchema: Schema = new Schema({
 }, { timestamps: true });
 
 export default mongoose.model<IAppointment>('Appointment', AppointmentSchema);
-

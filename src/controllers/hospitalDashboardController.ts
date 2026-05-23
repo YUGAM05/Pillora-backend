@@ -5,9 +5,19 @@ import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
 import Appointment from '../models/Appointment';
 import User from '../models/User';
+import PatientNote from '../models/PatientNote';
 import mongoose from 'mongoose';
 import redis from '../utils/redisMock';
 import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
+import PDFDocument from 'pdfkit';
+import { v2 as cloudinary } from 'cloudinary';
+import { sendInvoiceEmail } from '../services/emailService';
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
+    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
+    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
+});
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
 
 // @desc    Get hospital dashboard stats
@@ -58,11 +68,13 @@ export const getHospitalDoctors = async (req: AuthRequest, res: Response): Promi
 export const addDoctor = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
-        const { name, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
+        const { name, email, phone, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
 
         const doctor = await Doctor.create({
             hospital: hospital._id,
             name,
+            email,
+            phone,
             specialty,
             fee,
             availability: availability || [],
@@ -1032,6 +1044,291 @@ export const deleteDoctor = async (req: AuthRequest, res: Response): Promise<voi
         res.json({ message: 'Doctor and all associated slots/appointments deleted successfully.' });
     } catch (error: any) {
         res.status(500).json({ message: 'Error deleting doctor', error: error.message });
+    }
+};
+
+// @desc    Get booking hours analytics for the current week
+// @route   GET /api/hospital/dashboard/analytics/booking-hours
+export const getBookingHoursAnalytics = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        
+        const now = new Date();
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6); // Saturday
+        endOfWeek.setHours(23, 59, 59, 999);
+
+        const appointments = await Appointment.find({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfWeek, $lte: endOfWeek }
+        });
+
+        const hourCounts: { [key: string]: number } = {};
+        appointments.forEach(app => {
+            const hour = new Date(app.slotTime).getHours();
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const formattedHour = `${hour % 12 || 12}${ampm}`;
+            hourCounts[formattedHour] = (hourCounts[formattedHour] || 0) + 1;
+        });
+
+        // Format as array
+        const result = Object.keys(hourCounts).map(hour => ({
+            hour,
+            count: hourCounts[hour]
+        }));
+
+        res.json(result);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching booking hours analytics', error: error.message });
+    }
+};
+
+// @desc    Get cancellation rate for the current month
+// @route   GET /api/hospital/dashboard/analytics/cancellation-rate
+export const getCancellationRate = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const totalAppointments = await Appointment.countDocuments({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfMonth, $lte: endOfMonth }
+        });
+
+        const cancelledAppointments = await Appointment.countDocuments({
+            hospital: hospital._id,
+            slotTime: { $gte: startOfMonth, $lte: endOfMonth },
+            status: 'cancelled'
+        });
+
+        const rate = totalAppointments > 0 ? ((cancelledAppointments / totalAppointments) * 100).toFixed(1) : 0;
+
+        res.json({
+            total: totalAppointments,
+            cancelled: cancelledAppointments,
+            rate: Number(rate)
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching cancellation rate', error: error.message });
+    }
+};
+
+// @desc    Assign doctor to appointment
+// @route   PUT /api/hospital/dashboard/appointments/:id/assign-doctor
+export const assignDoctorToAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { doctorId } = req.body;
+
+        if (!doctorId) {
+            res.status(400).json({ message: 'doctorId is required' });
+            return;
+        }
+
+        const doctor = await Doctor.findOne({ _id: doctorId, hospital: hospital._id });
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor not found in this hospital' });
+            return;
+        }
+
+        const appointment = await Appointment.findOneAndUpdate(
+            { _id: id, hospital: hospital._id },
+            { doctor: doctor._id },
+            { new: true }
+        ).populate('doctor', 'name specialty');
+
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        res.json({ message: 'Doctor assigned successfully', appointment });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error assigning doctor', error: error.message });
+    }
+};
+
+// @desc    Get notes for a specific patient
+// @route   GET /api/hospital/dashboard/patients/:patientId/notes
+export const getPatientNotes = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { patientId } = req.params;
+
+        const notes = await PatientNote.find({ patient: patientId, hospital: hospital._id })
+            .populate('doctor', 'name specialty')
+            .sort({ createdAt: -1 });
+
+        res.json(notes);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching patient notes', error: error.message });
+    }
+};
+
+// @desc    Add a note for a patient
+// @route   POST /api/hospital/dashboard/patients/:patientId/notes
+export const addPatientNote = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { patientId } = req.params;
+        const { note, doctorId } = req.body;
+
+        if (!note) {
+            res.status(400).json({ message: 'Note content is required' });
+            return;
+        }
+
+        const patientNote = await PatientNote.create({
+            patient: patientId,
+            hospital: hospital._id,
+            doctor: doctorId || undefined,
+            note
+        });
+
+        const populatedNote = await PatientNote.findById(patientNote._id).populate('doctor', 'name specialty');
+
+        res.status(201).json(populatedNote);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error adding patient note', error: error.message });
+    }
+};
+
+// @desc    Upload Prescription URL
+// @route   PUT /api/hospital/dashboard/appointments/:id/prescription
+export const updateAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { prescriptionUrl } = req.body;
+
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id });
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        appointment.prescriptionUrl = prescriptionUrl;
+        await appointment.save();
+
+        res.json(appointment);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating prescription', error: error.message });
+    }
+};
+
+// @desc    Generate and Send Invoice
+// @route   POST /api/hospital/dashboard/appointments/:id/invoice
+export const generateAndSendInvoice = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { amount } = req.body;
+
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        const patientName = appointment.patientName || (appointment.patient as any)?.name || 'Patient';
+        const patientEmail = (appointment.patient as any)?.email;
+
+        if (!patientEmail) {
+            res.status(400).json({ message: 'Patient email not found for sending invoice. Cannot send email.' });
+            return;
+        }
+
+        // Generate PDF
+        const doc = new PDFDocument({ margin: 50 });
+        const buffers: Buffer[] = [];
+        
+        doc.on('data', buffers.push.bind(buffers));
+        
+        const invoiceName = `INV-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${appointment._id}`;
+
+        // Header
+        doc.fontSize(20).text(hospital.name, { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(16).text('INVOICE', { align: 'center', underline: true });
+        doc.moveDown();
+
+        // Invoice Details
+        doc.fontSize(12);
+        doc.text(`Invoice No: ${invoiceName}`);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`);
+        doc.text(`Patient: ${patientName}`);
+        doc.moveDown();
+
+        // Table Header
+        doc.text('Description', 50, doc.y, { continued: true });
+        doc.text('Amount', 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+        
+        doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.5);
+
+        // Table Row
+        doc.text('Consultation Fee', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${amount}`, 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+
+        doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.5);
+
+        // Total
+        doc.fontSize(14).text('Total:', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${amount}`, 400, doc.y, { align: 'right' });
+
+        doc.end();
+
+        // Wait for PDF to finish
+        const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
+            doc.on('end', () => {
+                resolve(Buffer.concat(buffers));
+            });
+            doc.on('error', reject);
+        });
+
+        const base64File = pdfBuffer.toString('base64');
+        const dataUri = `data:application/pdf;base64,${base64File}`;
+
+        // Upload to Cloudinary
+        const result = await cloudinary.uploader.upload(dataUri, {
+            folder: 'apex-care-invoices',
+            resource_type: 'auto',
+            public_id: invoiceName
+        });
+
+        const invoiceUrl = result.secure_url;
+
+        appointment.invoiceUrl = invoiceUrl;
+        appointment.paymentStatus = 'paid';
+        await appointment.save();
+
+        try {
+            await sendInvoiceEmail({
+                toEmail: patientEmail,
+                patientName: patientName,
+                hospitalName: hospital.name,
+                invoiceUrl: invoiceUrl,
+                date: new Date(appointment.bookingDate).toLocaleDateString(),
+                amount: Number(amount)
+            });
+        } catch (emailError: any) {
+            console.error('Invoice email failed (non-critical):', emailError.message);
+        }
+
+        res.json(appointment);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error generating invoice', error: error.message });
     }
 };
 
