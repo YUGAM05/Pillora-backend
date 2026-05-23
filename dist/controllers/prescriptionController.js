@@ -16,10 +16,21 @@ exports.adminVerifyPrescription = exports.adminGetAllPrescriptions = exports.get
 const Prescription_1 = __importDefault(require("../models/Prescription"));
 const aiService_1 = require("../services/aiService");
 const generative_ai_1 = require("@google/generative-ai");
-const genAI = new generative_ai_1.GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+let genAI = null;
+const getGenAI = () => {
+    if (!genAI) {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY is not configured in the backend environment variables.');
+        }
+        genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+    }
+    return genAI;
+};
 // ✅ Replaces Tesseract OCR - uses Gemini Vision directly
 const extractTextWithGemini = (buffer, mimeType) => __awaiter(void 0, void 0, void 0, function* () {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const client = getGenAI();
+    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const base64Image = buffer.toString('base64');
     const result = yield model.generateContent([
         {

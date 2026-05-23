@@ -4,11 +4,23 @@ import { verifyPrescription } from '../services/aiService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+let genAI: GoogleGenerativeAI | null = null;
+
+const getGenAI = (): GoogleGenerativeAI => {
+    if (!genAI) {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY is not configured in the backend environment variables.');
+        }
+        genAI = new GoogleGenerativeAI(apiKey);
+    }
+    return genAI;
+};
 
 // ✅ Replaces Tesseract OCR - uses Gemini Vision directly
 const extractTextWithGemini = async (buffer: Buffer, mimeType: string): Promise<string> => {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const client = getGenAI();
+    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const base64Image = buffer.toString('base64');
 
     const result = await model.generateContent([
