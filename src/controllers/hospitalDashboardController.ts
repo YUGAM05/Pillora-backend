@@ -947,6 +947,26 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 io.emit('appointmentsUpdated', { hospitalId: hospital._id });
             }
 
+            if (patient.email) {
+                try {
+                    const hospitalNameStr = hospital.name || 'Pillora Hospital';
+                    const dateStr = new Date(slotTime).toLocaleDateString();
+                    const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    await sendBookingConfirmationEmail({
+                        toEmail: patient.email,
+                        patientName: patient.name,
+                        hospitalName: hospitalNameStr,
+                        date: dateStr,
+                        timeSlot: timeSlotStr,
+                        bookingId: appointment._id.toString()
+                    });
+                    console.log('Walking appointment confirmation email sent to', patient.email);
+                } catch (emailError: any) {
+                    console.error('Walking appointment email failed (non-critical):', emailError.message);
+                }
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Manual appointment booked successfully',
