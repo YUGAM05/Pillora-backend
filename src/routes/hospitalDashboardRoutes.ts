@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import { protect } from '../middleware/authMiddleware';
 import { isHospital, selfManagedOnly, attachHospital } from '../middleware/hospitalMiddleware';
 import {
@@ -26,10 +27,14 @@ import {
     getPatientNotes,
     addPatientNote,
     updateAppointmentPrescription,
-    generateAndSendInvoice
+    generateAndSendInvoice,
+    searchPatients,
+    uploadAppointmentPrescription,
+    getAppointmentPrescription
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ─── Public Routes (No authentication required to view slots) ───────────────────
 router.get('/doctors/:id/slots', getDoctorSlots);
@@ -55,6 +60,10 @@ router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
 
 router.get('/patients/:patientId/notes', protect, isHospital, attachHospital, getPatientNotes);
 router.post('/patients/:patientId/notes', protect, isHospital, attachHospital, addPatientNote);
+
+router.get('/patients/search', protect, isHospital, attachHospital, searchPatients);
+router.post('/appointments/:id/prescription', protect, isHospital, attachHospital, upload.single('prescription'), uploadAppointmentPrescription);
+router.get('/appointments/:id/prescription', protect, isHospital, attachHospital, getAppointmentPrescription);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);

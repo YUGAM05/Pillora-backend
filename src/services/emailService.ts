@@ -171,3 +171,41 @@ export const sendInvoiceEmail = async ({
   await transporter.sendMail(mailOptions);
   console.log('Invoice email sent to', toEmail);
 };
+
+export interface PrescriptionEmailProps {
+  toEmail: string;
+  patientName: string;
+  hospitalName: string;
+  prescriptionUrl: string;
+  date: string;
+}
+
+export const sendPrescriptionEmail = async ({
+  toEmail,
+  patientName,
+  hospitalName,
+  prescriptionUrl,
+  date
+}: PrescriptionEmailProps) => {
+  const mailOptions = {
+    from: `"Pillora" <team@pillora.in>`,
+    to: toEmail,
+    subject: `Your Prescription - ${hospitalName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+        <h2 style="color: #10b981;">Prescription Uploaded 📝</h2>
+        <p>Hi <strong>${patientName}</strong>,</p>
+        <p>Your prescription for the consultation at <strong>${hospitalName}</strong> on ${date} has been uploaded and is ready for download.</p>
+        <p>You can view and download your prescription using the link below:</p>
+        <a href="${prescriptionUrl}" style="display:inline-block; padding:10px 20px; color:#fff; background:#10b981; text-decoration:none; border-radius:5px; margin:20px 0;">Download Prescription</a>
+        <p style="color: #888; font-size: 12px;">This is an automated email from Pillora. Please do not reply.</p>
+        <hr/>
+        <p style="text-align:center; color:#10b981; font-weight:bold;">Pillora — Blood Donors & Hospital Network</p>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log('Prescription email sent to', toEmail);
+};
+

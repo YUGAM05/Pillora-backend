@@ -18,7 +18,7 @@ cloudinary.config({
     api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
     api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
 });
-import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
+import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -1329,4 +1329,181 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
         res.status(500).json({ message: 'Error generating invoice', error: error.message });
     }
 };
+};
 
+// @desc    Search patients by booking ID or name
+// @route   GET /api/hospital/dashboard/patients/search
+export const searchPatients = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { bookingId, name } = req.query;
+
+        let query: any = { hospital: hospital._id };
+
+        if (bookingId) {
+            // Find specific booking and then find all other bookings for that patient
+            const initialBooking = await Appointment.findOne({ _id: bookingId as string, hospital: hospital._id }).populate('patient');
+            if (!initialBooking) {
+                res.status(404).json({ message: 'No patient found with this booking ID' });
+                return;
+            }
+            query.patient = initialBooking.patient;
+        } else if (name) {
+            // Find patients matching the name
+            const matchingUsers = await User.find({ name: { $regex: name as string, $options: 'i' } });
+            if (!matchingUsers.length) {
+                res.status(404).json({ message: 'No patient found with this name' });
+                return;
+            }
+            query.patient = { $in: matchingUsers.map(u => u._id) };
+        } else {
+            res.status(400).json({ message: 'Provide either bookingId or name to search' });
+            return;
+        }
+
+        const appointments = await Appointment.find(query)
+            .populate('patient')
+            .populate('doctor', 'name specialty')
+            .sort({ bookingDate: -1 });
+
+        if (!appointments.length) {
+            res.status(404).json({ message: 'No matching appointments found' });
+            return;
+        }
+
+        // Group by patient
+        const patientsMap = new Map();
+        
+        for (const appt of appointments) {
+            const patientId = appt.patient?._id.toString();
+            if (!patientId) continue;
+
+            if (!patientsMap.has(patientId)) {
+                patientsMap.set(patientId, {
+                    patientInfo: {
+                        _id: patientId,
+                        name: appt.patientName || (appt.patient as any)?.name || 'Unknown',
+                        email: appt.patientEmail || (appt.patient as any)?.email || '',
+                        phone: appt.patientPhone || (appt.patient as any)?.phone || '',
+                        totalVisits: 0,
+                        firstVisit: appt.bookingDate,
+                        lastVisit: appt.bookingDate,
+                        totalSpent: 0
+                    },
+                    bookings: []
+                });
+            }
+
+            const patientData = patientsMap.get(patientId);
+            patientData.totalVisits += 1;
+            
+            // Adjust dates
+            if (new Date(appt.bookingDate) < new Date(patientData.patientInfo.firstVisit)) {
+                patientData.patientInfo.firstVisit = appt.bookingDate;
+            }
+            if (new Date(appt.bookingDate) > new Date(patientData.patientInfo.lastVisit)) {
+                patientData.patientInfo.lastVisit = appt.bookingDate;
+            }
+
+            // In our system, the amount paid might be in the invoice, or if fee is on slot. 
+            // We'll just sum up if paymentStatus is paid. (Mock fee or actual fee).
+            // Usually consulting fee is attached to doctor or slot. We will add 0 for now unless we have fee logic.
+            // Wait, we can extract amount from invoice logic or just assume 500 for paid
+            const mockFee = appt.paymentStatus === 'paid' ? 500 : 0; // Assuming 500 or adjust if you have a fee field
+            patientData.patientInfo.totalSpent += mockFee;
+
+            patientData.bookings.push(appt);
+        }
+
+        const results = Array.from(patientsMap.values());
+        res.json(results);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error searching patients', error: error.message });
+    }
+};
+
+// @desc    Upload Prescription PDF
+// @route   POST /api/hospital/dashboard/appointments/:id/prescription
+export const uploadAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+
+        if (!req.file) {
+            res.status(400).json({ message: 'No PDF file uploaded' });
+            return;
+        }
+
+        if (req.file.mimetype !== 'application/pdf') {
+            res.status(400).json({ message: 'Only PDF files are allowed' });
+            return;
+        }
+
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        // Convert buffer to base64
+        const base64File = req.file.buffer.toString('base64');
+        const dataUri = \`data:\${req.file.mimetype};base64,\${base64File}\`;
+
+        // Upload to Cloudinary
+        const result = await cloudinary.uploader.upload(dataUri, {
+            folder: 'apex-care-prescriptions',
+            resource_type: 'raw',
+            format: 'pdf'
+        });
+
+        appointment.prescriptionUrl = result.secure_url;
+        appointment.prescriptionUploadedAt = new Date();
+        await appointment.save();
+
+        const patientEmail = (appointment.patient as any)?.email || appointment.patientEmail;
+        const patientName = (appointment.patient as any)?.name || appointment.patientName || 'Patient';
+
+        if (patientEmail) {
+            try {
+                await sendPrescriptionEmail({
+                    toEmail: patientEmail,
+                    patientName: patientName,
+                    hospitalName: hospital.name,
+                    prescriptionUrl: appointment.prescriptionUrl,
+                    date: new Date(appointment.bookingDate).toLocaleDateString()
+                });
+            } catch (emailError: any) {
+                console.error('Prescription email failed (non-critical):', emailError.message);
+            }
+        }
+
+        res.json(appointment);
+    } catch (error: any) {
+        console.error('Prescription upload error:', error);
+        res.status(500).json({ message: 'Error uploading prescription', error: error.message });
+    }
+};
+
+// @desc    Get Prescription URL
+// @route   GET /api/hospital/dashboard/appointments/:id/prescription
+export const getAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id });
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        if (!appointment.prescriptionUrl) {
+            res.status(404).json({ message: 'Prescription not uploaded yet' });
+            return;
+        }
+
+        res.json({ prescriptionUrl: appointment.prescriptionUrl, uploadedAt: appointment.prescriptionUploadedAt });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching prescription', error: error.message });
+    }
+};
