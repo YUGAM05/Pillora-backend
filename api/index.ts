@@ -13,20 +13,23 @@ try {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://pillora.in',
-    'https://pillora-hospital.vercel.app',
-    'https://apex-backend-theta.vercel.app'
-  ];
+  const isOriginAllowed = (origin: string): boolean => {
+    if (!origin) return true;
+    const isLocal = origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1');
+    const isVercel = origin.endsWith('.vercel.app');
+    const isPillora = origin.includes('pillora.in') ||
+                      origin.includes('pillora-admin') ||
+                      origin.includes('pillora-hospital') ||
+                      origin.includes('pillora-seller');
+    return isLocal || isVercel || isPillora;
+  };
 
   app.use(cors({
     origin: function(origin: any, callback: any) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (isOriginAllowed(origin)) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error(`Not allowed by CORS: ${origin}`));
       }
     },
     credentials: true,
