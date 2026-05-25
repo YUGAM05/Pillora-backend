@@ -19,10 +19,25 @@ export const createHealthTip = async (req: Request, res: Response) => {
 
 export const getAllHealthTips = async (req: Request, res: Response) => {
     try {
+        const mongoose = require('mongoose');
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('DB connection timeout')), 5000)
+        );
+
+        if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+            throw new Error('Database not connected');
+        }
+
+        await Promise.race([
+            mongoose.connection.db.admin().ping(),
+            timeoutPromise
+        ]);
+
         const tips = await HealthTip.find().sort({ date: -1 });
         res.status(200).json(tips);
-    } catch (error) {
-        res.status(500).json({ message: 'Error fetching health tips', error });
+    } catch (error: any) {
+        console.error('Health hub error:', error.message);
+        res.status(500).json({ status: 'error', message: error.message });
     }
 };
 

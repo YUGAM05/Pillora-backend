@@ -164,51 +164,111 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-import authRoutes from './routes/authRoutes';
-import bloodBankRoutes from './routes/bloodBankRoutes';
-import safetyRoutes from './routes/safetyRoutes';
-import adminRoutes from './routes/adminRoutes';
-import sellerRoutes from './routes/sellerRoutes';
-import deliveryRoutes from './routes/deliveryRoutes';
-import productRoutes from './routes/productRoutes';
-import notificationRoutes from './routes/notificationRoutes';
-import prescriptionRoutes from './routes/prescriptionRoutes';
-import hospitalRoutes from './routes/hospitalRoutes';
-import orderRoutes from './routes/orderRoutes';
-import healthHubRoutes from './routes/healthHubRoutes';
-import supportRoutes from './routes/supportRoutes';
-import blogRoutes from './routes/blogRoutes';
-import aiRoutes from './routes/aiRoutes';
-import couponRoutes from './routes/couponRoutes';
-import medicineRoutes from './routes/medicineRoutes';
-import uploadRoutes from './routes/uploadRoutes';
-import partnerRoutes from './routes/partnerRoutes';
-import hospitalDashboardRoutes from './routes/hospitalDashboardRoutes';
-import analyticsRoutes from './routes/analyticsRoutes';
-
-
-
+// ─── Route Imports & Bindings with Verbose Boot Sequence Logging ───
+console.log('=== AUTH ROUTES LOADING ===');
+const authRoutes = require('./routes/authRoutes').default || require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
+console.log('=== AUTH ROUTES LOADED ===');
+
+console.log('=== BLOOD BANK ROUTES LOADING ===');
+const bloodBankRoutes = require('./routes/bloodBankRoutes').default || require('./routes/bloodBankRoutes');
 app.use('/api/blood-bank', bloodBankRoutes);
+console.log('=== BLOOD BANK ROUTES LOADED ===');
+
+console.log('=== SAFETY ROUTES LOADING ===');
+const safetyRoutes = require('./routes/safetyRoutes').default || require('./routes/safetyRoutes');
 app.use('/api/safety', safetyRoutes);
+console.log('=== SAFETY ROUTES LOADED ===');
+
+console.log('=== ADMIN ROUTES LOADING ===');
+const adminRoutes = require('./routes/adminRoutes').default || require('./routes/adminRoutes');
 app.use('/api/admin', adminRoutes);
+console.log('=== ADMIN ROUTES LOADED ===');
+
+console.log('=== SELLER ROUTES LOADING ===');
+const sellerRoutes = require('./routes/sellerRoutes').default || require('./routes/sellerRoutes');
 app.use('/api/seller', sellerRoutes);
+console.log('=== SELLER ROUTES LOADED ===');
+
+console.log('=== DELIVERY ROUTES LOADING ===');
+const deliveryRoutes = require('./routes/deliveryRoutes').default || require('./routes/deliveryRoutes');
 app.use('/api/delivery', deliveryRoutes);
+console.log('=== DELIVERY ROUTES LOADED ===');
+
+console.log('=== PRODUCT ROUTES LOADING ===');
+const productRoutes = require('./routes/productRoutes').default || require('./routes/productRoutes');
 app.use('/api/products', productRoutes);
+console.log('=== PRODUCT ROUTES LOADED ===');
+
+console.log('=== NOTIFICATION ROUTES LOADING ===');
+const notificationRoutes = require('./routes/notificationRoutes').default || require('./routes/notificationRoutes');
 app.use('/api/notifications', notificationRoutes);
+console.log('=== NOTIFICATION ROUTES LOADED ===');
+
+console.log('=== PRESCRIPTION ROUTES LOADING ===');
+const prescriptionRoutes = require('./routes/prescriptionRoutes').default || require('./routes/prescriptionRoutes');
 app.use('/api/prescriptions', prescriptionRoutes);
+console.log('=== PRESCRIPTION ROUTES LOADED ===');
+
+console.log('=== HOSPITAL ROUTES LOADING ===');
+const hospitalRoutes = require('./routes/hospitalRoutes').default || require('./routes/hospitalRoutes');
 app.use('/api/hospitals', hospitalRoutes);
+console.log('=== HOSPITAL ROUTES LOADED ===');
+
+console.log('=== ORDER ROUTES LOADING ===');
+const orderRoutes = require('./routes/orderRoutes').default || require('./routes/orderRoutes');
 app.use('/api/orders', orderRoutes);
+console.log('=== ORDER ROUTES LOADED ===');
+
+console.log('=== HEALTH HUB ROUTES LOADING ===');
+const healthHubRoutes = require('./routes/healthHubRoutes').default || require('./routes/healthHubRoutes');
 app.use('/api/health-hub', healthHubRoutes);
+console.log('=== HEALTH HUB ROUTES LOADED ===');
+
+console.log('=== SUPPORT ROUTES LOADING ===');
+const supportRoutes = require('./routes/supportRoutes').default || require('./routes/supportRoutes');
 app.use('/api/support', supportRoutes);
+console.log('=== SUPPORT ROUTES LOADED ===');
+
+console.log('=== BLOG ROUTES LOADING ===');
+const blogRoutes = require('./routes/blogRoutes').default || require('./routes/blogRoutes');
 app.use('/api/blogs', blogRoutes);
+console.log('=== BLOG ROUTES LOADED ===');
+
+console.log('=== AI ROUTES LOADING ===');
+const aiRoutes = require('./routes/aiRoutes').default || require('./routes/aiRoutes');
 app.use('/api/ai', aiRoutes);
+console.log('=== AI ROUTES LOADED ===');
+
+console.log('=== COUPON ROUTES LOADING ===');
+const couponRoutes = require('./routes/couponRoutes').default || require('./routes/couponRoutes');
 app.use('/api/coupons', couponRoutes);
+console.log('=== COUPON ROUTES LOADED ===');
+
+console.log('=== MEDICINE ROUTES LOADING ===');
+const medicineRoutes = require('./routes/medicineRoutes').default || require('./routes/medicineRoutes');
 app.use('/api/medicines', medicineRoutes);
+console.log('=== MEDICINE ROUTES LOADED ===');
+
+console.log('=== UPLOAD ROUTES LOADING ===');
+const uploadRoutes = require('./routes/uploadRoutes').default || require('./routes/uploadRoutes');
 app.use('/api/upload', uploadRoutes);
+console.log('=== UPLOAD ROUTES LOADED ===');
+
+console.log('=== PARTNER ROUTES LOADING ===');
+const partnerRoutes = require('./routes/partnerRoutes').default || require('./routes/partnerRoutes');
 app.use('/api/partners', partnerRoutes);
+console.log('=== PARTNER ROUTES LOADED ===');
+
+console.log('=== HOSPITAL DASHBOARD ROUTES LOADING ===');
+const hospitalDashboardRoutes = require('./routes/hospitalDashboardRoutes').default || require('./routes/hospitalDashboardRoutes');
 app.use('/api/hospital/dashboard', hospitalDashboardRoutes);
+console.log('=== HOSPITAL DASHBOARD ROUTES LOADED ===');
+
+console.log('=== ANALYTICS ROUTES LOADING ===');
+const analyticsRoutes = require('./routes/analyticsRoutes').default || require('./routes/analyticsRoutes');
 app.use('/api/metrics', analyticsRoutes);
+console.log('=== ANALYTICS ROUTES LOADED ===');
 
 app.get('/', (req, res) => {
     res.status(200).json({
