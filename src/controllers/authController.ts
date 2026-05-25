@@ -151,7 +151,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
 
     try {
-        const userEmail = email?.toLowerCase().trim();
+        const userEmail = email?.toLowerCase()?.trim();
         let user = userEmail ? await User.findOne({ email: userEmail }) : null;
 
         // ── Google Login Flow ───────────────────────────────────────────────
@@ -263,7 +263,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            // ── Non-admin login (customers, sellers, delivery) ───────────────
+            // ── Non-admin login (customers, sellers, delivery, hospital) ──────
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -292,8 +292,8 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
             res.status(401).json({ message: 'Invalid email or password' });
         }
     } catch (error: any) {
-        console.error('Login Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        console.error('LOGIN ROUTE CRASH:', error.message, error.stack);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
