@@ -280,6 +280,29 @@ app.get('/', (req, res) => {
 
 export const connectDB = async () => {
     if (mongoose.connection.readyState === 1) return;
+    
+    // If connection is already in progress, wait for the open event to complete
+    if (mongoose.connection.readyState === 2) {
+        console.log('[DB] Connection in progress, waiting for open event...');
+        await new Promise((resolve, reject) => {
+            const onOpen = () => {
+                cleanup();
+                resolve(true);
+            };
+            const onError = (err: any) => {
+                cleanup();
+                reject(err);
+            };
+            const cleanup = () => {
+                mongoose.connection.removeListener('open', onOpen);
+                mongoose.connection.removeListener('error', onError);
+            };
+            mongoose.connection.once('open', onOpen);
+            mongoose.connection.once('error', onError);
+        });
+        return;
+    }
+    
     try {
         const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
         await mongoose.connect(uri, {
