@@ -198,7 +198,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         }
 
         // ── Regular Password Login Flow ──────────────────────────────────────
-        if (user && user.passwordHash && (await bcrypt.compare(password, user.passwordHash))) {
+        if (user && user.passwordHash && password && (await bcrypt.compare(password, user.passwordHash))) {
             console.log(`Login for ${email}: Role=${user.role}, Status=${user.status}`);
 
             // Block rejected non-admin users
@@ -293,7 +293,11 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         }
     } catch (error: any) {
         console.error('LOGIN ROUTE CRASH:', error.message, error.stack);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
+        res.status(500).json({ 
+            message: `Internal server error: ${error.message || 'Unknown error'}`, 
+            error: error.message,
+            stack: error.stack
+        });
     }
 };
 
