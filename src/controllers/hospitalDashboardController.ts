@@ -1329,7 +1329,6 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
         res.status(500).json({ message: 'Error generating invoice', error: error.message });
     }
 };
-};
 
 // @desc    Search patients by booking ID or name
 // @route   GET /api/hospital/dashboard/patients/search
@@ -1447,7 +1446,7 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 
         // Convert buffer to base64
         const base64File = req.file.buffer.toString('base64');
-        const dataUri = \`data:\${req.file.mimetype};base64,\${base64File}\`;
+        const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
