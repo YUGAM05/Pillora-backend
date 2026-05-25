@@ -134,8 +134,8 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
-        const start = new Date(`${date}T${startTime}:00`);
-        const end = new Date(`${date}T${endTime}:00`);
+        const start = new Date(`${date}T${startTime}:00+05:30`);
+        const end = new Date(`${date}T${endTime}:00+05:30`);
 
         if (isNaN(start.getTime()) || isNaN(end.getTime())) {
             res.status(400).json({ message: 'Invalid date or time format' });
@@ -253,10 +253,8 @@ export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<v
             return;
         }
 
-        const startOfDay = new Date(date as string);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(date as string);
-        endOfDay.setHours(23, 59, 59, 999);
+        const startOfDay = new Date(`${date}T00:00:00+05:30`);
+        const endOfDay = new Date(`${date}T23:59:59.999+05:30`);
 
         const slots = await Slot.find({
             doctor: id,
@@ -602,8 +600,8 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
 
         for (const targetDate of targetDates) {
             const dateStr = targetDate.toISOString().split('T')[0];
-            const start = new Date(`${dateStr}T${startTime}:00`);
-            const end = new Date(`${dateStr}T${endTime}:00`);
+            const start = new Date(`${dateStr}T${startTime}:00+05:30`);
+            const end = new Date(`${dateStr}T${endTime}:00+05:30`);
 
             // Past date/time validation
             if (start < now) {
