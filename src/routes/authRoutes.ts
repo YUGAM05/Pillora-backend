@@ -14,10 +14,25 @@ import { requireAdminAuth } from '../middleware/requireAdminAuth';
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5,
-    message: { message: 'Too many login attempts from this IP, please try again after 15 minutes' },
+    max: 20, // Increased from 5 — hospital staff may attempt login multiple times
     standardHeaders: true,
     legacyHeaders: false,
+    // IMPORTANT: Custom handler ensures CORS headers are always present on 429
+    // Without this, the browser sees a CORS error instead of the rate limit error.
+    handler: (req: express.Request, res: express.Response) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many login attempts from this IP, please try again after 15 minutes'
+        });
+    },
 });
 
 const router = express.Router();
@@ -67,13 +82,7 @@ router.options('/login', loginCors);
 
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', registerUser);
-router.post('/login', loginCors, (req, res, next) => {
-    // Skip rate limiting for OPTIONS preflight requests
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    next();
-}, loginLimiter, loginUser);
+router.post('/login', loginCors, loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 
