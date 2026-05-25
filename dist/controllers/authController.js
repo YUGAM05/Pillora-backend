@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.changePassword = exports.setupAdmin = exports.verifyOtp = exports.sendOtp = exports.emergencyLockdown = exports.logoutAdmin = exports.validateSession = exports.refreshToken = exports.setupMfa = exports.verifyMfa = exports.loginUser = exports.registerUser = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const Session_1 = __importDefault(require("../models/Session"));
 const axios_1 = __importDefault(require("axios"));
@@ -184,11 +185,12 @@ exports.registerUser = registerUser;
 //  LOGIN — with session creation + MFA enforcement
 // ═══════════════════════════════════════════════════════════════════════════════
 const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const { email, password, googleToken, name, profilePicture } = req.body;
     const { ip, ua } = getClientInfo(req);
-    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
+    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken}) | DB: ${mongoose_1.default.connection.name} (state: ${mongoose_1.default.connection.readyState})`);
     try {
-        const userEmail = email === null || email === void 0 ? void 0 : email.toLowerCase().trim();
+        const userEmail = (_a = email === null || email === void 0 ? void 0 : email.toLowerCase()) === null || _a === void 0 ? void 0 : _a.trim();
         let user = userEmail ? yield User_1.default.findOne({ email: userEmail }) : null;
         // ── Google Login Flow ───────────────────────────────────────────────
         if (googleToken) {
@@ -233,7 +235,7 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return;
         }
         // ── Regular Password Login Flow ──────────────────────────────────────
-        if (user && user.passwordHash && (yield bcryptjs_1.default.compare(password, user.passwordHash))) {
+        if (user && user.passwordHash && password && (yield bcryptjs_1.default.compare(password, user.passwordHash))) {
             console.log(`Login for ${email}: Role=${user.role}, Status=${user.status}`);
             // Block rejected non-admin users
             if (user.role !== 'admin' && user.status === 'rejected') {
@@ -291,7 +293,7 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 });
                 return;
             }
-            // ── Non-admin login (customers, sellers, delivery) ───────────────
+            // ── Non-admin login (customers, sellers, delivery, hospital) ──────
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -321,8 +323,12 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
     }
     catch (error) {
-        console.error('Login Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        console.error('LOGIN ROUTE CRASH:', error.message, error.stack);
+        res.status(500).json({
+            message: `Internal server error: ${error.message || 'Unknown error'}`,
+            error: error.message,
+            stack: error.stack
+        });
     }
 });
 exports.loginUser = loginUser;

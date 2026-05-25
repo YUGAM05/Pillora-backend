@@ -52,8 +52,8 @@ try {
 
   const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
   if (mongoUri) {
-    mongoose.connect(mongoUri)
-      .then(() => console.log('=== DB CONNECTED ==='))
+    mongoose.connect(mongoUri, { dbName: 'e-pharmacy' })
+      .then(() => console.log('=== DB CONNECTED to database:', mongoose.connection.name, '==='))
       .catch((err: any) => console.error('=== DB FAILED ===', err.message));
   } else {
     console.error('=== DB FAILED === MONGO_URI/MONGODB_URI environment variable is missing');

@@ -4,10 +4,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const multer_1 = __importDefault(require("multer"));
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const hospitalMiddleware_1 = require("../middleware/hospitalMiddleware");
 const hospitalDashboardController_1 = require("../controllers/hospitalDashboardController");
 const router = express_1.default.Router();
+const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 // ─── Public Routes (No authentication required to view slots) ───────────────────
 router.get('/doctors/:id/slots', hospitalDashboardController_1.getDoctorSlots);
 // ─── Patient / Booking Routes (Requires login) ──────────────────────────────────
@@ -29,6 +31,9 @@ router.post('/appointments/:id/invoice', authMiddleware_1.protect, hospitalMiddl
 router.get('/slots', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSlots);
 router.get('/patients/:patientId/notes', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPatientNotes);
 router.post('/patients/:patientId/notes', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.addPatientNote);
+router.get('/patients/search', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.searchPatients);
+router.post('/appointments/:id/prescription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, upload.single('prescription'), hospitalDashboardController_1.uploadAppointmentPrescription);
+router.get('/appointments/:id/prescription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getAppointmentPrescription);
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addDoctor);
 router.put('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.updateDoctor);

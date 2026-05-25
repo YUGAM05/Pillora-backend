@@ -26,9 +26,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL;
 if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_CALLBACK_URL) {
-    console.warn('[Passport] WARNING: Google OAuth env variables are missing. ' +
-        'Google login will be disabled. Set GOOGLE_CLIENT_ID, ' +
-        'GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL in Vercel to enable it.');
+    console.error('MISSING: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
 }
 else {
     try {
@@ -63,7 +61,7 @@ else {
                 return done(error, undefined);
             }
         })));
-        console.log('[Passport] Google OAuth strategy registered successfully.');
+        console.log('Google OAuth registered');
     }
     catch (err) {
         console.error('[Passport] Failed to register Google OAuth strategy:', err);

@@ -53,6 +53,7 @@ const AppointmentSchema = new mongoose_1.Schema({
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
     prescriptionUrl: { type: String },
+    prescriptionUploadedAt: { type: Date },
     invoiceUrl: { type: String },
     tokenNumber: { type: Number },
     patientName: { type: String },

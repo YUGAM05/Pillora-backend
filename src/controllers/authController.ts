@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import User from '../models/User';
 import Session from '../models/Session';
 import axios from 'axios';
@@ -148,7 +149,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 export const loginUser = async (req: Request, res: Response): Promise<void> => {
     const { email, password, googleToken, name, profilePicture } = req.body;
     const { ip, ua } = getClientInfo(req);
-    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken})`);
+    console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken}) | DB: ${mongoose.connection.name} (state: ${mongoose.connection.readyState})`);
 
     try {
         const userEmail = email?.toLowerCase()?.trim();

@@ -306,10 +306,11 @@ export const connectDB = async () => {
     try {
         const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
         await mongoose.connect(uri, {
+            dbName: 'e-pharmacy',
             serverSelectionTimeoutMS: 4000,
             connectTimeoutMS: 4000,
         });
-        console.log('[DB] Connected to MongoDB');
+        console.log('[DB] Connected to MongoDB:', mongoose.connection.name);
     } catch (error: any) {
         console.error('[DB] Connection Error:', error.message);
         throw error;

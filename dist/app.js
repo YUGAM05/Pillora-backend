@@ -59,7 +59,9 @@ const allowedOrigins = [
     'https://pillora-admin.vercel.app',
     'https://www.pillora-admin.vercel.app',
     'https://pillora-hospital.vercel.app',
+    'https://www.pillora-hospital.vercel.app',
     'https://pillora-seller.vercel.app',
+    'https://www.pillora-seller.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
@@ -79,7 +81,10 @@ app.use((req, res, next) => {
     else {
         const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
         const isVercel = origin && origin.endsWith('.vercel.app');
-        const isPillora = origin && (origin.includes('pillora.in') || origin.includes('pillora-admin'));
+        const isPillora = origin && (origin.includes('pillora.in') ||
+            origin.includes('pillora-admin') ||
+            origin.includes('pillora-hospital') ||
+            origin.includes('pillora-seller'));
         if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
             res.setHeader('Access-Control-Allow-Origin', origin);
         }
@@ -146,7 +151,7 @@ app.use((0, express_session_1.default)({
     resave: false,
     saveUninitialized: false,
     store: connect_mongo_1.default.create({
-        mongoUrl: process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
+        mongoUrl: process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
         collectionName: 'sessions',
     }),
     cookie: {
@@ -157,48 +162,91 @@ app.use((0, express_session_1.default)({
 }));
 app.use(passport_1.default.initialize());
 app.use(passport_1.default.session());
-const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
-const bloodBankRoutes_1 = __importDefault(require("./routes/bloodBankRoutes"));
-const safetyRoutes_1 = __importDefault(require("./routes/safetyRoutes"));
-const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
-const sellerRoutes_1 = __importDefault(require("./routes/sellerRoutes"));
-const deliveryRoutes_1 = __importDefault(require("./routes/deliveryRoutes"));
-const productRoutes_1 = __importDefault(require("./routes/productRoutes"));
-const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
-const prescriptionRoutes_1 = __importDefault(require("./routes/prescriptionRoutes"));
-const hospitalRoutes_1 = __importDefault(require("./routes/hospitalRoutes"));
-const orderRoutes_1 = __importDefault(require("./routes/orderRoutes"));
-const healthHubRoutes_1 = __importDefault(require("./routes/healthHubRoutes"));
-const supportRoutes_1 = __importDefault(require("./routes/supportRoutes"));
-const blogRoutes_1 = __importDefault(require("./routes/blogRoutes"));
-const aiRoutes_1 = __importDefault(require("./routes/aiRoutes"));
-const couponRoutes_1 = __importDefault(require("./routes/couponRoutes"));
-const medicineRoutes_1 = __importDefault(require("./routes/medicineRoutes"));
-const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
-const partnerRoutes_1 = __importDefault(require("./routes/partnerRoutes"));
-const hospitalDashboardRoutes_1 = __importDefault(require("./routes/hospitalDashboardRoutes"));
-const analyticsRoutes_1 = __importDefault(require("./routes/analyticsRoutes"));
-app.use('/api/auth', authRoutes_1.default);
-app.use('/api/blood-bank', bloodBankRoutes_1.default);
-app.use('/api/safety', safetyRoutes_1.default);
-app.use('/api/admin', adminRoutes_1.default);
-app.use('/api/seller', sellerRoutes_1.default);
-app.use('/api/delivery', deliveryRoutes_1.default);
-app.use('/api/products', productRoutes_1.default);
-app.use('/api/notifications', notificationRoutes_1.default);
-app.use('/api/prescriptions', prescriptionRoutes_1.default);
-app.use('/api/hospitals', hospitalRoutes_1.default);
-app.use('/api/orders', orderRoutes_1.default);
-app.use('/api/health-hub', healthHubRoutes_1.default);
-app.use('/api/support', supportRoutes_1.default);
-app.use('/api/blogs', blogRoutes_1.default);
-app.use('/api/ai', aiRoutes_1.default);
-app.use('/api/coupons', couponRoutes_1.default);
-app.use('/api/medicines', medicineRoutes_1.default);
-app.use('/api/upload', uploadRoutes_1.default);
-app.use('/api/partners', partnerRoutes_1.default);
-app.use('/api/hospital/dashboard', hospitalDashboardRoutes_1.default);
-app.use('/api/metrics', analyticsRoutes_1.default);
+// ─── Route Imports & Bindings with Verbose Boot Sequence Logging ───
+console.log('=== AUTH ROUTES LOADING ===');
+const authRoutes = require('./routes/authRoutes').default || require('./routes/authRoutes');
+app.use('/api/auth', authRoutes);
+console.log('=== AUTH ROUTES LOADED ===');
+console.log('=== BLOOD BANK ROUTES LOADING ===');
+const bloodBankRoutes = require('./routes/bloodBankRoutes').default || require('./routes/bloodBankRoutes');
+app.use('/api/blood-bank', bloodBankRoutes);
+console.log('=== BLOOD BANK ROUTES LOADED ===');
+console.log('=== SAFETY ROUTES LOADING ===');
+const safetyRoutes = require('./routes/safetyRoutes').default || require('./routes/safetyRoutes');
+app.use('/api/safety', safetyRoutes);
+console.log('=== SAFETY ROUTES LOADED ===');
+console.log('=== ADMIN ROUTES LOADING ===');
+const adminRoutes = require('./routes/adminRoutes').default || require('./routes/adminRoutes');
+app.use('/api/admin', adminRoutes);
+console.log('=== ADMIN ROUTES LOADED ===');
+console.log('=== SELLER ROUTES LOADING ===');
+const sellerRoutes = require('./routes/sellerRoutes').default || require('./routes/sellerRoutes');
+app.use('/api/seller', sellerRoutes);
+console.log('=== SELLER ROUTES LOADED ===');
+console.log('=== DELIVERY ROUTES LOADING ===');
+const deliveryRoutes = require('./routes/deliveryRoutes').default || require('./routes/deliveryRoutes');
+app.use('/api/delivery', deliveryRoutes);
+console.log('=== DELIVERY ROUTES LOADED ===');
+console.log('=== PRODUCT ROUTES LOADING ===');
+const productRoutes = require('./routes/productRoutes').default || require('./routes/productRoutes');
+app.use('/api/products', productRoutes);
+console.log('=== PRODUCT ROUTES LOADED ===');
+console.log('=== NOTIFICATION ROUTES LOADING ===');
+const notificationRoutes = require('./routes/notificationRoutes').default || require('./routes/notificationRoutes');
+app.use('/api/notifications', notificationRoutes);
+console.log('=== NOTIFICATION ROUTES LOADED ===');
+console.log('=== PRESCRIPTION ROUTES LOADING ===');
+const prescriptionRoutes = require('./routes/prescriptionRoutes').default || require('./routes/prescriptionRoutes');
+app.use('/api/prescriptions', prescriptionRoutes);
+console.log('=== PRESCRIPTION ROUTES LOADED ===');
+console.log('=== HOSPITAL ROUTES LOADING ===');
+const hospitalRoutes = require('./routes/hospitalRoutes').default || require('./routes/hospitalRoutes');
+app.use('/api/hospitals', hospitalRoutes);
+console.log('=== HOSPITAL ROUTES LOADED ===');
+console.log('=== ORDER ROUTES LOADING ===');
+const orderRoutes = require('./routes/orderRoutes').default || require('./routes/orderRoutes');
+app.use('/api/orders', orderRoutes);
+console.log('=== ORDER ROUTES LOADED ===');
+console.log('=== HEALTH HUB ROUTES LOADING ===');
+const healthHubRoutes = require('./routes/healthHubRoutes').default || require('./routes/healthHubRoutes');
+app.use('/api/health-hub', healthHubRoutes);
+console.log('=== HEALTH HUB ROUTES LOADED ===');
+console.log('=== SUPPORT ROUTES LOADING ===');
+const supportRoutes = require('./routes/supportRoutes').default || require('./routes/supportRoutes');
+app.use('/api/support', supportRoutes);
+console.log('=== SUPPORT ROUTES LOADED ===');
+console.log('=== BLOG ROUTES LOADING ===');
+const blogRoutes = require('./routes/blogRoutes').default || require('./routes/blogRoutes');
+app.use('/api/blogs', blogRoutes);
+console.log('=== BLOG ROUTES LOADED ===');
+console.log('=== AI ROUTES LOADING ===');
+const aiRoutes = require('./routes/aiRoutes').default || require('./routes/aiRoutes');
+app.use('/api/ai', aiRoutes);
+console.log('=== AI ROUTES LOADED ===');
+console.log('=== COUPON ROUTES LOADING ===');
+const couponRoutes = require('./routes/couponRoutes').default || require('./routes/couponRoutes');
+app.use('/api/coupons', couponRoutes);
+console.log('=== COUPON ROUTES LOADED ===');
+console.log('=== MEDICINE ROUTES LOADING ===');
+const medicineRoutes = require('./routes/medicineRoutes').default || require('./routes/medicineRoutes');
+app.use('/api/medicines', medicineRoutes);
+console.log('=== MEDICINE ROUTES LOADED ===');
+console.log('=== UPLOAD ROUTES LOADING ===');
+const uploadRoutes = require('./routes/uploadRoutes').default || require('./routes/uploadRoutes');
+app.use('/api/upload', uploadRoutes);
+console.log('=== UPLOAD ROUTES LOADED ===');
+console.log('=== PARTNER ROUTES LOADING ===');
+const partnerRoutes = require('./routes/partnerRoutes').default || require('./routes/partnerRoutes');
+app.use('/api/partners', partnerRoutes);
+console.log('=== PARTNER ROUTES LOADED ===');
+console.log('=== HOSPITAL DASHBOARD ROUTES LOADING ===');
+const hospitalDashboardRoutes = require('./routes/hospitalDashboardRoutes').default || require('./routes/hospitalDashboardRoutes');
+app.use('/api/hospital/dashboard', hospitalDashboardRoutes);
+console.log('=== HOSPITAL DASHBOARD ROUTES LOADED ===');
+console.log('=== ANALYTICS ROUTES LOADING ===');
+const analyticsRoutes = require('./routes/analyticsRoutes').default || require('./routes/analyticsRoutes');
+app.use('/api/metrics', analyticsRoutes);
+console.log('=== ANALYTICS ROUTES LOADED ===');
 app.get('/', (req, res) => {
     res.status(200).json({
         message: 'Apex Care API is running with Sockets',
@@ -209,13 +257,35 @@ app.get('/', (req, res) => {
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     if (mongoose_1.default.connection.readyState === 1)
         return;
+    // If connection is already in progress, wait for the open event to complete
+    if (mongoose_1.default.connection.readyState === 2) {
+        console.log('[DB] Connection in progress, waiting for open event...');
+        yield new Promise((resolve, reject) => {
+            const onOpen = () => {
+                cleanup();
+                resolve(true);
+            };
+            const onError = (err) => {
+                cleanup();
+                reject(err);
+            };
+            const cleanup = () => {
+                mongoose_1.default.connection.removeListener('open', onOpen);
+                mongoose_1.default.connection.removeListener('error', onError);
+            };
+            mongoose_1.default.connection.once('open', onOpen);
+            mongoose_1.default.connection.once('error', onError);
+        });
+        return;
+    }
     try {
-        const uri = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
+        const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
         yield mongoose_1.default.connect(uri, {
+            dbName: 'e-pharmacy',
             serverSelectionTimeoutMS: 4000,
             connectTimeoutMS: 4000,
         });
-        console.log('[DB] Connected to MongoDB');
+        console.log('[DB] Connected to MongoDB:', mongoose_1.default.connection.name);
     }
     catch (error) {
         console.error('[DB] Connection Error:', error.message);

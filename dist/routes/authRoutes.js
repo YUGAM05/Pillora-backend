@@ -22,10 +22,26 @@ const requireAdminAuth_1 = require("../middleware/requireAdminAuth");
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5,
-    message: { message: 'Too many login attempts from this IP, please try again after 15 minutes' },
+    max: 20, // Increased from 5 — hospital staff may attempt login multiple times
     standardHeaders: true,
     legacyHeaders: false,
+    // IMPORTANT: Custom handler ensures CORS headers are always present on 429
+    // Without this, the browser sees a CORS error instead of the rate limit error.
+    handler: (req, res) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many login attempts from this IP, please try again after 15 minutes'
+        });
+    },
 });
 const router = express_1.default.Router();
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
@@ -73,13 +89,7 @@ const loginCors = (req, res, next) => {
 router.options('/login', loginCors);
 // ── Public routes ────────────────────────────────────────────────────────────
 router.post('/register', authController_1.registerUser);
-router.post('/login', loginCors, (req, res, next) => {
-    // Skip rate limiting for OPTIONS preflight requests
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    next();
-}, loginLimiter, authController_1.loginUser);
+router.post('/login', loginCors, loginLimiter, authController_1.loginUser);
 router.post('/send-otp', authController_1.sendOtp);
 router.post('/verify-otp', authController_1.verifyOtp);
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────

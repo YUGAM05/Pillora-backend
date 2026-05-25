@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendInvoiceEmail = exports.sendHospitalNotificationEmail = exports.sendBookingConfirmationEmail = void 0;
+exports.sendPrescriptionEmail = exports.sendInvoiceEmail = exports.sendHospitalNotificationEmail = exports.sendBookingConfirmationEmail = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const transporter = nodemailer_1.default.createTransport({
     host: 'smtp.zoho.in',
@@ -130,3 +130,25 @@ const sendInvoiceEmail = (_a) => __awaiter(void 0, [_a], void 0, function* ({ to
     console.log('Invoice email sent to', toEmail);
 });
 exports.sendInvoiceEmail = sendInvoiceEmail;
+const sendPrescriptionEmail = (_a) => __awaiter(void 0, [_a], void 0, function* ({ toEmail, patientName, hospitalName, prescriptionUrl, date }) {
+    const mailOptions = {
+        from: `"Pillora" <team@pillora.in>`,
+        to: toEmail,
+        subject: `Your Prescription - ${hospitalName}`,
+        html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+        <h2 style="color: #10b981;">Prescription Uploaded 📝</h2>
+        <p>Hi <strong>${patientName}</strong>,</p>
+        <p>Your prescription for the consultation at <strong>${hospitalName}</strong> on ${date} has been uploaded and is ready for download.</p>
+        <p>You can view and download your prescription using the link below:</p>
+        <a href="${prescriptionUrl}" style="display:inline-block; padding:10px 20px; color:#fff; background:#10b981; text-decoration:none; border-radius:5px; margin:20px 0;">Download Prescription</a>
+        <p style="color: #888; font-size: 12px;">This is an automated email from Pillora. Please do not reply.</p>
+        <hr/>
+        <p style="text-align:center; color:#10b981; font-weight:bold;">Pillora — Blood Donors & Hospital Network</p>
+      </div>
+    `
+    };
+    yield transporter.sendMail(mailOptions);
+    console.log('Prescription email sent to', toEmail);
+});
+exports.sendPrescriptionEmail = sendPrescriptionEmail;
