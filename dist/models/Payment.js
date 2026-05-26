@@ -34,19 +34,13 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const DonorSchema = new mongoose_1.Schema({
-    donor_name: { type: String, required: false },
-    blood_group: { type: String, required: false },
-    name: { type: String },
-    bloodGroup: { type: String },
-    age: { type: Number },
-    gender: { type: String },
-    phone: { type: String },
-    donor_phone: { type: String, required: false },
-    city: { type: String, required: true },
-    area: { type: String, required: true },
-    fullAddress: { type: String },
-    isAvailable: { type: Boolean, default: true },
-    registeredAt: { type: Date, default: Date.now }
+const PaymentSchema = new mongoose_1.Schema({
+    appointmentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment', required: true, unique: true }, // one payment per appointment
+    hospitalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
+    patientName: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    mode: { type: String, enum: ['online', 'offline'], required: true },
+    status: { type: String, enum: ['pending', 'paid'], default: 'paid' },
+    recordedBy: { type: mongoose_1.Schema.Types.ObjectId, required: true }
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('Donor', DonorSchema);
+exports.default = mongoose_1.default.model('Payment', PaymentSchema);

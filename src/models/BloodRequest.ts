@@ -11,13 +11,18 @@ export interface IBloodRequest extends Document {
     city: string;
     contactNumber: string;
     reason?: string;
-    status: 'Open' | 'Fulfilled' | 'Urgent' | 'Closed' | 'Fake';
+    status: 'Open' | 'Fulfilled' | 'Urgent' | 'Closed' | 'Fake' | 'pending' | 'matched' | 'no_donor_found';
     isUrgent: boolean;
     kycDocumentType: 'Aadhar Card' | 'PAN Card' | 'Driving License';
     kycDocumentId?: string;
     kycDocumentImage?: string;
     aiVerificationStatus: 'Pending' | 'Verified' | 'Rejected' | 'Error';
     aiVerificationRemarks?: string;
+    unitsNeeded?: number;
+    coordinationNumber?: string;
+    email?: string;
+    kycStatus?: 'pending' | 'verified' | 'failed';
+    kycVerifiedAt?: Date;
 }
 
 const BloodRequestSchema: Schema = new Schema({
@@ -37,7 +42,7 @@ const BloodRequestSchema: Schema = new Schema({
     reason: { type: String },
     status: {
         type: String,
-        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed', 'Fake'],
+        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed', 'Fake', 'pending', 'matched', 'no_donor_found'],
         default: 'Open'
     },
     isUrgent: { type: Boolean, default: false },
@@ -53,7 +58,16 @@ const BloodRequestSchema: Schema = new Schema({
         enum: ['Pending', 'Verified', 'Rejected', 'Error'],
         default: 'Pending'
     },
-    aiVerificationRemarks: { type: String }
+    aiVerificationRemarks: { type: String },
+    unitsNeeded: { type: Number },
+    coordinationNumber: { type: String },
+    email: { type: String },
+    kycStatus: {
+        type: String,
+        enum: ['pending', 'verified', 'failed'],
+        default: 'pending'
+    },
+    kycVerifiedAt: { type: Date }
 }, { timestamps: true });
 
 export default mongoose.model<IBloodRequest>('BloodRequest', BloodRequestSchema);

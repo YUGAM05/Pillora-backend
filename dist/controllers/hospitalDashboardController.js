@@ -12,13 +12,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.getPaymentSummary = exports.recordPayment = exports.autocompleteBookingIds = exports.autocompletePatients = exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
 const User_1 = __importDefault(require("../models/User"));
 const PatientNote_1 = __importDefault(require("../models/PatientNote"));
+const Payment_1 = __importDefault(require("../models/Payment"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
 const holdManager_1 = require("../utils/holdManager");
@@ -31,6 +32,7 @@ cloudinary_1.v2.config({
     api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
 });
 const emailService_2 = require("../services/emailService");
+const dateHelper_1 = require("../utils/dateHelper");
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -377,8 +379,9 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             try {
                 const hospitalDoc = yield Hospital_1.default.findById(hospitalId);
                 const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
-                const dateStr = new Date(slotTime).toLocaleDateString();
-                const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                const dateStr = (0, dateHelper_1.formatDateIST)(slotTime);
+                const timeSlotStr = (0, dateHelper_1.formatTimeIST)(slotTime);
                 yield (0, emailService_2.sendBookingConfirmationEmail)({
                     toEmail: patientEmail,
                     patientName: patientName,
@@ -864,8 +867,9 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
             if (patient.email) {
                 try {
                     const hospitalNameStr = hospital.name || 'Pillora Hospital';
-                    const dateStr = new Date(slotTime).toLocaleDateString();
-                    const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                    const dateStr = (0, dateHelper_1.formatDateIST)(slotTime);
+                    const timeSlotStr = (0, dateHelper_1.formatTimeIST)(slotTime);
                     yield (0, emailService_2.sendBookingConfirmationEmail)({
                         toEmail: patient.email,
                         patientName: patient.name,
@@ -1158,10 +1162,15 @@ const generateAndSendInvoice = (req, res) => __awaiter(void 0, void 0, void 0, f
         const dataUri = `data:application/pdf;base64,${base64File}`;
         // Upload to Cloudinary
         const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
-            folder: 'apex-care-invoices',
-            resource_type: 'auto',
+            resource_type: 'raw',
+            upload_preset: 'pillora-uploads',
+            folder: 'pillora-invoices',
+            access_mode: 'public',
+            type: 'upload',
             public_id: invoiceName
         });
+        console.log('Invoice URL:', result.secure_url);
+        // Must contain /raw/upload/ not /image/upload/
         const invoiceUrl = result.secure_url;
         appointment.invoiceUrl = invoiceUrl;
         appointment.paymentStatus = 'paid';
@@ -1172,7 +1181,8 @@ const generateAndSendInvoice = (req, res) => __awaiter(void 0, void 0, void 0, f
                 patientName: patientName,
                 hospitalName: hospital.name,
                 invoiceUrl: invoiceUrl,
-                date: new Date(appointment.bookingDate).toLocaleDateString(),
+                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                date: (0, dateHelper_1.formatDateIST)(appointment.bookingDate),
                 amount: Number(amount)
             });
         }
@@ -1195,22 +1205,47 @@ const searchPatients = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const { bookingId, name } = req.query;
         let query = { hospital: hospital._id };
         if (bookingId) {
-            // Find specific booking and then find all other bookings for that patient
-            const initialBooking = yield Appointment_1.default.findOne({ _id: bookingId, hospital: hospital._id }).populate('patient');
+            // Find booking by partial or exact ID (case-insensitive)
+            const lowerQuery = bookingId.toLowerCase().trim();
+            // First try exact match if valid ObjectId
+            let initialBooking;
+            if (mongoose_1.default.Types.ObjectId.isValid(lowerQuery) && lowerQuery.length === 24) {
+                initialBooking = yield Appointment_1.default.findOne({ _id: lowerQuery, hospital: hospital._id }).populate('patient');
+            }
+            // If not found, fetch recent and do partial match like autocomplete
+            if (!initialBooking) {
+                const recentAppts = yield Appointment_1.default.find({ hospital: hospital._id })
+                    .populate('patient')
+                    .sort({ createdAt: -1 })
+                    .limit(500);
+                initialBooking = recentAppts.find(a => a._id.toString().toLowerCase().includes(lowerQuery));
+            }
             if (!initialBooking) {
                 res.status(404).json({ message: 'No patient found with this booking ID' });
                 return;
             }
-            query.patient = initialBooking.patient;
+            if (initialBooking.patient) {
+                query.patient = initialBooking.patient._id;
+            }
+            else if (initialBooking.patientEmail) {
+                query.patientEmail = initialBooking.patientEmail;
+            }
+            else {
+                query.patientName = initialBooking.patientName;
+            }
         }
         else if (name) {
+            const searchName = name.trim();
+            const regex = new RegExp(searchName, 'i');
             // Find patients matching the name
-            const matchingUsers = yield User_1.default.find({ name: { $regex: name, $options: 'i' } });
-            if (!matchingUsers.length) {
-                res.status(404).json({ message: 'No patient found with this name' });
-                return;
+            const matchingUsers = yield User_1.default.find({ name: regex });
+            // We want to match either the user account OR the name directly on the appointment
+            query.$or = [
+                { patientName: regex }
+            ];
+            if (matchingUsers.length > 0) {
+                query.$or.push({ patient: { $in: matchingUsers.map(u => u._id) } });
             }
-            query.patient = { $in: matchingUsers.map(u => u._id) };
         }
         else {
             res.status(400).json({ message: 'Provide either bookingId or name to search' });
@@ -1290,28 +1325,64 @@ const uploadAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, vo
             res.status(404).json({ message: 'Appointment not found' });
             return;
         }
+        // Check first 4 bytes — valid PDF starts with %PDF
+        const header = req.file.buffer.subarray(0, 4).toString();
+        if (header !== '%PDF') {
+            res.status(400).json({ message: 'File is not a valid PDF — header check failed' });
+            return;
+        }
         // Convert buffer to base64
         const base64File = req.file.buffer.toString('base64');
         const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
+        // If prescription already exists delete old one from Cloudinary first
+        if (appointment.prescriptionUrl) {
+            try {
+                const oldPublicId = appointment.prescriptionUrl
+                    .split('/').slice(-2).join('/') // extract folder/filename
+                    .replace('.pdf', ''); // remove extension
+                yield cloudinary_1.v2.uploader.destroy(oldPublicId, { resource_type: 'raw' });
+                console.log('Old prescription deleted from Cloudinary');
+            }
+            catch (err) {
+                console.error('Could not delete old prescription:', err.message);
+            }
+        }
         // Upload to Cloudinary
         const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
-            folder: 'apex-care-prescriptions',
             resource_type: 'raw',
-            format: 'pdf'
+            upload_preset: 'pillora-uploads',
+            folder: 'pillora-prescriptions',
+            access_mode: 'public',
+            type: 'upload',
+            format: 'pdf',
+            public_id: `prescription-${appointment._id}`,
+            use_filename: false,
+            unique_filename: true
         });
-        appointment.prescriptionUrl = result.secure_url;
+        console.log('Prescription URL:', result.secure_url);
+        // Must contain /raw/upload/ not /image/upload/
+        let prescriptionUrl = result.secure_url;
+        if (!prescriptionUrl.endsWith('.pdf')) {
+            prescriptionUrl += '.pdf';
+        }
+        appointment.prescriptionUrl = prescriptionUrl;
         appointment.prescriptionUploadedAt = new Date();
         yield appointment.save();
         const patientEmail = ((_a = appointment.patient) === null || _a === void 0 ? void 0 : _a.email) || appointment.patientEmail;
         const patientName = ((_b = appointment.patient) === null || _b === void 0 ? void 0 : _b.name) || appointment.patientName || 'Patient';
         if (patientEmail) {
             try {
+                // Add fl_attachment to force download as PDF in email
+                const downloadUrl = appointment.prescriptionUrl.includes('/raw/upload/')
+                    ? appointment.prescriptionUrl.replace('/raw/upload/', '/raw/upload/fl_attachment:prescription/')
+                    : appointment.prescriptionUrl;
                 yield (0, emailService_2.sendPrescriptionEmail)({
                     toEmail: patientEmail,
                     patientName: patientName,
                     hospitalName: hospital.name,
-                    prescriptionUrl: appointment.prescriptionUrl,
-                    date: new Date(appointment.bookingDate).toLocaleDateString()
+                    prescriptionUrl: downloadUrl,
+                    // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                    date: (0, dateHelper_1.formatDateIST)(appointment.bookingDate)
                 });
             }
             catch (emailError) {
@@ -1341,10 +1412,245 @@ const getAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, void 
             res.status(404).json({ message: 'Prescription not uploaded yet' });
             return;
         }
-        res.json({ prescriptionUrl: appointment.prescriptionUrl, uploadedAt: appointment.prescriptionUploadedAt });
+        // Redirect to Cloudinary URL directly
+        res.setHeader('Content-Type', 'application/pdf');
+        res.redirect(appointment.prescriptionUrl);
     }
     catch (error) {
         res.status(500).json({ message: 'Error fetching prescription', error: error.message });
     }
 });
 exports.getAppointmentPrescription = getAppointmentPrescription;
+// @desc    Autocomplete patient names (≥2 chars) scoped to this hospital
+// @route   GET /api/hospital/dashboard/patients/autocomplete?q=yu
+// @access  Private/Hospital
+const autocompletePatients = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const query = (req.query.q || '').trim();
+        if (query.length < 2) {
+            res.json([]);
+            return;
+        }
+        // Get distinct patient IDs who have bookings at this hospital
+        const bookingPatientIds = yield Appointment_1.default.distinct('patient', { hospital: hospital._id });
+        // Partial case-insensitive name match, limited to this hospital's patients
+        const regex = new RegExp(query, 'i');
+        const patients = yield User_1.default.find({
+            _id: { $in: bookingPatientIds },
+            name: regex
+        })
+            .select('name email phone')
+            .limit(8)
+            .lean();
+        const suggestions = patients.map((p) => ({
+            id: p._id.toString(),
+            name: p.name,
+            email: p.email || '',
+            phone: p.phone || ''
+        }));
+        res.json(suggestions);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Autocomplete error', error: error.message });
+    }
+});
+exports.autocompletePatients = autocompletePatients;
+// @desc    Autocomplete booking IDs (≥4 chars) scoped to this hospital
+// @route   GET /api/hospital/dashboard/bookings/autocomplete?q=abc1
+// @access  Private/Hospital
+const autocompleteBookingIds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const query = (req.query.q || '').trim();
+        if (query.length < 4) {
+            res.json([]);
+            return;
+        }
+        // Fetch recent appointments for this hospital
+        const appointments = yield Appointment_1.default.find({ hospital: hospital._id })
+            .populate('patient', 'name')
+            .select('_id slotTime patientName patient')
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .lean();
+        // Filter by partial ID match anywhere in the full ObjectId string
+        const lowerQuery = query.toLowerCase();
+        const matched = appointments
+            .filter((a) => a._id.toString().toLowerCase().includes(lowerQuery))
+            .slice(0, 8)
+            .map((a) => {
+            var _a;
+            return ({
+                id: a._id.toString(),
+                bookingId: a._id.toString(),
+                patientName: a.patientName || ((_a = a.patient) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown',
+                date: a.slotTime
+                    ? new Date(a.slotTime).toLocaleDateString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                    })
+                    : ''
+            });
+        });
+        res.json(matched);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Autocomplete error', error: error.message });
+    }
+});
+exports.autocompleteBookingIds = autocompleteBookingIds;
+// @desc    Record a manual payment for a booking
+// @route   POST /api/hospital/dashboard/appointments/:id/payment
+// @access  Private/Hospital
+const recordPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const hospital = req.hospital;
+        const { id } = req.params;
+        const { amount, mode } = req.body;
+        if (amount === undefined || amount < 0) {
+            res.status(400).json({ message: 'Valid amount is required' });
+            return;
+        }
+        if (!['online', 'offline'].includes(mode)) {
+            res.status(400).json({ message: 'Valid payment mode is required (online or offline)' });
+            return;
+        }
+        const appointment = yield Appointment_1.default.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        const patientName = appointment.patientName || ((_a = appointment.patient) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Patient';
+        let payment = yield Payment_1.default.findOne({ appointmentId: appointment._id });
+        if (payment) {
+            // Update existing payment
+            payment.amount = amount;
+            payment.mode = mode;
+            payment.recordedBy = req.user._id;
+            yield payment.save();
+        }
+        else {
+            // Create new payment
+            payment = new Payment_1.default({
+                appointmentId: appointment._id,
+                hospitalId: hospital._id,
+                patientName,
+                amount,
+                mode,
+                status: 'paid',
+                recordedBy: req.user._id
+            });
+            yield payment.save();
+        }
+        // Update appointment status
+        appointment.paymentStatus = 'paid';
+        yield appointment.save();
+        res.json({ message: 'Payment recorded successfully', payment, appointment });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error recording payment', error: error.message });
+    }
+});
+exports.recordPayment = recordPayment;
+// @desc    Get payment summary and analytics
+// @route   GET /api/hospital/dashboard/payments/summary
+// @access  Private/Hospital
+const getPaymentSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        const { from, to } = req.query;
+        // Build date filter
+        let dateFilter = {};
+        if (from || to) {
+            dateFilter.createdAt = {};
+            if (from)
+                dateFilter.createdAt.$gte = new Date(from);
+            if (to) {
+                const toDate = new Date(to);
+                toDate.setHours(23, 59, 59, 999);
+                dateFilter.createdAt.$lte = toDate;
+            }
+        }
+        // Base match for this hospital
+        const matchStage = Object.assign({ hospitalId: hospital._id, status: 'paid' }, dateFilter);
+        // 1. Total summary stats
+        const payments = yield Payment_1.default.find(matchStage);
+        const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
+        const onlinePayments = payments.filter(p => p.mode === 'online');
+        const offlinePayments = payments.filter(p => p.mode === 'offline');
+        const totalOnlineRevenue = onlinePayments.reduce((sum, p) => sum + p.amount, 0);
+        const totalOfflineRevenue = offlinePayments.reduce((sum, p) => sum + p.amount, 0);
+        // Fetch unpaid appointments count for the same date range (using bookingDate or createdAt)
+        let apptDateFilter = {};
+        if (from || to) {
+            apptDateFilter.createdAt = {};
+            if (from)
+                apptDateFilter.createdAt.$gte = new Date(from);
+            if (to) {
+                const toDate = new Date(to);
+                toDate.setHours(23, 59, 59, 999);
+                apptDateFilter.createdAt.$lte = toDate;
+            }
+        }
+        const pendingCount = yield Appointment_1.default.countDocuments(Object.assign({ hospital: hospital._id, paymentStatus: { $ne: 'paid' } }, apptDateFilter));
+        const paidCount = yield Appointment_1.default.countDocuments(Object.assign({ hospital: hospital._id, paymentStatus: 'paid' }, apptDateFilter));
+        // 2. Aggregate Revenue over time (Daily)
+        const timeSeriesData = yield Payment_1.default.aggregate([
+            { $match: matchStage },
+            {
+                $group: {
+                    _id: {
+                        date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                        mode: "$mode"
+                    },
+                    total: { $sum: "$amount" }
+                }
+            },
+            {
+                $group: {
+                    _id: "$_id.date",
+                    modes: {
+                        $push: {
+                            mode: "$_id.mode",
+                            amount: "$total"
+                        }
+                    }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+        // Format timeseries for frontend Recharts
+        const chartData = timeSeriesData.map(item => {
+            var _a, _b;
+            const online = ((_a = item.modes.find((m) => m.mode === 'online')) === null || _a === void 0 ? void 0 : _a.amount) || 0;
+            const offline = ((_b = item.modes.find((m) => m.mode === 'offline')) === null || _b === void 0 ? void 0 : _b.amount) || 0;
+            return {
+                date: item._id,
+                online,
+                offline,
+                total: online + offline
+            };
+        });
+        res.json({
+            summary: {
+                totalRevenue,
+                online: { count: onlinePayments.length, total: totalOnlineRevenue },
+                offline: { count: offlinePayments.length, total: totalOfflineRevenue },
+                pending: { count: pendingCount }
+            },
+            paidVsPending: {
+                paid: paidCount,
+                pending: pendingCount
+            },
+            chartData
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching payment summary', error: error.message });
+    }
+});
+exports.getPaymentSummary = getPaymentSummary;

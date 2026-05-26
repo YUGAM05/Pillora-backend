@@ -102,7 +102,7 @@ const analyzeDrugSafety = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 'Monitor for any unusual allergic reactions',
                 'Maintain a light diet if experiencing stomach sensitivity'
             ],
-            disclaimer: 'APEX SAFETY ENGINE: This analysis is generated using our proprietary pharmaceutical database and verified inventory data. It is FOR INFORMATIONAL USE ONLY and does not replace the advice of a certified physician.'
+            disclaimer: 'PILLORA SAFETY ENGINE: This analysis is generated using our proprietary pharmaceutical database and verified inventory data. It is FOR INFORMATIONAL USE ONLY and does not replace the advice of a certified physician.'
         };
         res.json(report);
     }
@@ -187,7 +187,7 @@ const checkSafety = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             warnings: Array.from(new Set(warnings)), // Deduplicate
             checkedMedications: cartItems.length,
             checkedConditions: (medicalConditions === null || medicalConditions === void 0 ? void 0 : medicalConditions.length) || 0,
-            engine: "Apex Verified Safety Engine"
+            engine: "Pillora Verified Safety Engine"
         });
     }
     catch (error) {

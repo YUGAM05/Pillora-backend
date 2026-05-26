@@ -20,6 +20,7 @@ const bloodCompatibility_1 = require("../utils/bloodCompatibility");
 const whatsappService_1 = require("../utils/whatsappService");
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
 const activityLogger_1 = require("../utils/activityLogger");
+const bloodConnectService_1 = require("../services/bloodConnectService");
 // @desc    Register as a blood donor
 // @route   POST /api/blood-bank/donors
 // @access  Private
@@ -163,8 +164,9 @@ exports.findMatches = findMatches;
 // @route   POST /api/blood-bank/requests
 // @access  Private
 const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
+        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage, email, unitsNeeded, coordinationNumber } = req.body;
         let finalKycDocumentId = kycDocumentId;
         let aiStatus = 'Pending';
         let aiRemarks = '';
@@ -201,7 +203,10 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             kycDocumentId: finalKycDocumentId || 'Processing...',
             kycDocumentImage: kycDocumentImage, // Store image for Admin
             aiVerificationStatus: aiStatus,
-            aiVerificationRemarks: aiRemarks
+            aiVerificationRemarks: aiRemarks,
+            email: email || ((_a = req.user) === null || _a === void 0 ? void 0 : _a.email),
+            unitsNeeded: unitsNeeded || units,
+            coordinationNumber: coordinationNumber || contactNumber
         });
         // 2. Instant Response: Return 201 Created to the frontend
         res.status(201).json(request);
@@ -215,7 +220,10 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // 3. Background Processing: Matching & notifications safe out of flow
         (() => __awaiter(void 0, void 0, void 0, function* () {
             try {
-                // Perform Matching & Notifications
+                // Call automated KYC processing flow
+                const kycPassed = aiStatus === 'Verified';
+                yield (0, bloodConnectService_1.processKYCResult)(request._id.toString(), kycPassed);
+                // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
                     const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
                     const [donors1, donors2] = yield Promise.all([
@@ -444,6 +452,11 @@ const verifyRequestWithAI = (req, res) => __awaiter(void 0, void 0, void 0, func
         console.log(`[Controller] Saving request with status: ${request.aiVerificationStatus}...`);
         const savedRequest = yield request.save();
         console.log(`[Controller] Request saved successfully. New status: ${savedRequest.aiVerificationStatus}`);
+        // Trigger automated KYC and notification flow
+        const kycPassed = savedRequest.aiVerificationStatus === 'Verified';
+        (0, bloodConnectService_1.processKYCResult)(savedRequest._id.toString(), kycPassed).catch(err => {
+            console.error('[verifyRequestWithAI] Error running processKYCResult:', err);
+        });
         res.json(savedRequest);
     }
     catch (error) {
@@ -470,6 +483,11 @@ const updateKycStatus = (req, res) => __awaiter(void 0, void 0, void 0, function
             res.status(404).json({ message: 'Request not found' });
             return;
         }
+        // Trigger automated KYC and notification flow
+        const kycPassed = status === 'Verified';
+        (0, bloodConnectService_1.processKYCResult)(request._id.toString(), kycPassed).catch(err => {
+            console.error('[updateKycStatus] Error running processKYCResult:', err);
+        });
         res.json(request);
     }
     catch (error) {

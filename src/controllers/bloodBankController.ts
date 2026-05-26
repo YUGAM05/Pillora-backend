@@ -7,6 +7,7 @@ import { getCompatibleDonors } from '../utils/bloodCompatibility';
 import { sendWhatsAppMessage } from '../utils/whatsappService';
 import { verifyAadhaarLocal, validateVerhoeff } from '../utils/aadhaarVerifier';
 import { logActivity } from '../utils/activityLogger';
+import { processKYCResult } from '../services/bloodConnectService';
 
 
 
@@ -170,7 +171,7 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 // @access  Private
 export const createRequest = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage } = req.body;
+        const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage, email, unitsNeeded, coordinationNumber } = req.body;
 
         let finalKycDocumentId = kycDocumentId;
         let aiStatus: 'Verified' | 'Rejected' | 'Error' = 'Pending' as any;
@@ -207,7 +208,10 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
             kycDocumentId: finalKycDocumentId || 'Processing...', 
             kycDocumentImage: kycDocumentImage, // Store image for Admin
             aiVerificationStatus: aiStatus,
-            aiVerificationRemarks: aiRemarks
+            aiVerificationRemarks: aiRemarks,
+            email: email || (req.user as any)?.email,
+            unitsNeeded: unitsNeeded || units,
+            coordinationNumber: coordinationNumber || contactNumber
         });
 
         // 2. Instant Response: Return 201 Created to the frontend
@@ -224,7 +228,11 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
         // 3. Background Processing: Matching & notifications safe out of flow
         (async () => {
             try {
-                // Perform Matching & Notifications
+                // Call automated KYC processing flow
+                const kycPassed = aiStatus === 'Verified';
+                await processKYCResult(request._id.toString(), kycPassed);
+
+                // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
                     const compatibleGroups = getCompatibleDonors(bloodGroup);
                     const [donors1, donors2] = await Promise.all([
@@ -466,6 +474,12 @@ export const verifyRequestWithAI = async (req: Request, res: Response): Promise<
         const savedRequest = await request.save();
         console.log(`[Controller] Request saved successfully. New status: ${savedRequest.aiVerificationStatus}`);
 
+        // Trigger automated KYC and notification flow
+        const kycPassed = savedRequest.aiVerificationStatus === 'Verified';
+        processKYCResult(savedRequest._id.toString(), kycPassed).catch(err => {
+            console.error('[verifyRequestWithAI] Error running processKYCResult:', err);
+        });
+
         res.json(savedRequest);
 
     } catch (error: any) {
@@ -498,6 +512,12 @@ export const updateKycStatus = async (req: Request, res: Response): Promise<void
             res.status(404).json({ message: 'Request not found' });
             return;
         }
+
+        // Trigger automated KYC and notification flow
+        const kycPassed = status === 'Verified';
+        processKYCResult(request._id.toString(), kycPassed).catch(err => {
+            console.error('[updateKycStatus] Error running processKYCResult:', err);
+        });
 
         res.json(request);
     } catch (error) {

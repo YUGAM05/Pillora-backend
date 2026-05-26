@@ -62,7 +62,7 @@ const sendWhatsAppBill = (userPhone, customerName, orderId, amount, pdfLink // I
         console.log("📨 WHATSAPP AUTOMATION SIMULATION");
         console.log(`To: ${formattedPhone}`);
         console.log(`Message: `);
-        console.log(`Hello ${customerName}, thank you for choosing Apex Care!`);
+        console.log(`Hello ${customerName}, thank you for choosing Pillora!`);
         console.log(`Your order #${orderId} of ₹${amount} has been placed successfully.`);
         console.log(`We will deliver it shortly.`);
         console.log("==========================================");

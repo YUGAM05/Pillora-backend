@@ -51,7 +51,7 @@ const BloodRequestSchema = new mongoose_1.Schema({
     reason: { type: String },
     status: {
         type: String,
-        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed', 'Fake'],
+        enum: ['Open', 'Fulfilled', 'Urgent', 'Closed', 'Fake', 'pending', 'matched', 'no_donor_found'],
         default: 'Open'
     },
     isUrgent: { type: Boolean, default: false },
@@ -67,6 +67,15 @@ const BloodRequestSchema = new mongoose_1.Schema({
         enum: ['Pending', 'Verified', 'Rejected', 'Error'],
         default: 'Pending'
     },
-    aiVerificationRemarks: { type: String }
+    aiVerificationRemarks: { type: String },
+    unitsNeeded: { type: Number },
+    coordinationNumber: { type: String },
+    email: { type: String },
+    kycStatus: {
+        type: String,
+        enum: ['pending', 'verified', 'failed'],
+        default: 'pending'
+    },
+    kycVerifiedAt: { type: Date }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('BloodRequest', BloodRequestSchema);
