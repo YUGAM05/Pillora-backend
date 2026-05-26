@@ -1458,6 +1458,19 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
         const base64File = req.file.buffer.toString('base64');
         const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
 
+        // If prescription already exists delete old one from Cloudinary first
+        if (appointment.prescriptionUrl) {
+            try {
+                const oldPublicId = appointment.prescriptionUrl
+                    .split('/').slice(-2).join('/')  // extract folder/filename
+                    .replace('.pdf', '');            // remove extension
+                await cloudinary.uploader.destroy(oldPublicId, { resource_type: 'raw' });
+                console.log('Old prescription deleted from Cloudinary');
+            } catch (err: any) {
+                console.error('Could not delete old prescription:', err.message);
+            }
+        }
+
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
             resource_type: 'raw',
