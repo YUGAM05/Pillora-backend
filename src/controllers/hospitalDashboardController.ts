@@ -6,6 +6,7 @@ import Slot from '../models/Slot';
 import Appointment from '../models/Appointment';
 import User from '../models/User';
 import PatientNote from '../models/PatientNote';
+import Payment from '../models/Payment';
 import mongoose from 'mongoose';
 import redis from '../utils/redisMock';
 import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
@@ -1671,5 +1672,178 @@ export const autocompleteBookingIds = async (req: AuthRequest, res: Response): P
         res.json(matched);
     } catch (error: any) {
         res.status(500).json({ message: 'Autocomplete error', error: error.message });
+    }
+};
+
+// @desc    Record a manual payment for a booking
+// @route   POST /api/hospital/dashboard/appointments/:id/payment
+// @access  Private/Hospital
+export const recordPayment = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { amount, mode } = req.body;
+
+        if (amount === undefined || amount < 0) {
+            res.status(400).json({ message: 'Valid amount is required' });
+            return;
+        }
+
+        if (!['online', 'offline'].includes(mode)) {
+            res.status(400).json({ message: 'Valid payment mode is required (online or offline)' });
+            return;
+        }
+
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        const patientName = appointment.patientName || (appointment.patient as any)?.name || 'Unknown Patient';
+
+        let payment = await Payment.findOne({ appointmentId: appointment._id });
+
+        if (payment) {
+            // Update existing payment
+            payment.amount = amount;
+            payment.mode = mode;
+            payment.recordedBy = req.user!._id;
+            await payment.save();
+        } else {
+            // Create new payment
+            payment = new Payment({
+                appointmentId: appointment._id,
+                hospitalId: hospital._id,
+                patientName,
+                amount,
+                mode,
+                status: 'paid',
+                recordedBy: req.user!._id
+            });
+            await payment.save();
+        }
+
+        // Update appointment status
+        appointment.paymentStatus = 'paid';
+        await appointment.save();
+
+        res.json({ message: 'Payment recorded successfully', payment, appointment });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error recording payment', error: error.message });
+    }
+};
+
+// @desc    Get payment summary and analytics
+// @route   GET /api/hospital/dashboard/payments/summary
+// @access  Private/Hospital
+export const getPaymentSummary = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { from, to } = req.query;
+
+        // Build date filter
+        let dateFilter: any = {};
+        if (from || to) {
+            dateFilter.createdAt = {};
+            if (from) dateFilter.createdAt.$gte = new Date(from as string);
+            if (to) {
+                const toDate = new Date(to as string);
+                toDate.setHours(23, 59, 59, 999);
+                dateFilter.createdAt.$lte = toDate;
+            }
+        }
+
+        // Base match for this hospital
+        const matchStage = { hospitalId: hospital._id, status: 'paid', ...dateFilter };
+
+        // 1. Total summary stats
+        const payments = await Payment.find(matchStage);
+        
+        const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
+        const onlinePayments = payments.filter(p => p.mode === 'online');
+        const offlinePayments = payments.filter(p => p.mode === 'offline');
+        
+        const totalOnlineRevenue = onlinePayments.reduce((sum, p) => sum + p.amount, 0);
+        const totalOfflineRevenue = offlinePayments.reduce((sum, p) => sum + p.amount, 0);
+
+        // Fetch unpaid appointments count for the same date range (using bookingDate or createdAt)
+        let apptDateFilter: any = {};
+        if (from || to) {
+            apptDateFilter.createdAt = {};
+            if (from) apptDateFilter.createdAt.$gte = new Date(from as string);
+            if (to) {
+                const toDate = new Date(to as string);
+                toDate.setHours(23, 59, 59, 999);
+                apptDateFilter.createdAt.$lte = toDate;
+            }
+        }
+
+        const pendingCount = await Appointment.countDocuments({ 
+            hospital: hospital._id, 
+            paymentStatus: { $ne: 'paid' },
+            ...apptDateFilter
+        });
+        
+        const paidCount = await Appointment.countDocuments({
+            hospital: hospital._id,
+            paymentStatus: 'paid',
+            ...apptDateFilter
+        });
+
+        // 2. Aggregate Revenue over time (Daily)
+        const timeSeriesData = await Payment.aggregate([
+            { $match: matchStage },
+            {
+                $group: {
+                    _id: {
+                        date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                        mode: "$mode"
+                    },
+                    total: { $sum: "$amount" }
+                }
+            },
+            {
+                $group: {
+                    _id: "$_id.date",
+                    modes: {
+                        $push: {
+                            mode: "$_id.mode",
+                            amount: "$total"
+                        }
+                    }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        // Format timeseries for frontend Recharts
+        const chartData = timeSeriesData.map(item => {
+            const online = item.modes.find((m: any) => m.mode === 'online')?.amount || 0;
+            const offline = item.modes.find((m: any) => m.mode === 'offline')?.amount || 0;
+            return {
+                date: item._id,
+                online,
+                offline,
+                total: online + offline
+            };
+        });
+
+        res.json({
+            summary: {
+                totalRevenue,
+                online: { count: onlinePayments.length, total: totalOnlineRevenue },
+                offline: { count: offlinePayments.length, total: totalOfflineRevenue },
+                pending: { count: pendingCount }
+            },
+            paidVsPending: {
+                paid: paidCount,
+                pending: pendingCount
+            },
+            chartData
+        });
+
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching payment summary', error: error.message });
     }
 };

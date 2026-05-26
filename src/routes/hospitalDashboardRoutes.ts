@@ -32,7 +32,9 @@ import {
     uploadAppointmentPrescription,
     getAppointmentPrescription,
     autocompletePatients,
-    autocompleteBookingIds
+    autocompleteBookingIds,
+    recordPayment,
+    getPaymentSummary
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -69,6 +71,10 @@ router.get('/bookings/autocomplete', protect, isHospital, attachHospital, autoco
 router.get('/patients/search', protect, isHospital, attachHospital, searchPatients);
 router.post('/appointments/:id/prescription', protect, isHospital, attachHospital, upload.single('prescription'), uploadAppointmentPrescription);
 router.get('/appointments/:id/prescription', protect, isHospital, attachHospital, getAppointmentPrescription);
+
+// Payment routes
+router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);
+router.post('/appointments/:id/payment', protect, isHospital, attachHospital, recordPayment);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
