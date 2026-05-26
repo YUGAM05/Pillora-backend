@@ -1303,8 +1303,9 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
-            folder: 'pillora-invoices',
             resource_type: 'raw',
+            upload_preset: 'pillora-uploads',
+            folder: 'pillora-invoices',
             access_mode: 'public',
             type: 'upload',
             public_id: invoiceName
@@ -1459,8 +1460,9 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
-            folder: 'pillora-prescriptions',
             resource_type: 'raw',
+            upload_preset: 'pillora-uploads',
+            folder: 'pillora-prescriptions',
             access_mode: 'public',
             type: 'upload',
             format: 'pdf'
