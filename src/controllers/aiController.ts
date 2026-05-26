@@ -6,10 +6,10 @@ const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GE
 
 // Smart Responses Fallback
 const SMART_RESPONSES: Record<string, string> = {
-    "hello": "Hello! I'm your Apex Care assistant. I can help you find medicines, check blood availability, or answer questions about your orders. What's on your mind?",
-    "hi": "Hi there! How can I assist you with your healthcare needs today?",
-    "apex care": "Apex Care is your all-in-one healthcare destination! 🏥 We provide a comprehensive e-pharmacy with 2000+ medicines, a real-time blood bank registry, verified hospital & ambulance directories, and an AI-powered safety checker. Our mission is to make healthcare accessible, affordable, and safe for everyone.",
-    "who are you": "I am the Apex Care AI Assistant, powered by advanced medical intelligence. I'm here to help you navigate our platform, check drug safety, find blood donors, and provide general health information.",
+    "hello": "Hello! I'm your Pillora assistant. I can help you find medicines, check blood availability, or answer questions about your orders. What's on your mind?",
+    "hi": "Hi there! How can Pillora assist you with your health today?",
+    "apex care": "Pillora is your all-in-one healthcare destination! 🏥 We provide a comprehensive e-pharmacy with 2000+ medicines, a real-time blood bank registry, verified hospital & ambulance directories, and an AI-powered safety checker. Our mission is to make healthcare accessible, affordable, and safe for everyone.",
+    "who are you": "I am the Pillora AI Assistant, powered by advanced medical intelligence. I'm here to help you navigate our platform, check drug safety, find blood donors, and provide general health information.",
     "blood": "You can check blood availability in our [Blood Bank](/blood-bank) section. We have a real-time registry of donors and requests. Would you like me to help you find a specific blood group?",
     "order": "You can track your orders in your [Profile Dashboard](/my-donor-profile). If you have a specific order ID, I can try to find more details for you.",
     "medicine": "We have a database of over 2000 medicines! You can search for them on our [Home Page](/) or use our [AI Safety Checker](/ai-safety-checker) to see if a medication is right for your symptoms.",
@@ -59,7 +59,7 @@ export const chatWithAI = async (req: Request, res: Response): Promise<void> => 
                     try {
                         const model = client.getGenerativeModel({
                             model: modelName,
-                            systemInstruction: `You are the Apex Care Medical Intelligence Engine.
+                            systemInstruction: `You are the Pillora Medical Intelligence Engine.
                             NAME: ${userName}
                             CONTEXT: ${drugContext}
                             MISSION: Provide accurate, professional health advice. Use Markdown. Link to platform: [Pharmacy](http://localhost:3000/), [Hospital](http://localhost:3000/hospitals), [Blood Bank](http://localhost:3000/blood-bank), [Safety Checker](http://localhost:3000/safety-checker).
@@ -93,7 +93,7 @@ export const chatWithAI = async (req: Request, res: Response): Promise<void> => 
 
         // 4. Final Fallback
         if (!reply) {
-            reply = "I understand you're asking about something specific. While I'm connecting to my full medical knowledge base, I can tell you that Apex Care is here to support your health with our Pharmacy, Blood Bank, and Hospital services. How can I best help you today?";
+            reply = "I understand you're asking about something specific. While I'm connecting to my full medical knowledge base, I can tell you that Pillora is here to support your health with our Pharmacy, Blood Bank, and Hospital services. How can I best help you today?";
         }
 
         res.json({ reply });

@@ -1303,7 +1303,7 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
-            folder: 'apex-care-invoices',
+            folder: 'pillora-invoices',
             resource_type: 'raw',
             access_mode: 'public',
             type: 'upload',
@@ -1459,7 +1459,7 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
-            folder: 'apex-care-prescriptions',
+            folder: 'pillora-prescriptions',
             resource_type: 'raw',
             access_mode: 'public',
             type: 'upload',

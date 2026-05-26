@@ -153,10 +153,10 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 slug: "sahaj-clinic",
                 address: " I, Block 240, TITANIUM CITY CENTER BUSINESS PARK, Mall, 100 Feet Anand Nagar Rd, Satellite, Ahmedabad, Gujarat 380015",
                 city: "Ahmedabad",
-                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1779291416/apex-care-seller/bhwjckvornjkfjzdzfp0.webp",
+                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1779291416/pillora-seller/bhwjckvornjkfjzdzfp0.webp",
                 images: [
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/apex-care-seller/o7ri6k5tjz4dxi3zskbd.webp",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/apex-care-seller/wijvfokghllnwkvnlig1.webp"
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/pillora-seller/o7ri6k5tjz4dxi3zskbd.webp",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1779291658/pillora-seller/wijvfokghllnwkvnlig1.webp"
                 ],
                 isOpen24Hours: false,
                 consultationFee: 700,

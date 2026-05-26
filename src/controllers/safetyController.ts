@@ -118,7 +118,7 @@ export const analyzeDrugSafety = async (req: Request, res: Response): Promise<vo
                 'Maintain a light diet if experiencing stomach sensitivity'
             ],
 
-            disclaimer: 'APEX SAFETY ENGINE: This analysis is generated using our proprietary pharmaceutical database and verified inventory data. It is FOR INFORMATIONAL USE ONLY and does not replace the advice of a certified physician.'
+            disclaimer: 'PILLORA SAFETY ENGINE: This analysis is generated using our proprietary pharmaceutical database and verified inventory data. It is FOR INFORMATIONAL USE ONLY and does not replace the advice of a certified physician.'
         };
 
         res.json(report);
@@ -239,7 +239,7 @@ export const checkSafety = async (req: Request, res: Response): Promise<void> =>
             warnings: Array.from(new Set(warnings)), // Deduplicate
             checkedMedications: cartItems.length,
             checkedConditions: medicalConditions?.length || 0,
-            engine: "Apex Verified Safety Engine"
+            engine: "Pillora Verified Safety Engine"
         });
     } catch (error) {
         console.error('Safety check error:', error);

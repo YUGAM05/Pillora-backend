@@ -26,7 +26,7 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
 
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
-            folder: 'apex-care-seller',
+            folder: 'pillora-seller',
             resource_type: 'auto'
         });
 

@@ -177,7 +177,7 @@ function getSimulatedResponse(ocrText: string = '') {
     confidence: 0.85,
     doctor_name: doctorName !== "Unknown Doctor" ? doctorName : "Dr. Simulation (Fallback)",
     patient_name: patientName !== "Unknown Patient" ? patientName : "Test Patient",
-    hospital_name: "Apex Care Verification",
+    hospital_name: "Pillora Verification",
     date: new Date().toISOString().split('T')[0],
     medicines: mappedMedicines,
     issues: ["Extracted via offline heuristic engine due to AI API unavailability."],

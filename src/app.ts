@@ -272,7 +272,7 @@ console.log('=== ANALYTICS ROUTES LOADED ===');
 
 app.get('/', (req, res) => {
     res.status(200).json({
-        message: 'Apex Care API is running with Sockets',
+        message: 'Pillora API is running with Sockets',
         timestamp: new Date().toISOString(),
         dbStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
     });
