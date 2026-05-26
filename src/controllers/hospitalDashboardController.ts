@@ -19,6 +19,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
 });
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
+import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -416,8 +417,9 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
             try {
                 const hospitalDoc = await Hospital.findById(hospitalId);
                 const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
-                const dateStr = new Date(slotTime).toLocaleDateString();
-                const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                const dateStr = formatDateIST(slotTime);
+                const timeSlotStr = formatTimeIST(slotTime);
                 
                 await sendBookingConfirmationEmail({
                     toEmail: patientEmail,
@@ -960,8 +962,9 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
             if (patient.email) {
                 try {
                     const hospitalNameStr = hospital.name || 'Pillora Hospital';
-                    const dateStr = new Date(slotTime).toLocaleDateString();
-                    const timeSlotStr = new Date(slotTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                    const dateStr = formatDateIST(slotTime);
+                    const timeSlotStr = formatTimeIST(slotTime);
 
                     await sendBookingConfirmationEmail({
                         toEmail: patient.email,
@@ -1301,9 +1304,14 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
         // Upload to Cloudinary
         const result = await cloudinary.uploader.upload(dataUri, {
             folder: 'apex-care-invoices',
-            resource_type: 'auto',
+            resource_type: 'raw',
+            access_mode: 'public',
+            type: 'upload',
             public_id: invoiceName
         });
+
+        console.log('Invoice URL:', result.secure_url);
+        // Must contain /raw/upload/ not /image/upload/
 
         const invoiceUrl = result.secure_url;
 
@@ -1317,7 +1325,8 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
                 patientName: patientName,
                 hospitalName: hospital.name,
                 invoiceUrl: invoiceUrl,
-                date: new Date(appointment.bookingDate).toLocaleDateString(),
+                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                date: formatDateIST(appointment.bookingDate),
                 amount: Number(amount)
             });
         } catch (emailError: any) {
@@ -1452,8 +1461,13 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
         const result = await cloudinary.uploader.upload(dataUri, {
             folder: 'apex-care-prescriptions',
             resource_type: 'raw',
+            access_mode: 'public',
+            type: 'upload',
             format: 'pdf'
         });
+
+        console.log('Prescription URL:', result.secure_url);
+        // Must contain /raw/upload/ not /image/upload/
 
         appointment.prescriptionUrl = result.secure_url;
         appointment.prescriptionUploadedAt = new Date();
@@ -1469,7 +1483,8 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
                     patientName: patientName,
                     hospitalName: hospital.name,
                     prescriptionUrl: appointment.prescriptionUrl,
-                    date: new Date(appointment.bookingDate).toLocaleDateString()
+                    // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
+                    date: formatDateIST(appointment.bookingDate)
                 });
             } catch (emailError: any) {
                 console.error('Prescription email failed (non-critical):', emailError.message);
