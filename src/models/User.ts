@@ -189,4 +189,7 @@ const UserSchema: Schema = new Schema({
     isMfaEnabled: { type: Boolean, default: false }
 }, { timestamps: true });
 
+// Index for fast autocomplete queries on patient name
+UserSchema.index({ name: 1 });
+
 export default mongoose.model<IUser>('User', UserSchema);

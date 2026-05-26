@@ -1521,3 +1521,87 @@ export const getAppointmentPrescription = async (req: AuthRequest, res: Response
         res.status(500).json({ message: 'Error fetching prescription', error: error.message });
     }
 };
+
+// @desc    Autocomplete patient names (≥2 chars) scoped to this hospital
+// @route   GET /api/hospital/dashboard/patients/autocomplete?q=yu
+// @access  Private/Hospital
+export const autocompletePatients = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const query = (req.query.q as string || '').trim();
+
+        if (query.length < 2) {
+            res.json([]);
+            return;
+        }
+
+        // Get distinct patient IDs who have bookings at this hospital
+        const bookingPatientIds = await Appointment.distinct('patient', { hospital: hospital._id });
+
+        // Partial case-insensitive name match, limited to this hospital's patients
+        const patients = await User.find({
+            _id: { $in: bookingPatientIds },
+            name: { $regex: query, $options: 'i' }
+        })
+        .select('name email phone')
+        .limit(8)
+        .lean();
+
+        const suggestions = (patients as any[]).map((p) => ({
+            id: p._id.toString(),
+            name: p.name,
+            email: p.email || '',
+            phone: p.phone || ''
+        }));
+
+        res.json(suggestions);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Autocomplete error', error: error.message });
+    }
+};
+
+// @desc    Autocomplete booking IDs (≥4 chars) scoped to this hospital
+// @route   GET /api/hospital/dashboard/bookings/autocomplete?q=abc1
+// @access  Private/Hospital
+export const autocompleteBookingIds = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const query = (req.query.q as string || '').trim();
+
+        if (query.length < 4) {
+            res.json([]);
+            return;
+        }
+
+        // Fetch recent appointments for this hospital
+        const appointments = await Appointment.find({ hospital: hospital._id })
+            .populate('patient', 'name')
+            .select('_id slotTime patientName patient')
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .lean();
+
+        // Filter by partial ID match anywhere in the full ObjectId string
+        const lowerQuery = query.toLowerCase();
+        const matched = (appointments as any[])
+            .filter((a) => a._id.toString().toLowerCase().includes(lowerQuery))
+            .slice(0, 8)
+            .map((a) => ({
+                id: a._id.toString(),
+                bookingId: a._id.toString(),
+                patientName: a.patientName || (a.patient as any)?.name || 'Unknown',
+                date: a.slotTime
+                    ? new Date(a.slotTime).toLocaleDateString('en-IN', {
+                          timeZone: 'Asia/Kolkata',
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                      })
+                    : ''
+            }));
+
+        res.json(matched);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Autocomplete error', error: error.message });
+    }
+};

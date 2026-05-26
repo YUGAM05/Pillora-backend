@@ -30,7 +30,9 @@ import {
     generateAndSendInvoice,
     searchPatients,
     uploadAppointmentPrescription,
-    getAppointmentPrescription
+    getAppointmentPrescription,
+    autocompletePatients,
+    autocompleteBookingIds
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -61,6 +63,9 @@ router.get('/slots', protect, isHospital, attachHospital, getHospitalSlots);
 router.get('/patients/:patientId/notes', protect, isHospital, attachHospital, getPatientNotes);
 router.post('/patients/:patientId/notes', protect, isHospital, attachHospital, addPatientNote);
 
+// Autocomplete routes must be registered BEFORE /patients/:patientId routes to avoid Express treating 'autocomplete' as a patientId param
+router.get('/patients/autocomplete', protect, isHospital, attachHospital, autocompletePatients);
+router.get('/bookings/autocomplete', protect, isHospital, attachHospital, autocompleteBookingIds);
 router.get('/patients/search', protect, isHospital, attachHospital, searchPatients);
 router.post('/appointments/:id/prescription', protect, isHospital, attachHospital, upload.single('prescription'), uploadAppointmentPrescription);
 router.get('/appointments/:id/prescription', protect, isHospital, attachHospital, getAppointmentPrescription);
