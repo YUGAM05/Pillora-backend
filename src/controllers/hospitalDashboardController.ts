@@ -1454,6 +1454,13 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
             return;
         }
 
+        // Check first 4 bytes — valid PDF starts with %PDF
+        const header = req.file.buffer.subarray(0, 4).toString();
+        if (header !== '%PDF') {
+            res.status(400).json({ message: 'File is not a valid PDF — header check failed' });
+            return;
+        }
+
         // Convert buffer to base64
         const base64File = req.file.buffer.toString('base64');
         const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
@@ -1478,13 +1485,21 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
             folder: 'pillora-prescriptions',
             access_mode: 'public',
             type: 'upload',
-            format: 'pdf'
+            format: 'pdf',
+            public_id: `prescription-${appointment._id}`,
+            use_filename: false,
+            unique_filename: true
         });
 
         console.log('Prescription URL:', result.secure_url);
         // Must contain /raw/upload/ not /image/upload/
 
-        appointment.prescriptionUrl = result.secure_url;
+        let prescriptionUrl = result.secure_url;
+        if (!prescriptionUrl.endsWith('.pdf')) {
+            prescriptionUrl += '.pdf';
+        }
+
+        appointment.prescriptionUrl = prescriptionUrl;
         appointment.prescriptionUploadedAt = new Date();
         await appointment.save();
 
@@ -1493,11 +1508,16 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 
         if (patientEmail) {
             try {
+                // Add fl_attachment to force download as PDF in email
+                const downloadUrl = appointment.prescriptionUrl.includes('/raw/upload/')
+                    ? appointment.prescriptionUrl.replace('/raw/upload/', '/raw/upload/fl_attachment:prescription/')
+                    : appointment.prescriptionUrl;
+
                 await sendPrescriptionEmail({
                     toEmail: patientEmail,
                     patientName: patientName,
                     hospitalName: hospital.name,
-                    prescriptionUrl: appointment.prescriptionUrl,
+                    prescriptionUrl: downloadUrl,
                     // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
                     date: formatDateIST(appointment.bookingDate)
                 });
@@ -1531,7 +1551,9 @@ export const getAppointmentPrescription = async (req: AuthRequest, res: Response
             return;
         }
 
-        res.json({ prescriptionUrl: appointment.prescriptionUrl, uploadedAt: appointment.prescriptionUploadedAt });
+        // Redirect to Cloudinary URL directly
+        res.setHeader('Content-Type', 'application/pdf');
+        res.redirect(appointment.prescriptionUrl);
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching prescription', error: error.message });
     }
