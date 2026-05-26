@@ -14,7 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processKYCResult = exports.searchAndNotifyDonors = void 0;
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
-const Donor_1 = __importDefault(require("../models/Donor"));
+const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const emailService_1 = require("./emailService");
 /**
  * Searches for matching blood donors and notifies the requester.
@@ -27,24 +27,66 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
             console.error(`[searchAndNotifyDonors] BloodRequest not found for ID: ${requestId}`);
             return;
         }
-        const cityVal = request.city || '';
-        const areaVal = request.area || '';
-        const bloodGroupVal = request.bloodGroup;
-        // Search donors matching blood group AND city AND area
-        let donors = yield Donor_1.default.find({
-            bloodGroup: bloodGroupVal,
+        console.log('=== DONOR SEARCH START ===');
+        console.log('Request ID:', requestId);
+        console.log('Request blood group:', request.bloodGroup);
+        console.log('Request city:', request.city);
+        console.log('Request area:', request.area);
+        // First check how many total donors exist
+        const totalDonors = yield BloodDonor_1.default.countDocuments();
+        console.log('Total donors in DB:', totalDonors);
+        // Check all donors regardless of filters
+        const allDonors = yield BloodDonor_1.default.find({});
+        console.log('All donors:', JSON.stringify(allDonors.map(d => ({
+            name: d.name,
+            bloodGroup: d.bloodGroup,
+            city: d.city,
+            area: d.area,
+            isAvailable: d.isAvailable
+        })), null, 2));
+        // Fix 4 — Check the exact field names in the Donor schema
+        const firstDonor = yield BloodDonor_1.default.findOne({});
+        if (firstDonor) {
+            console.log('Donor document keys:', Object.keys(firstDonor.toObject()));
+            console.log('Full donor document:', firstDonor.toObject());
+        }
+        else {
+            console.log('No donor document in DB to extract keys from.');
+        }
+        // Fix 5 — Check the exact field names in the BloodRequest schema
+        console.log('Request document keys:', Object.keys(request.toObject()));
+        console.log('Full request document:', request.toObject());
+        const cityVal = (request.city || '').trim();
+        const areaVal = (request.area || '').trim();
+        const bloodGroupVal = (request.bloodGroup || '').trim();
+        // Now search with filters
+        // Fix 2 & 3: Use case-insensitive regex for bloodGroup, trim fields, and check isAvailable condition
+        let donors = yield BloodDonor_1.default.find({
+            bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
             city: { $regex: cityVal, $options: 'i' },
             area: { $regex: areaVal, $options: 'i' },
-            isAvailable: true
+            $or: [
+                { isAvailable: true },
+                { isAvailable: { $exists: false } },
+                { isAvailable: null }
+            ]
         });
+        console.log('Matching donors found (strict city + area):', donors.length);
         // If no exact area match found search by city and blood group only
         if (donors.length === 0) {
-            donors = yield Donor_1.default.find({
-                bloodGroup: bloodGroupVal,
+            console.log('No exact area match. Falling back to city + blood group search...');
+            donors = yield BloodDonor_1.default.find({
+                bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
                 city: { $regex: cityVal, $options: 'i' },
-                isAvailable: true
+                $or: [
+                    { isAvailable: true },
+                    { isAvailable: { $exists: false } },
+                    { isAvailable: null }
+                ]
             });
+            console.log('Matching donors found (city fallback):', donors.length);
         }
+        console.log('=== DONOR SEARCH END ===');
         const emailToUse = request.email || '';
         if (donors.length === 0) {
             // NO DONORS FOUND
@@ -72,9 +114,9 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
                 bloodGroup: bloodGroupVal,
                 unitsNeeded: request.unitsNeeded || request.units || 1,
                 donors: donors.map((d) => ({
-                    name: d.name || d.donor_name || 'Anonymous',
-                    bloodGroup: d.bloodGroup || d.blood_group || bloodGroupVal,
-                    phone: d.phone || d.donor_phone || 'N/A',
+                    name: d.name || 'Anonymous',
+                    bloodGroup: d.bloodGroup || bloodGroupVal,
+                    phone: d.phone || 'N/A',
                     area: d.area || '',
                     city: d.city || ''
                 }))

@@ -1,5 +1,5 @@
 import BloodRequest from '../models/BloodRequest';
-import Donor from '../models/Donor';
+import BloodDonor from '../models/BloodDonor';
 import { sendKYCFailedEmail, sendNoDonorFoundEmail, sendDonorFoundEmail } from './emailService';
 
 /**
@@ -14,26 +14,74 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
       return;
     }
 
-    const cityVal = request.city || '';
-    const areaVal = request.area || '';
-    const bloodGroupVal = request.bloodGroup;
+    console.log('=== DONOR SEARCH START ===');
+    console.log('Request ID:', requestId);
+    console.log('Request blood group:', request.bloodGroup);
+    console.log('Request city:', request.city);
+    console.log('Request area:', request.area);
 
-    // Search donors matching blood group AND city AND area
-    let donors = await Donor.find({
-      bloodGroup: bloodGroupVal,
+    // First check how many total donors exist
+    const totalDonors = await BloodDonor.countDocuments();
+    console.log('Total donors in DB:', totalDonors);
+
+    // Check all donors regardless of filters
+    const allDonors = await BloodDonor.find({});
+    console.log('All donors:', JSON.stringify(allDonors.map(d => ({
+      name: d.name,
+      bloodGroup: d.bloodGroup,
+      city: d.city,
+      area: d.area,
+      isAvailable: d.isAvailable
+    })), null, 2));
+
+    // Fix 4 — Check the exact field names in the Donor schema
+    const firstDonor = await BloodDonor.findOne({});
+    if (firstDonor) {
+      console.log('Donor document keys:', Object.keys(firstDonor.toObject()));
+      console.log('Full donor document:', firstDonor.toObject());
+    } else {
+      console.log('No donor document in DB to extract keys from.');
+    }
+
+    // Fix 5 — Check the exact field names in the BloodRequest schema
+    console.log('Request document keys:', Object.keys(request.toObject()));
+    console.log('Full request document:', request.toObject());
+
+    const cityVal = (request.city || '').trim();
+    const areaVal = (request.area || '').trim();
+    const bloodGroupVal = (request.bloodGroup || '').trim();
+
+    // Now search with filters
+    // Fix 2 & 3: Use case-insensitive regex for bloodGroup, trim fields, and check isAvailable condition
+    let donors = await BloodDonor.find({
+      bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
       city: { $regex: cityVal, $options: 'i' },
       area: { $regex: areaVal, $options: 'i' },
-      isAvailable: true
+      $or: [
+        { isAvailable: true },
+        { isAvailable: { $exists: false } },
+        { isAvailable: null }
+      ]
     });
+
+    console.log('Matching donors found (strict city + area):', donors.length);
 
     // If no exact area match found search by city and blood group only
     if (donors.length === 0) {
-      donors = await Donor.find({
-        bloodGroup: bloodGroupVal,
+      console.log('No exact area match. Falling back to city + blood group search...');
+      donors = await BloodDonor.find({
+        bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
         city: { $regex: cityVal, $options: 'i' },
-        isAvailable: true
+        $or: [
+          { isAvailable: true },
+          { isAvailable: { $exists: false } },
+          { isAvailable: null }
+        ]
       });
+      console.log('Matching donors found (city fallback):', donors.length);
     }
+
+    console.log('=== DONOR SEARCH END ===');
 
     const emailToUse = request.email || '';
 
@@ -63,9 +111,9 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
         bloodGroup: bloodGroupVal,
         unitsNeeded: request.unitsNeeded || request.units || 1,
         donors: donors.map((d: any) => ({
-          name: d.name || d.donor_name || 'Anonymous',
-          bloodGroup: d.bloodGroup || d.blood_group || bloodGroupVal,
-          phone: d.phone || d.donor_phone || 'N/A',
+          name: d.name || 'Anonymous',
+          bloodGroup: d.bloodGroup || bloodGroupVal,
+          phone: d.phone || 'N/A',
           area: d.area || '',
           city: d.city || ''
         }))
