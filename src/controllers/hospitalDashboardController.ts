@@ -1350,21 +1350,51 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
         let query: any = { hospital: hospital._id };
 
         if (bookingId) {
-            // Find specific booking and then find all other bookings for that patient
-            const initialBooking = await Appointment.findOne({ _id: bookingId as string, hospital: hospital._id }).populate('patient');
+            // Find booking by partial or exact ID (case-insensitive)
+            const lowerQuery = (bookingId as string).toLowerCase().trim();
+            
+            // First try exact match if valid ObjectId
+            let initialBooking;
+            if (mongoose.Types.ObjectId.isValid(lowerQuery) && lowerQuery.length === 24) {
+                initialBooking = await Appointment.findOne({ _id: lowerQuery, hospital: hospital._id }).populate('patient');
+            }
+            
+            // If not found, fetch recent and do partial match like autocomplete
+            if (!initialBooking) {
+                const recentAppts = await Appointment.find({ hospital: hospital._id })
+                    .populate('patient')
+                    .sort({ createdAt: -1 })
+                    .limit(500);
+                initialBooking = recentAppts.find(a => a._id.toString().toLowerCase().includes(lowerQuery));
+            }
+
             if (!initialBooking) {
                 res.status(404).json({ message: 'No patient found with this booking ID' });
                 return;
             }
-            query.patient = initialBooking.patient;
-        } else if (name) {
-            // Find patients matching the name
-            const matchingUsers = await User.find({ name: { $regex: name as string, $options: 'i' } });
-            if (!matchingUsers.length) {
-                res.status(404).json({ message: 'No patient found with this name' });
-                return;
+            
+            if (initialBooking.patient) {
+                query.patient = (initialBooking.patient as any)._id;
+            } else if (initialBooking.patientEmail) {
+                query.patientEmail = initialBooking.patientEmail;
+            } else {
+                query.patientName = initialBooking.patientName;
             }
-            query.patient = { $in: matchingUsers.map(u => u._id) };
+        } else if (name) {
+            const searchName = (name as string).trim();
+            const regex = new RegExp(searchName, 'i');
+            
+            // Find patients matching the name
+            const matchingUsers = await User.find({ name: regex });
+            
+            // We want to match either the user account OR the name directly on the appointment
+            query.$or = [
+                { patientName: regex }
+            ];
+            
+            if (matchingUsers.length > 0) {
+                query.$or.push({ patient: { $in: matchingUsers.map(u => u._id) } });
+            }
         } else {
             res.status(400).json({ message: 'Provide either bookingId or name to search' });
             return;
@@ -1576,9 +1606,10 @@ export const autocompletePatients = async (req: AuthRequest, res: Response): Pro
         const bookingPatientIds = await Appointment.distinct('patient', { hospital: hospital._id });
 
         // Partial case-insensitive name match, limited to this hospital's patients
+        const regex = new RegExp(query, 'i');
         const patients = await User.find({
             _id: { $in: bookingPatientIds },
-            name: { $regex: query, $options: 'i' }
+            name: regex
         })
         .select('name email phone')
         .limit(8)
