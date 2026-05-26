@@ -59,12 +59,16 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
         const cityVal = (request.city || '').trim();
         const areaVal = (request.area || '').trim();
         const bloodGroupVal = (request.bloodGroup || '').trim();
+        const escapeRegex = (str) => str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const escapedBloodGroup = escapeRegex(bloodGroupVal);
+        const escapedCity = escapeRegex(cityVal);
+        const escapedArea = escapeRegex(areaVal);
         // Now search with filters
         // Fix 2 & 3: Use case-insensitive regex for bloodGroup, trim fields, and check isAvailable condition
         let donors = yield BloodDonor_1.default.find({
-            bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
-            city: { $regex: cityVal, $options: 'i' },
-            area: { $regex: areaVal, $options: 'i' },
+            bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
+            city: { $regex: escapedCity, $options: 'i' },
+            area: { $regex: escapedArea, $options: 'i' },
             $or: [
                 { isAvailable: true },
                 { isAvailable: { $exists: false } },
@@ -76,8 +80,8 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
         if (donors.length === 0) {
             console.log('No exact area match. Falling back to city + blood group search...');
             donors = yield BloodDonor_1.default.find({
-                bloodGroup: { $regex: `^${bloodGroupVal}$`, $options: 'i' },
-                city: { $regex: cityVal, $options: 'i' },
+                bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
+                city: { $regex: escapedCity, $options: 'i' },
                 $or: [
                     { isAvailable: true },
                     { isAvailable: { $exists: false } },
