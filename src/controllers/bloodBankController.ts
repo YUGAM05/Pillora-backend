@@ -525,3 +525,29 @@ export const updateKycStatus = async (req: Request, res: Response): Promise<void
     }
 };
 
+// @desc    Delete user's own request
+// @route   DELETE /api/blood-bank/requests/:id
+// @access  Private
+export const deleteMyRequest = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const request = await BloodRequest.findById(id);
+
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+
+        // Verify ownership
+        if (request.user.toString() !== req.user.id) {
+            res.status(401).json({ message: 'User not authorized to delete this request' });
+            return;
+        }
+
+        await request.deleteOne();
+        res.json({ message: 'Request deleted successfully' });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Server Error' });
+    }
+};
+

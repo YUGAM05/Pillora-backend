@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { protect, adminOnly } from '../middleware/authMiddleware';
-import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, deleteRequest, getMyRequests, getMyDonorProfile, verifyRequestWithAI, updateKycStatus } from '../controllers/bloodBankController';
+import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, deleteRequest, deleteMyRequest, getMyRequests, getMyDonorProfile, verifyRequestWithAI, updateKycStatus } from '../controllers/bloodBankController';
 import { exportDonorsToExcel, exportRequestsToExcel, exportDonorsToPDF, exportRequestsToPDF } from '../controllers/bloodBankExportController';
 import { importDonorsFromExcel, getDonorStats } from '../controllers/bloodBankImportController';
 import { downloadDonorTemplate } from '../controllers/bloodBankTemplateController';
@@ -20,6 +20,7 @@ router.delete('/admin/donors/:id', protect, adminOnly, deleteDonor);
 router.post('/requests', protect, createRequest);
 router.get('/requests', getRequests);
 router.get('/my-requests', protect, getMyRequests);
+router.delete('/requests/:id', protect, deleteMyRequest);
 router.get('/my-donor', protect, getMyDonorProfile);
 router.get('/admin/requests', protect, adminOnly, getAllRequestsAdmin);
 router.delete('/admin/requests/:id', protect, adminOnly, deleteRequest);
