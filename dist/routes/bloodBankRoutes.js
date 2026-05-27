@@ -21,6 +21,7 @@ router.delete('/admin/donors/:id', authMiddleware_1.protect, authMiddleware_1.ad
 router.post('/requests', authMiddleware_1.protect, bloodBankController_1.createRequest);
 router.get('/requests', bloodBankController_1.getRequests);
 router.get('/my-requests', authMiddleware_1.protect, bloodBankController_1.getMyRequests);
+router.delete('/requests/:id', authMiddleware_1.protect, bloodBankController_1.deleteMyRequest);
 router.get('/my-donor', authMiddleware_1.protect, bloodBankController_1.getMyDonorProfile);
 router.get('/admin/requests', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.getAllRequestsAdmin);
 router.delete('/admin/requests/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, bloodBankController_1.deleteRequest);

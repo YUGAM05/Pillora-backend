@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Donor_1 = __importDefault(require("../models/Donor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
@@ -39,8 +39,8 @@ const registerDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(400).json({ message: 'This phone number is already registered by another donor' });
             return;
         }
-        // Upsert: update existing record or create new one
-        const donor = yield BloodDonor_1.default.findOneAndUpdate({ user: req.user.id }, {
+        // Upsert: update existing record by phone or create a new one
+        const donor = yield BloodDonor_1.default.findOneAndUpdate({ phone: phone }, {
             user: req.user.id,
             name,
             bloodGroup,
@@ -303,6 +303,10 @@ exports.getRequests = getRequests;
 // @access  Private/Admin
 const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const totalBloodDonors = yield BloodDonor_1.default.countDocuments({});
+        const totalLegacyDonors = yield Donor_1.default.countDocuments({});
+        console.log('Total BloodDonors in DB:', totalBloodDonors);
+        console.log('Total Legacy Donors in DB:', totalLegacyDonors);
         const [donors1, donors2] = yield Promise.all([
             BloodDonor_1.default.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
             Donor_1.default.find({}).sort({ createdAt: -1 })
@@ -343,7 +347,28 @@ const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         ];
         // Sort combined list by date
         combinedDonors.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        res.json(combinedDonors);
+        if (!req.query.page && !req.query.limit) {
+            // For backwards compatibility with legacy clients that don't pass page/limit
+            res.json(combinedDonors);
+            return;
+        }
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+        const paginatedDonors = combinedDonors.slice(skip, skip + limit);
+        const totalDonors = combinedDonors.length;
+        const totalAvailable = combinedDonors.filter((d) => d.isAvailable).length;
+        console.log(`Returning ${paginatedDonors.length} of ${totalDonors} total donors (page ${page}/${Math.ceil(totalDonors / limit)})`);
+        res.json({
+            donors: paginatedDonors,
+            pagination: {
+                total: totalDonors,
+                available: totalAvailable,
+                page,
+                totalPages: Math.ceil(totalDonors / limit),
+                hasMore: page < Math.ceil(totalDonors / limit)
+            }
+        });
     }
     catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -495,3 +520,27 @@ const updateKycStatus = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.updateKycStatus = updateKycStatus;
+// @desc    Delete user's own request
+// @route   DELETE /api/blood-bank/requests/:id
+// @access  Private
+const deleteMyRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const request = yield BloodRequest_1.default.findById(id);
+        if (!request) {
+            res.status(404).json({ message: 'Request not found' });
+            return;
+        }
+        // Verify ownership
+        if (request.user.toString() !== req.user.id) {
+            res.status(401).json({ message: 'User not authorized to delete this request' });
+            return;
+        }
+        yield request.deleteOne();
+        res.json({ message: 'Request deleted successfully' });
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message || 'Server Error' });
+    }
+});
+exports.deleteMyRequest = deleteMyRequest;

@@ -31,9 +31,9 @@ export const registerDonor = async (req: AuthRequest, res: Response): Promise<vo
             return;
         }
 
-        // Upsert: update existing record or create new one
+        // Upsert: update existing record by phone or create a new one
         const donor = await BloodDonor.findOneAndUpdate(
-            { user: req.user.id },
+            { phone: phone },
             {
                 user: req.user.id,
                 name,
@@ -307,6 +307,11 @@ export const getRequests = async (req: Request, res: Response): Promise<void> =>
 // @access  Private/Admin
 export const getAllDonors = async (req: Request, res: Response): Promise<void> => {
     try {
+        const totalBloodDonors = await BloodDonor.countDocuments({});
+        const totalLegacyDonors = await Donor.countDocuments({});
+        console.log('Total BloodDonors in DB:', totalBloodDonors);
+        console.log('Total Legacy Donors in DB:', totalLegacyDonors);
+
         const [donors1, donors2] = await Promise.all([
             BloodDonor.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
             Donor.find({}).sort({ createdAt: -1 })
@@ -351,7 +356,32 @@ export const getAllDonors = async (req: Request, res: Response): Promise<void> =
         // Sort combined list by date
         combinedDonors.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-        res.json(combinedDonors);
+        if (!req.query.page && !req.query.limit) {
+            // For backwards compatibility with legacy clients that don't pass page/limit
+            res.json(combinedDonors);
+            return;
+        }
+
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const skip = (page - 1) * limit;
+
+        const paginatedDonors = combinedDonors.slice(skip, skip + limit);
+        const totalDonors = combinedDonors.length;
+        const totalAvailable = combinedDonors.filter((d: any) => d.isAvailable).length;
+
+        console.log(`Returning ${paginatedDonors.length} of ${totalDonors} total donors (page ${page}/${Math.ceil(totalDonors / limit)})`);
+
+        res.json({
+            donors: paginatedDonors,
+            pagination: {
+                total: totalDonors,
+                available: totalAvailable,
+                page,
+                totalPages: Math.ceil(totalDonors / limit),
+                hasMore: page < Math.ceil(totalDonors / limit)
+            }
+        });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
     }
