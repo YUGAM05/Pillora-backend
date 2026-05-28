@@ -296,60 +296,49 @@ export const getRequests = async (req: Request, res: Response): Promise<void> =>
 // @route   GET /api/blood-bank/admin/donors
 // @access  Private/Admin
 export const getAllDonors = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const totalDonors = await BloodDonor.countDocuments({});
-        const totalAvailable = await BloodDonor.countDocuments({ isAvailable: true });
-        console.log('Total Donors in DB (blooddonors):', totalDonors);
-        console.log('Total Available Donors in DB (blooddonors):', totalAvailable);
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const skip = (page - 1) * limit;
 
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 100;
-        const skip = (page - 1) * limit;
+    const total = await BloodDonor.countDocuments({});
+    const donors = await BloodDonor.find({})
+      .sort({ createdAt: -1 })
+      .populate('user', 'name email')
+      .skip(skip)
+      .limit(limit);
 
-        const donors = await BloodDonor.find({})
-            .sort({ createdAt: -1 })
-            .populate('user', 'name email')
-            .skip(skip)
-            .limit(limit);
+    console.log(`[AdminDonors] Total in DB: ${total}, Returning: ${donors.length}`);
 
-        console.log(`[AdminDonors] Fetched: ${donors.length}, Total: ${totalDonors}`);
+    const standardizedDonors = donors.map(d => ({
+      _id: d._id,
+      name: d.name,
+      email: d.email || (d.user as any)?.email || 'N/A',
+      bloodGroup: d.bloodGroup,
+      age: d.age,
+      gender: d.gender,
+      phone: d.phone,
+      city: d.city,
+      area: d.area,
+      address: d.address,
+      isAvailable: d.isAvailable,
+      source: d.source || 'user_panel',
+      createdAt: d.createdAt
+    }));
 
-        const standardizedDonors = donors.map(d => ({
-            _id: d._id,
-            name: d.name,
-            email: d.email || (d.user as any)?.email || 'N/A',
-            bloodGroup: d.bloodGroup,
-            age: d.age,
-            gender: d.gender,
-            phone: d.phone,
-            city: d.city,
-            area: d.area,
-            address: d.address,
-            isAvailable: d.isAvailable,
-            source: d.source || 'user_panel',
-            createdAt: d.createdAt
-        }));
-
-        if (!req.query.page && !req.query.limit) {
-            // For backwards compatibility with legacy clients that don't pass page/limit
-            res.json(standardizedDonors);
-            return;
-        }
-
-        res.json({
-            donors: standardizedDonors,
-            pagination: {
-                total: totalDonors,
-                available: totalAvailable,
-                page,
-                totalPages: Math.ceil(totalDonors / limit),
-                hasMore: page < Math.ceil(totalDonors / limit)
-            }
-        });
-    } catch (error) {
-        console.error('Error fetching donors for admin:', error);
-        res.status(500).json({ message: 'Server Error', error });
-    }
+    res.status(200).json({
+      donors: standardizedDonors,
+      pagination: {
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page < Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching donors for admin:', error);
+    res.status(500).json({ message: 'Server Error', error });
+  }
 };
 
 // @desc    Get all requests (Admin)
