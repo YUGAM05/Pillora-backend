@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import BloodDonor from '../models/BloodDonor';
-import Donor from '../models/Donor';
 import BloodRequest from '../models/BloodRequest';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { getCompatibleDonors } from '../utils/bloodCompatibility';
@@ -141,22 +140,11 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
             query.area = new RegExp(area as string, 'i');
         }
 
-        // Find matches in both BloodDonor (old) and Donor (new) models
-        const [donors1, donors2] = await Promise.all([
-            BloodDonor.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 }),
-            Donor.find({
-                blood_group: { $in: compatibleGroups },
-                city: query.city,
-                area: query.area
-            }).sort({ lastDonationDate: 1 })
-        ]);
+        // Find matches in unified BloodDonor model
+        const donors = await BloodDonor.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 });
 
-        // Merge and remove duplicates if any (based on phone/donor_phone)
-        const allDonors = [
-            ...donors1.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup })),
-            ...donors2.map((d: any) => ({ name: d.donor_name, phone: d.donor_phone, bloodGroup: d.blood_group }))
-        ];
-
+        // Map and remove duplicates if any (based on phone)
+        const allDonors = donors.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup }));
         const uniqueDonors = Array.from(new Map(allDonors.map(d => [d.phone, d])).values());
 
         res.json(uniqueDonors);
@@ -235,11 +223,13 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
                 // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
                     const compatibleGroups = getCompatibleDonors(bloodGroup);
-                    const [donors1, donors2] = await Promise.all([
-                        Donor.find({ blood_group: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i') }).limit(5),
-                        BloodDonor.find({ bloodGroup: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i'), isAvailable: true }).limit(5)
-                    ]);
-                    const matchedDonors = Array.from(new Map([...donors1.map((d: any) => ({ name: d.donor_name, phone: d.donor_phone })), ...donors2.map(d => ({ name: d.name, phone: d.phone }))].map(d => [d.phone, d])).values()).slice(0, 5);
+                    const matchedDonorsRaw = await BloodDonor.find({
+                        bloodGroup: { $in: compatibleGroups },
+                        city: new RegExp(city, 'i'),
+                        area: new RegExp(area, 'i'),
+                        isAvailable: true
+                    }).limit(5);
+                    const matchedDonors = matchedDonorsRaw.map(d => ({ name: d.name, phone: d.phone }));
                     if (matchedDonors.length > 0) {
                         let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors.\n\nPlease contact them immediately. Stay Safe!`;
                         await sendWhatsAppMessage(contactNumber, messageBody);
@@ -307,73 +297,47 @@ export const getRequests = async (req: Request, res: Response): Promise<void> =>
 // @access  Private/Admin
 export const getAllDonors = async (req: Request, res: Response): Promise<void> => {
     try {
-        const totalBloodDonors = await BloodDonor.countDocuments({});
-        const totalLegacyDonors = await Donor.countDocuments({});
-        console.log('Total BloodDonors in DB:', totalBloodDonors);
-        console.log('Total Legacy Donors in DB:', totalLegacyDonors);
+        const totalDonors = await BloodDonor.countDocuments({});
+        const totalAvailable = await BloodDonor.countDocuments({ isAvailable: true });
+        console.log('Total Donors in DB (blooddonors):', totalDonors);
+        console.log('Total Available Donors in DB (blooddonors):', totalAvailable);
 
-        const [donors1, donors2] = await Promise.all([
-            BloodDonor.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
-            Donor.find({}).sort({ createdAt: -1 })
-        ]);
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 100;
+        const skip = (page - 1) * limit;
 
-        console.log(`[AdminDonors] BloodDonor: ${donors1.length}, LegacyDonor: ${donors2.length}`);
+        const donors = await BloodDonor.find({})
+            .sort({ createdAt: -1 })
+            .populate('user', 'name email')
+            .skip(skip)
+            .limit(limit);
 
-        // Standardize the format for the admin table
-        const combinedDonors = [
-            ...donors1.map(d => ({
-                _id: d._id,
-                name: d.name,
-                email: d.email,
-                bloodGroup: d.bloodGroup,
-                age: d.age,
-                gender: d.gender,
-                phone: d.phone,
-                city: d.city,
-                area: d.area,
-                address: d.address,
-                isAvailable: d.isAvailable,
-                source: d.source || 'user_panel',
-                createdAt: d.createdAt
-            })),
-            ...donors2.map((d: any) => ({
-                _id: d._id,
-                name: d.donor_name,
-                email: 'N/A',
-                bloodGroup: d.blood_group,
-                age: 25, // Default for legacy data
-                gender: 'Other',
-                phone: d.donor_phone,
-                city: d.city,
-                area: d.area,
-                address: 'Imported Record',
-                isAvailable: true,
-                source: 'imported',
-                createdAt: d.createdAt
-            }))
-        ];
+        console.log(`[AdminDonors] Fetched: ${donors.length}, Total: ${totalDonors}`);
 
-        // Sort combined list by date
-        combinedDonors.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const standardizedDonors = donors.map(d => ({
+            _id: d._id,
+            name: d.name,
+            email: d.email || (d.user as any)?.email || 'N/A',
+            bloodGroup: d.bloodGroup,
+            age: d.age,
+            gender: d.gender,
+            phone: d.phone,
+            city: d.city,
+            area: d.area,
+            address: d.address,
+            isAvailable: d.isAvailable,
+            source: d.source || 'user_panel',
+            createdAt: d.createdAt
+        }));
 
         if (!req.query.page && !req.query.limit) {
             // For backwards compatibility with legacy clients that don't pass page/limit
-            res.json(combinedDonors);
+            res.json(standardizedDonors);
             return;
         }
 
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 50;
-        const skip = (page - 1) * limit;
-
-        const paginatedDonors = combinedDonors.slice(skip, skip + limit);
-        const totalDonors = combinedDonors.length;
-        const totalAvailable = combinedDonors.filter((d: any) => d.isAvailable).length;
-
-        console.log(`Returning ${paginatedDonors.length} of ${totalDonors} total donors (page ${page}/${Math.ceil(totalDonors / limit)})`);
-
         res.json({
-            donors: paginatedDonors,
+            donors: standardizedDonors,
             pagination: {
                 total: totalDonors,
                 available: totalAvailable,
@@ -383,6 +347,7 @@ export const getAllDonors = async (req: Request, res: Response): Promise<void> =
             }
         });
     } catch (error) {
+        console.error('Error fetching donors for admin:', error);
         res.status(500).json({ message: 'Server Error', error });
     }
 };
@@ -428,11 +393,9 @@ export const updateRequestStatus = async (req: Request, res: Response): Promise<
 export const deleteDonor = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
-        // Try deleting from both collections
-        const donor1 = await BloodDonor.findByIdAndDelete(id);
-        const donor2 = await Donor.findByIdAndDelete(id);
+        const donor = await BloodDonor.findByIdAndDelete(id);
 
-        if (!donor1 && !donor2) {
+        if (!donor) {
             res.status(404).json({ message: 'Donor not found' });
             return;
         }

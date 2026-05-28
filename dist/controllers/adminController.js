@@ -15,7 +15,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
-const Donor_1 = __importDefault(require("../models/Donor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
@@ -48,11 +47,7 @@ const getSystemStats = (req, res) => __awaiter(void 0, void 0, void 0, function*
     try {
         const totalUsers = yield User_1.default.countDocuments({ role: 'customer' });
         const totalSellers = yield User_1.default.countDocuments({ role: 'seller', status: 'approved' });
-        const [donorCount1, donorCount2] = yield Promise.all([
-            BloodDonor_1.default.countDocuments(),
-            Donor_1.default.countDocuments()
-        ]);
-        const totalDonors = donorCount1 + donorCount2;
+        const totalDonors = yield BloodDonor_1.default.countDocuments();
         const totalOrders = yield Order_1.default.countDocuments();
         const pendingProducts = yield Inventory_1.default.countDocuments({ status: 'pending' });
         // Calculate Revenue

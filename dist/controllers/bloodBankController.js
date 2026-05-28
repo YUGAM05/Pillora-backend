@@ -14,7 +14,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
-const Donor_1 = __importDefault(require("../models/Donor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const bloodCompatibility_1 = require("../utils/bloodCompatibility");
 const whatsappService_1 = require("../utils/whatsappService");
@@ -137,20 +136,10 @@ const findMatches = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (area) {
             query.area = new RegExp(area, 'i');
         }
-        // Find matches in both BloodDonor (old) and Donor (new) models
-        const [donors1, donors2] = yield Promise.all([
-            BloodDonor_1.default.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 }),
-            Donor_1.default.find({
-                blood_group: { $in: compatibleGroups },
-                city: query.city,
-                area: query.area
-            }).sort({ lastDonationDate: 1 })
-        ]);
-        // Merge and remove duplicates if any (based on phone/donor_phone)
-        const allDonors = [
-            ...donors1.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup })),
-            ...donors2.map((d) => ({ name: d.donor_name, phone: d.donor_phone, bloodGroup: d.blood_group }))
-        ];
+        // Find matches in unified BloodDonor model
+        const donors = yield BloodDonor_1.default.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 });
+        // Map and remove duplicates if any (based on phone)
+        const allDonors = donors.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup }));
         const uniqueDonors = Array.from(new Map(allDonors.map(d => [d.phone, d])).values());
         res.json(uniqueDonors);
     }
@@ -226,11 +215,13 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
                     const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
-                    const [donors1, donors2] = yield Promise.all([
-                        Donor_1.default.find({ blood_group: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i') }).limit(5),
-                        BloodDonor_1.default.find({ bloodGroup: { $in: compatibleGroups }, city: new RegExp(city, 'i'), area: new RegExp(area, 'i'), isAvailable: true }).limit(5)
-                    ]);
-                    const matchedDonors = Array.from(new Map([...donors1.map((d) => ({ name: d.donor_name, phone: d.donor_phone })), ...donors2.map(d => ({ name: d.name, phone: d.phone }))].map(d => [d.phone, d])).values()).slice(0, 5);
+                    const matchedDonorsRaw = yield BloodDonor_1.default.find({
+                        bloodGroup: { $in: compatibleGroups },
+                        city: new RegExp(city, 'i'),
+                        area: new RegExp(area, 'i'),
+                        isAvailable: true
+                    }).limit(5);
+                    const matchedDonors = matchedDonorsRaw.map(d => ({ name: d.name, phone: d.phone }));
                     if (matchedDonors.length > 0) {
                         let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors.\n\nPlease contact them immediately. Stay Safe!`;
                         yield (0, whatsappService_1.sendWhatsAppMessage)(contactNumber, messageBody);
@@ -303,21 +294,25 @@ exports.getRequests = getRequests;
 // @access  Private/Admin
 const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalBloodDonors = yield BloodDonor_1.default.countDocuments({});
-        const totalLegacyDonors = yield Donor_1.default.countDocuments({});
-        console.log('Total BloodDonors in DB:', totalBloodDonors);
-        console.log('Total Legacy Donors in DB:', totalLegacyDonors);
-        const [donors1, donors2] = yield Promise.all([
-            BloodDonor_1.default.find({}).sort({ createdAt: -1 }).populate('user', 'name email'),
-            Donor_1.default.find({}).sort({ createdAt: -1 })
-        ]);
-        console.log(`[AdminDonors] BloodDonor: ${donors1.length}, LegacyDonor: ${donors2.length}`);
-        // Standardize the format for the admin table
-        const combinedDonors = [
-            ...donors1.map(d => ({
+        const totalDonors = yield BloodDonor_1.default.countDocuments({});
+        const totalAvailable = yield BloodDonor_1.default.countDocuments({ isAvailable: true });
+        console.log('Total Donors in DB (blooddonors):', totalDonors);
+        console.log('Total Available Donors in DB (blooddonors):', totalAvailable);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 100;
+        const skip = (page - 1) * limit;
+        const donors = yield BloodDonor_1.default.find({})
+            .sort({ createdAt: -1 })
+            .populate('user', 'name email')
+            .skip(skip)
+            .limit(limit);
+        console.log(`[AdminDonors] Fetched: ${donors.length}, Total: ${totalDonors}`);
+        const standardizedDonors = donors.map(d => {
+            var _a;
+            return ({
                 _id: d._id,
                 name: d.name,
-                email: d.email,
+                email: d.email || ((_a = d.user) === null || _a === void 0 ? void 0 : _a.email) || 'N/A',
                 bloodGroup: d.bloodGroup,
                 age: d.age,
                 gender: d.gender,
@@ -328,39 +323,15 @@ const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 isAvailable: d.isAvailable,
                 source: d.source || 'user_panel',
                 createdAt: d.createdAt
-            })),
-            ...donors2.map((d) => ({
-                _id: d._id,
-                name: d.donor_name,
-                email: 'N/A',
-                bloodGroup: d.blood_group,
-                age: 25, // Default for legacy data
-                gender: 'Other',
-                phone: d.donor_phone,
-                city: d.city,
-                area: d.area,
-                address: 'Imported Record',
-                isAvailable: true,
-                source: 'imported',
-                createdAt: d.createdAt
-            }))
-        ];
-        // Sort combined list by date
-        combinedDonors.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            });
+        });
         if (!req.query.page && !req.query.limit) {
             // For backwards compatibility with legacy clients that don't pass page/limit
-            res.json(combinedDonors);
+            res.json(standardizedDonors);
             return;
         }
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 50;
-        const skip = (page - 1) * limit;
-        const paginatedDonors = combinedDonors.slice(skip, skip + limit);
-        const totalDonors = combinedDonors.length;
-        const totalAvailable = combinedDonors.filter((d) => d.isAvailable).length;
-        console.log(`Returning ${paginatedDonors.length} of ${totalDonors} total donors (page ${page}/${Math.ceil(totalDonors / limit)})`);
         res.json({
-            donors: paginatedDonors,
+            donors: standardizedDonors,
             pagination: {
                 total: totalDonors,
                 available: totalAvailable,
@@ -371,6 +342,7 @@ const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         });
     }
     catch (error) {
+        console.error('Error fetching donors for admin:', error);
         res.status(500).json({ message: 'Server Error', error });
     }
 });
@@ -412,10 +384,8 @@ exports.updateRequestStatus = updateRequestStatus;
 const deleteDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        // Try deleting from both collections
-        const donor1 = yield BloodDonor_1.default.findByIdAndDelete(id);
-        const donor2 = yield Donor_1.default.findByIdAndDelete(id);
-        if (!donor1 && !donor2) {
+        const donor = yield BloodDonor_1.default.findByIdAndDelete(id);
+        if (!donor) {
             res.status(404).json({ message: 'Donor not found' });
             return;
         }

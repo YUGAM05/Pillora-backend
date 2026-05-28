@@ -14,7 +14,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDonorStats = exports.importDonorsFromExcel = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
-const Donor_1 = __importDefault(require("../models/Donor"));
 const exceljs_1 = __importDefault(require("exceljs"));
 // @desc    Import donors from Excel file
 // @route   POST /api/blood-bank/admin/import/donors
@@ -219,16 +218,12 @@ exports.importDonorsFromExcel = importDonorsFromExcel;
 // @access  Private/Admin
 const getDonorStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const [totalBloodDonors, totalLegacyDonors] = yield Promise.all([
-            BloodDonor_1.default.countDocuments(),
-            Donor_1.default.countDocuments()
-        ]);
+        const totalDonors = yield BloodDonor_1.default.countDocuments();
         const googleFormDonors = yield BloodDonor_1.default.countDocuments({ source: 'google_form' });
         const userPanelDonors = yield BloodDonor_1.default.countDocuments({
             $or: [{ source: 'user_panel' }, { source: { $exists: false } }]
         });
         const availableDonors = yield BloodDonor_1.default.countDocuments({ isAvailable: true });
-        const totalDonors = totalBloodDonors + totalLegacyDonors;
         // Blood group distribution
         const bloodGroupStats = yield BloodDonor_1.default.aggregate([
             {

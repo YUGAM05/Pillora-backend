@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import BloodDonor from '../models/BloodDonor';
-import Donor from '../models/Donor';
 import ExcelJS from 'exceljs';
 import { AuthRequest } from '../middleware/authMiddleware';
 
@@ -227,18 +226,13 @@ export const importDonorsFromExcel = async (req: AuthRequest, res: Response): Pr
 // @access  Private/Admin
 export const getDonorStats = async (req: Request, res: Response): Promise<void> => {
     try {
-        const [totalBloodDonors, totalLegacyDonors] = await Promise.all([
-            BloodDonor.countDocuments(),
-            Donor.countDocuments()
-        ]);
+        const totalDonors = await BloodDonor.countDocuments();
         
         const googleFormDonors = await BloodDonor.countDocuments({ source: 'google_form' });
         const userPanelDonors = await BloodDonor.countDocuments({
             $or: [{ source: 'user_panel' }, { source: { $exists: false } }]
         });
         const availableDonors = await BloodDonor.countDocuments({ isAvailable: true });
-        
-        const totalDonors = totalBloodDonors + totalLegacyDonors;
 
         // Blood group distribution
         const bloodGroupStats = await BloodDonor.aggregate([

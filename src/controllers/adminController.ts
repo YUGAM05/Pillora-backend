@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
 import BloodDonor from '../models/BloodDonor';
-import Donor from '../models/Donor';
 import Inventory from '../models/Inventory';
 import Order from '../models/Order';
 import Notification from '../models/Notification';
@@ -36,12 +35,7 @@ export const getSystemStats = async (req: Request, res: Response): Promise<void>
     try {
         const totalUsers = await User.countDocuments({ role: 'customer' });
         const totalSellers = await User.countDocuments({ role: 'seller', status: 'approved' });
-        
-        const [donorCount1, donorCount2] = await Promise.all([
-            BloodDonor.countDocuments(),
-            Donor.countDocuments()
-        ]);
-        const totalDonors = donorCount1 + donorCount2;
+        const totalDonors = await BloodDonor.countDocuments();
 
         const totalOrders = await Order.countDocuments();
         const pendingProducts = await Inventory.countDocuments({ status: 'pending' });
