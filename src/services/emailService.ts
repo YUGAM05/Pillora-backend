@@ -306,10 +306,20 @@ export interface DonorFoundEmailProps {
   patientName: string;
   bloodGroup: string;
   unitsNeeded: number;
+  requestArea?: string;
+  requestCity?: string;
   donors: DonorFoundProps[];
 }
 
-export const sendDonorFoundEmail = async ({ toEmail, patientName, bloodGroup, unitsNeeded, donors }: DonorFoundEmailProps) => {
+export const sendDonorFoundEmail = async ({
+  toEmail,
+  patientName,
+  bloodGroup,
+  unitsNeeded,
+  requestArea,
+  requestCity,
+  donors
+}: DonorFoundEmailProps) => {
   try {
     const donorRows = donors.map(donor => `
       <tr>
@@ -330,6 +340,8 @@ export const sendDonorFoundEmail = async ({ toEmail, patientName, bloodGroup, un
           <p>Hi <strong>${patientName}</strong>,</p>
           <p>Great news! Your KYC verification was <strong style="color:green;">successful</strong> and we found <strong>${donors.length}</strong> matching <strong>${bloodGroup}</strong> donor(s) in your area.</p>
           <p><strong>Units Needed:</strong> ${unitsNeeded}</p>
+          <p><strong>Your Request Location:</strong> ${requestArea}, ${requestCity}</p>
+          <p>The following donors are available near your area:</p>
           <h3 style="color:#e63946;">Donor Details:</h3>
           <table style="width:100%; border-collapse: collapse; margin: 20px 0;">
             <thead>

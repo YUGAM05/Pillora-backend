@@ -115,6 +115,8 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
         patientName: request.patientName,
         bloodGroup: bloodGroupVal,
         unitsNeeded: request.unitsNeeded || request.units || 1,
+        requestArea: areaVal,      // ← ADD THIS: the user's entered area
+        requestCity: cityVal,      // ← ADD THIS
         donors: donors.map((d: any) => ({
           name: d.name || 'Anonymous',
           bloodGroup: d.bloodGroup || bloodGroupVal,

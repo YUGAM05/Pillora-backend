@@ -20,7 +20,8 @@ try {
     const isPillora = origin.includes('pillora.in') ||
                       origin.includes('pillora-admin') ||
                       origin.includes('pillora-hospital') ||
-                      origin.includes('pillora-seller');
+                      origin.includes('pillora-seller') ||
+                      origin.includes('pillorahospital.in');
     return isLocal || isVercel || isPillora;
   };
 

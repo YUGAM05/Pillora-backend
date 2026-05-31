@@ -55,6 +55,8 @@ const allowedOrigins = [
     'https://www.pillora-hospital.vercel.app',
     'https://pillora-seller.vercel.app',
     'https://www.pillora-seller.vercel.app',
+    'https://pillorahospital.in',
+    'https://www.pillorahospital.in',
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002',
@@ -79,7 +81,8 @@ app.use((req, res, next) => {
             origin.includes('pillora.in') ||
             origin.includes('pillora-admin') ||
             origin.includes('pillora-hospital') ||
-            origin.includes('pillora-seller')
+            origin.includes('pillora-seller') ||
+            origin.includes('pillorahospital.in')
         );
 
         if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {

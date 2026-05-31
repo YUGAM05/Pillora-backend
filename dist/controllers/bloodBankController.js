@@ -294,19 +294,16 @@ exports.getRequests = getRequests;
 // @access  Private/Admin
 const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalDonors = yield BloodDonor_1.default.countDocuments({});
-        const totalAvailable = yield BloodDonor_1.default.countDocuments({ isAvailable: true });
-        console.log('Total Donors in DB (blooddonors):', totalDonors);
-        console.log('Total Available Donors in DB (blooddonors):', totalAvailable);
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 100;
         const skip = (page - 1) * limit;
+        const total = yield BloodDonor_1.default.countDocuments({});
         const donors = yield BloodDonor_1.default.find({})
             .sort({ createdAt: -1 })
             .populate('user', 'name email')
             .skip(skip)
             .limit(limit);
-        console.log(`[AdminDonors] Fetched: ${donors.length}, Total: ${totalDonors}`);
+        console.log(`[AdminDonors] Total in DB: ${total}, Returning: ${donors.length}`);
         const standardizedDonors = donors.map(d => {
             var _a;
             return ({
@@ -325,19 +322,13 @@ const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 createdAt: d.createdAt
             });
         });
-        if (!req.query.page && !req.query.limit) {
-            // For backwards compatibility with legacy clients that don't pass page/limit
-            res.json(standardizedDonors);
-            return;
-        }
-        res.json({
+        res.status(200).json({
             donors: standardizedDonors,
             pagination: {
-                total: totalDonors,
-                available: totalAvailable,
+                total,
                 page,
-                totalPages: Math.ceil(totalDonors / limit),
-                hasMore: page < Math.ceil(totalDonors / limit)
+                totalPages: Math.ceil(total / limit),
+                hasMore: page < Math.ceil(total / limit)
             }
         });
     }

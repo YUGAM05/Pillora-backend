@@ -117,6 +117,8 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
                 patientName: request.patientName,
                 bloodGroup: bloodGroupVal,
                 unitsNeeded: request.unitsNeeded || request.units || 1,
+                requestArea: areaVal, // ← ADD THIS: the user's entered area
+                requestCity: cityVal, // ← ADD THIS
                 donors: donors.map((d) => ({
                     name: d.name || 'Anonymous',
                     bloodGroup: d.bloodGroup || bloodGroupVal,
