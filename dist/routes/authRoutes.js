@@ -19,6 +19,7 @@ const passport_1 = __importDefault(require("../config/passport"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const requireAdminAuth_1 = require("../middleware/requireAdminAuth");
+const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -115,11 +116,22 @@ router.get('/google/callback', passport_1.default.authenticate('google', {
     session: false,
     failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed`
 }), (req, res) => {
+    var _a;
     try {
         const user = req.user;
         if (!user) {
             return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_user`);
         }
+        // Record login history
+        const ip = ((_a = req.headers['x-forwarded-for']) === null || _a === void 0 ? void 0 : _a.toString().split(',')[0].trim())
+            || req.ip || req.socket.remoteAddress || 'unknown';
+        const ua = req.headers['user-agent'] || 'unknown';
+        LoginHistory_1.default.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
+        }).catch(err => console.error('Error logging Google user login:', err));
         const token = jsonwebtoken_1.default.sign({ id: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', { expiresIn: '30d' });
         const userData = {
             id: user._id,
@@ -153,11 +165,22 @@ router.get('/google/seller/callback', passport_1.default.authenticate('google', 
     session: false,
     failureRedirect: `${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=auth_failed`
 }), ((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const user = req.user;
         if (!user) {
             return res.redirect(`${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=no_user`);
         }
+        // Record login history
+        const ip = ((_a = req.headers['x-forwarded-for']) === null || _a === void 0 ? void 0 : _a.toString().split(',')[0].trim())
+            || req.ip || req.socket.remoteAddress || 'unknown';
+        const ua = req.headers['user-agent'] || 'unknown';
+        LoginHistory_1.default.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
+        }).catch(err => console.error('Error logging Google seller login:', err));
         if (user.role !== 'seller' && user.role !== 'admin') {
             user.role = 'seller';
             yield user.save();
@@ -195,11 +218,22 @@ router.get('/google/delivery/callback', passport_1.default.authenticate('google'
     session: false,
     failureRedirect: `${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=auth_failed`
 }), ((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const user = req.user;
         if (!user) {
             return res.redirect(`${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=no_user`);
         }
+        // Record login history
+        const ip = ((_a = req.headers['x-forwarded-for']) === null || _a === void 0 ? void 0 : _a.toString().split(',')[0].trim())
+            || req.ip || req.socket.remoteAddress || 'unknown';
+        const ua = req.headers['user-agent'] || 'unknown';
+        LoginHistory_1.default.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
+        }).catch(err => console.error('Error logging Google delivery login:', err));
         if (user.role !== 'delivery' && user.role !== 'admin') {
             user.role = 'delivery';
             yield user.save();

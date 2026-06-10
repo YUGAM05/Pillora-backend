@@ -10,6 +10,7 @@ import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { requireAdminAuth } from '../middleware/requireAdminAuth';
+import LoginHistory from '../models/LoginHistory';
 
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = rateLimit({
@@ -125,6 +126,17 @@ router.get('/google/callback',
                 return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_user`);
             }
 
+            // Record login history
+            const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim()
+                || req.ip || req.socket.remoteAddress || 'unknown';
+            const ua = req.headers['user-agent'] || 'unknown';
+            LoginHistory.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            }).catch(err => console.error('Error logging Google user login:', err));
+
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
                 process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
@@ -178,6 +190,17 @@ router.get('/google/seller/callback',
             if (!user) {
                 return res.redirect(`${process.env.SELLER_PANEL_URL || 'http://localhost:3003'}/login?error=no_user`);
             }
+
+            // Record login history
+            const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim()
+                || req.ip || req.socket.remoteAddress || 'unknown';
+            const ua = req.headers['user-agent'] || 'unknown';
+            LoginHistory.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            }).catch(err => console.error('Error logging Google seller login:', err));
 
             if (user.role !== 'seller' && user.role !== 'admin') {
                 user.role = 'seller';
@@ -237,6 +260,17 @@ router.get('/google/delivery/callback',
             if (!user) {
                 return res.redirect(`${process.env.DELIVERY_PANEL_URL || 'http://localhost:3002'}/login?error=no_user`);
             }
+
+            // Record login history
+            const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim()
+                || req.ip || req.socket.remoteAddress || 'unknown';
+            const ua = req.headers['user-agent'] || 'unknown';
+            LoginHistory.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            }).catch(err => console.error('Error logging Google delivery login:', err));
 
             if (user.role !== 'delivery' && user.role !== 'admin') {
                 user.role = 'delivery';

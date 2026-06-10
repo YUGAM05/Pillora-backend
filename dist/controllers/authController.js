@@ -56,6 +56,7 @@ const OTPAuth = __importStar(require("otpauth"));
 const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 const activityLogger_1 = require("../utils/activityLogger");
+const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -220,6 +221,13 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     yield user.save();
                 console.log(`[GoogleLogin] Existing user logged in: ${userEmail}`);
             }
+            // Record login history
+            yield LoginHistory_1.default.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            });
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -294,6 +302,13 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 return;
             }
             // ── Non-admin login (customers, sellers, delivery, hospital) ──────
+            // Record login history
+            yield LoginHistory_1.default.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            });
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -373,6 +388,13 @@ const verifyMfa = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             ipAddress: ip,
             status: 'success',
             details: { sessionId, userAgent: ua }
+        });
+        // Record login history
+        yield LoginHistory_1.default.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
         });
         // Generate JWT with sessionId embedded
         const jwtToken = generateToken(user._id, user.role, sessionId);
@@ -623,6 +645,14 @@ const verifyOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return;
         }
         console.log(`[OTP VERIFIED] Login successful for phone: ${phone}`);
+        // Record login history
+        const { ip, ua } = getClientInfo(req);
+        yield LoginHistory_1.default.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
+        });
         res.json({
             _id: user._id,
             name: user.name,

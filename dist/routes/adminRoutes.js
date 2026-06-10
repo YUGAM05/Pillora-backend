@@ -11,6 +11,7 @@ const router = express_1.default.Router();
 router.get('/stats', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getSystemStats);
 router.get('/trends', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getAdminTrends); // NEW: Trend data for graphs
 router.get('/activities', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getPlatformActivities); // NEW: Real-time platform activities
+router.get('/login-analytics', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getLoginAnalytics); // NEW: Login analytics stats & logs
 // User Management
 const adminController_2 = require("../controllers/adminController");
 router.get('/users', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUsers);

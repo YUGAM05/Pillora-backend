@@ -6,6 +6,7 @@ import Order from '../models/Order';
 import Notification from '../models/Notification';
 import Hospital from '../models/Hospital';
 import { verifyAadhaarLocal } from '../utils/aadhaarVerifier';
+import LoginHistory from '../models/LoginHistory';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import axios from 'axios';
@@ -634,5 +635,97 @@ export const adminBulkGenerateSlots = async (req: Request, res: Response): Promi
         res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
     } catch (error: any) {
         res.status(500).json({ message: 'Error generating slots', error: error.message });
+    }
+};
+
+// @desc    Get User Login Analytics (Stats & Recent Activity)
+// @route   GET /api/admin/login-analytics
+// @access  Private/Admin
+export const getLoginAnalytics = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // 1. Total Registered Users Count
+        const totalUsers = await User.countDocuments();
+
+        // Timezone calculation (IST = UTC + 5:30)
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 mins in ms
+        const currentIstTime = new Date(now.getTime() + istOffset);
+
+        const istYear = currentIstTime.getUTCFullYear();
+        const istMonth = currentIstTime.getUTCMonth();
+        const istDay = currentIstTime.getUTCDate();
+
+        // 2. Total Logins Today (IST timezone)
+        const istMidnightInUtc = new Date(Date.UTC(istYear, istMonth, istDay, 0, 0, 0, 0) - istOffset);
+        const loginsToday = await LoginHistory.countDocuments({
+            timestamp: { $gte: istMidnightInUtc }
+        });
+
+        // 3. Total Logins This Week (IST timezone, starting on Monday)
+        const istDayOfWeek = currentIstTime.getUTCDay(); // 0 is Sunday, 1 is Monday, ...
+        const diffToMonday = istDayOfWeek === 0 ? 6 : istDayOfWeek - 1;
+        const istMondayDay = istDay - diffToMonday;
+        const istWeekStartInUtc = new Date(Date.UTC(istYear, istMonth, istMondayDay, 0, 0, 0, 0) - istOffset);
+
+        const loginsThisWeek = await LoginHistory.countDocuments({
+            timestamp: { $gte: istWeekStartInUtc }
+        });
+
+        // 4. Recent Login Activity Table showing user name, email, blood group (if available), and timestamp
+        const recentLogins = await LoginHistory.find()
+            .populate('user', 'name email role')
+            .sort({ timestamp: -1 })
+            .limit(100);
+
+        const userIds = recentLogins.map(log => log.user?._id).filter(Boolean);
+        const donors = await BloodDonor.find({ user: { $in: userIds } }).select('user bloodGroup');
+
+        const bloodGroupMap: Record<string, string> = {};
+        donors.forEach(donor => {
+            if (donor.user) {
+                bloodGroupMap[donor.user.toString()] = donor.bloodGroup;
+            }
+        });
+
+        const emails = recentLogins.map(log => log.email).filter(Boolean);
+        const donorsByEmail = await BloodDonor.find({ email: { $in: emails } }).select('email bloodGroup');
+        donorsByEmail.forEach(donor => {
+            if (donor.email) {
+                bloodGroupMap[donor.email.toLowerCase()] = donor.bloodGroup;
+            }
+        });
+
+        const activities = recentLogins.map(log => {
+            const userObj = log.user as any;
+            const userIdStr = userObj?._id?.toString();
+            const emailStr = log.email || userObj?.email;
+
+            const bloodGroup = (userIdStr && bloodGroupMap[userIdStr])
+                || (emailStr && bloodGroupMap[emailStr.toLowerCase()])
+                || null;
+
+            return {
+                _id: log._id,
+                name: userObj?.name || 'Unknown User',
+                email: emailStr || 'N/A',
+                role: userObj?.role || 'customer',
+                ipAddress: log.ipAddress,
+                userAgent: log.userAgent,
+                timestamp: log.timestamp,
+                bloodGroup
+            };
+        });
+
+        res.json({
+            stats: {
+                totalUsers,
+                loginsToday,
+                loginsThisWeek
+            },
+            activities
+        });
+    } catch (error: any) {
+        console.error("Error in getLoginAnalytics:", error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };

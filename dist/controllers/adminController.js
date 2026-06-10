@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
+exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
@@ -20,6 +20,7 @@ const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
+const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
@@ -593,3 +594,84 @@ const adminBulkGenerateSlots = (req, res) => __awaiter(void 0, void 0, void 0, f
     }
 });
 exports.adminBulkGenerateSlots = adminBulkGenerateSlots;
+// @desc    Get User Login Analytics (Stats & Recent Activity)
+// @route   GET /api/admin/login-analytics
+// @access  Private/Admin
+const getLoginAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // 1. Total Registered Users Count
+        const totalUsers = yield User_1.default.countDocuments();
+        // Timezone calculation (IST = UTC + 5:30)
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 mins in ms
+        const currentIstTime = new Date(now.getTime() + istOffset);
+        const istYear = currentIstTime.getUTCFullYear();
+        const istMonth = currentIstTime.getUTCMonth();
+        const istDay = currentIstTime.getUTCDate();
+        // 2. Total Logins Today (IST timezone)
+        const istMidnightInUtc = new Date(Date.UTC(istYear, istMonth, istDay, 0, 0, 0, 0) - istOffset);
+        const loginsToday = yield LoginHistory_1.default.countDocuments({
+            timestamp: { $gte: istMidnightInUtc }
+        });
+        // 3. Total Logins This Week (IST timezone, starting on Monday)
+        const istDayOfWeek = currentIstTime.getUTCDay(); // 0 is Sunday, 1 is Monday, ...
+        const diffToMonday = istDayOfWeek === 0 ? 6 : istDayOfWeek - 1;
+        const istMondayDay = istDay - diffToMonday;
+        const istWeekStartInUtc = new Date(Date.UTC(istYear, istMonth, istMondayDay, 0, 0, 0, 0) - istOffset);
+        const loginsThisWeek = yield LoginHistory_1.default.countDocuments({
+            timestamp: { $gte: istWeekStartInUtc }
+        });
+        // 4. Recent Login Activity Table showing user name, email, blood group (if available), and timestamp
+        const recentLogins = yield LoginHistory_1.default.find()
+            .populate('user', 'name email role')
+            .sort({ timestamp: -1 })
+            .limit(100);
+        const userIds = recentLogins.map(log => { var _a; return (_a = log.user) === null || _a === void 0 ? void 0 : _a._id; }).filter(Boolean);
+        const donors = yield BloodDonor_1.default.find({ user: { $in: userIds } }).select('user bloodGroup');
+        const bloodGroupMap = {};
+        donors.forEach(donor => {
+            if (donor.user) {
+                bloodGroupMap[donor.user.toString()] = donor.bloodGroup;
+            }
+        });
+        const emails = recentLogins.map(log => log.email).filter(Boolean);
+        const donorsByEmail = yield BloodDonor_1.default.find({ email: { $in: emails } }).select('email bloodGroup');
+        donorsByEmail.forEach(donor => {
+            if (donor.email) {
+                bloodGroupMap[donor.email.toLowerCase()] = donor.bloodGroup;
+            }
+        });
+        const activities = recentLogins.map(log => {
+            var _a;
+            const userObj = log.user;
+            const userIdStr = (_a = userObj === null || userObj === void 0 ? void 0 : userObj._id) === null || _a === void 0 ? void 0 : _a.toString();
+            const emailStr = log.email || (userObj === null || userObj === void 0 ? void 0 : userObj.email);
+            const bloodGroup = (userIdStr && bloodGroupMap[userIdStr])
+                || (emailStr && bloodGroupMap[emailStr.toLowerCase()])
+                || null;
+            return {
+                _id: log._id,
+                name: (userObj === null || userObj === void 0 ? void 0 : userObj.name) || 'Unknown User',
+                email: emailStr || 'N/A',
+                role: (userObj === null || userObj === void 0 ? void 0 : userObj.role) || 'customer',
+                ipAddress: log.ipAddress,
+                userAgent: log.userAgent,
+                timestamp: log.timestamp,
+                bloodGroup
+            };
+        });
+        res.json({
+            stats: {
+                totalUsers,
+                loginsToday,
+                loginsThisWeek
+            },
+            activities
+        });
+    }
+    catch (error) {
+        console.error("Error in getLoginAnalytics:", error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+});
+exports.getLoginAnalytics = getLoginAnalytics;

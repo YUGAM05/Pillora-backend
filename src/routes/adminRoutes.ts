@@ -1,5 +1,5 @@
 import express from 'express';
-import { getSystemStats, getAdminTrends, getPlatformActivities } from '../controllers/adminController';
+import { getSystemStats, getAdminTrends, getPlatformActivities, getLoginAnalytics } from '../controllers/adminController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 
 const router = express.Router();
@@ -8,6 +8,7 @@ const router = express.Router();
 router.get('/stats', protect, adminOnly, getSystemStats);
 router.get('/trends', protect, adminOnly, getAdminTrends); // NEW: Trend data for graphs
 router.get('/activities', protect, adminOnly, getPlatformActivities); // NEW: Real-time platform activities
+router.get('/login-analytics', protect, adminOnly, getLoginAnalytics); // NEW: Login analytics stats & logs
 
 // User Management
 import { 

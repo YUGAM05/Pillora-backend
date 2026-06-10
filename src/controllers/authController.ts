@@ -9,6 +9,7 @@ import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
 import { logActivity } from '../utils/activityLogger';
+import LoginHistory from '../models/LoginHistory';
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
@@ -183,6 +184,14 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 console.log(`[GoogleLogin] Existing user logged in: ${userEmail}`);
             }
 
+            // Record login history
+            await LoginHistory.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            });
+
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -265,6 +274,14 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
             }
 
             // ── Non-admin login (customers, sellers, delivery, hospital) ──────
+            // Record login history
+            await LoginHistory.create({
+                user: user._id,
+                email: user.email,
+                ipAddress: ip,
+                userAgent: ua
+            });
+
             res.json({
                 _id: user._id,
                 name: user.name,
@@ -352,6 +369,14 @@ export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
             ipAddress: ip,
             status: 'success',
             details: { sessionId, userAgent: ua }
+        });
+
+        // Record login history
+        await LoginHistory.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
         });
 
         // Generate JWT with sessionId embedded
@@ -629,6 +654,15 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
         }
 
         console.log(`[OTP VERIFIED] Login successful for phone: ${phone}`);
+
+        // Record login history
+        const { ip, ua } = getClientInfo(req);
+        await LoginHistory.create({
+            user: user._id,
+            email: user.email,
+            ipAddress: ip,
+            userAgent: ua
+        });
 
         res.json({
             _id: user._id,
