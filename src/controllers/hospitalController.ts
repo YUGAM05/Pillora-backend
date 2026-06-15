@@ -14,19 +14,120 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
 });
 
+// @desc    Get all unique cities
+// @route   GET /api/hospitals/cities
+// @access  Public
+export const getCities = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const cities = await Hospital.distinct('city');
+        res.json(cities);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+};
+
 // @desc    Get all hospitals
 // @route   GET /api/hospitals
 // @access  Public
 export const getHospitals = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { city } = req.query;
+        const { 
+            city, 
+            speciality, 
+            pmjay, 
+            govtSchemes, 
+            hospitalType, 
+            bedCapacity, 
+            emergency, 
+            booking, 
+            minRating,
+            sortBy
+        } = req.query;
+        
         let query: any = {};
 
         if (city) {
-            query.city = { $regex: city, $options: 'i' };
+            query.city = { $regex: new RegExp(`^${String(city).trim()}$`, 'i') };
+        }
+        if (pmjay === 'true') {
+            query.governmentSchemes = { $regex: 'PM-JAY|Ayushman Bharat', $options: 'i' };
+        }
+        if (govtSchemes) {
+            const schemesArr = String(govtSchemes).split(',').map(s => s.trim()).filter(Boolean);
+            if (schemesArr.length > 0) {
+                query.governmentSchemes = { $in: schemesArr.map(s => new RegExp(s, 'i')) };
+            }
+        }
+        if (hospitalType) {
+            const typesArr = String(hospitalType).split(',').map(t => t.trim()).filter(Boolean);
+            if (typesArr.length > 0) {
+                query.hospitalType = { $in: typesArr.map(t => new RegExp(`^${t}$`, 'i')) };
+            }
+        }
+        if (bedCapacity) {
+            const capacityRanges = String(bedCapacity).split(',').map(c => c.trim()).filter(Boolean);
+            if (capacityRanges.length > 0) {
+                const orConditions: any[] = [];
+                capacityRanges.forEach(range => {
+                    if (range === '<50') {
+                        orConditions.push({ bedCapacity: { $lt: 50 } });
+                    } else if (range === '50-200') {
+                        orConditions.push({ bedCapacity: { $gte: 50, $lte: 200 } });
+                    } else if (range === '200-500') {
+                        orConditions.push({ bedCapacity: { $gte: 200, $lte: 500 } });
+                    } else if (range === '500+') {
+                        orConditions.push({ bedCapacity: { $gt: 500 } });
+                    }
+                });
+                if (orConditions.length > 0) {
+                    query.$or = orConditions;
+                }
+            }
+        }
+        if (emergency === 'true') {
+            query.isOpen24Hours = true;
+        }
+        if (minRating) {
+            query.rating = { $gte: Number(minRating) };
         }
 
-        const hospitals = await Hospital.find(query);
+        let hospitals = await Hospital.find(query);
+
+        if (speciality) {
+            const specList = String(speciality).split(',').map(s => s.trim()).filter(Boolean);
+            if (specList.length > 0) {
+                const specRegexes = specList.map(s => new RegExp(s, 'i'));
+                const doctors = await Doctor.find({
+                    $or: [
+                        { specialty: { $in: specRegexes } },
+                        { department: { $in: specRegexes } }
+                    ]
+                });
+                const hospitalIds = doctors.map(d => d.hospital.toString());
+                hospitals = hospitals.filter(h => {
+                    const hasSpecInDoc = hospitalIds.includes(h._id.toString());
+                    const hasSpecInHosp = h.specialities && h.specialities.some(s => specList.some(f => s.toLowerCase().includes(f.toLowerCase())));
+                    return hasSpecInDoc || hasSpecInHosp;
+                });
+            }
+        }
+
+        if (booking === 'true') {
+            const doctors = await Doctor.find({ is_active: true });
+            const hospitalIdsWithDoctors = new Set(doctors.map(d => d.hospital.toString()));
+            hospitals = hospitals.filter(h => hospitalIdsWithDoctors.has(h._id.toString()) || (h.doctors && h.doctors.length > 0));
+        }
+
+        if (sortBy) {
+            if (sortBy === 'rating') {
+                hospitals.sort((a, b) => b.rating - a.rating);
+            } else if (sortBy === 'beds') {
+                hospitals.sort((a, b) => (b.bedCapacity || 0) - (a.bedCapacity || 0));
+            } else if (sortBy === 'name') {
+                hospitals.sort((a, b) => a.name.localeCompare(b.name));
+            }
+        }
+
         res.json(hospitals);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -107,44 +208,29 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 image: "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
                 images: [
                     "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/mn7byimzu9lnrctxlxje.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/dfmqwsgxrmhutvw8cifq.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/xckxelhbfnt931f9eozt.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/klwhiregoc53wfkkscxt.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/woc17ilxgnq1rmh4r1ib.jpg",
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/eutvwe5eufldnms7qndn.jpg"
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776591924/hospitals/mn7byimzu9lnrctxlxje.jpg"
                 ],
                 isOpen24Hours: false,
                 consultationFee: 1000,
-                governmentSchemes: [],
+                governmentSchemes: ["MA Vatsalya"],
                 isOnlinePaymentAvailable: true,
                 ambulanceContact: "",
                 contactNumber: "",
                 phoneNumbers: ["94096 54006", "95589 51408"],
                 description: "🏥  <b>Vrundavan Children Hospital</b>\n<br><div><b>Hospital Type : </b>Private \n\n<b>Departments &amp; Services</b>\n\n1).🩺 General Pediatrics\n2).💉 Vaccination\n3).🧠 Epilepsy in Children\n4).🦠 Infectious Disease\n5).🫁 Respiratory Disease<div><br></div><div><b>Charges</b></div><div><b>Charges for Old Case :</b> 500\n<b>Charges for New Case :</b> 1000</div><div><br></div><div>Emergency OPD is Available on Sunday </div><div> </div><div><b>Total beds :</b> 19 Beds\n\n<br><div><br></div></div></div>",
                 rating: 4.4,
-                doctors: [
-                    {
-                        name: "Dr. Hashmukh D Shah",
-                        specialization: "M.D(Gold Medalist)",
-                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-                        timing: "10AM – 1PM"
-                    },
-                    {
-                        name: "Dr. JIgnesh Modi",
-                        specialization: "M.D.D.Ped.DNB",
-                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-                        timing: "10AM - 1PM and 5PM- 7.30PM"
-                    }
-                ],
+                doctors: [],
                 management_type: "SELF" as const,
                 is_verified: false,
                 plan: "Standard" as const,
                 is_featured: false,
-                has_govt_schemes: false,
+                has_govt_schemes: true,
                 has_custom_page: false,
                 is_spotlight: false,
                 priority_support: false,
+                hospitalType: "Private" as const,
+                bedCapacity: 19,
+                specialities: ["Paediatrics"],
                 user: new mongoose.Types.ObjectId("6a06d7b6036cb833da973567")
             },
             {
@@ -164,16 +250,9 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 isOnlinePaymentAvailable: true,
                 ambulanceContact: " 63513 53722",
                 phoneNumbers: [],
-                description: "Sahaj Clinic Description(about their Clinic)\nDaily OPD Timings (Monday – Friday, excluding Wednesday evening alterations)\nMorning: 10:30 AM to 1:00 PM\nEvening: 5:00 PM to 7:30 PM\n\nWednesday \"Corporate Friendly\" Timings\nEvening: 5:00 PM to 8:30 PM (Extended for working professionals)\n\nSaturday Timings:\n   Morning: 10:30 AM to 3:00 PM\n   Evening: Closed (No Saturday evening OPD)\n\nEmergency charges apply for any patient requiring a consultation after 7:45 PM\n\nConsultation Fees & Diagnostic Charges\n(Effective from April 1, 2025)\nNew Case:* ₹700\nOld Case (Follow-up): ₹400 (Valid up to 3 months from the date of the new case registration)\n\nService Charges\nECG 350₹\n2D Echocardiography 2,000₹\nNeuropathy Check-up 800₹",
+                description: "Sahaj Clinic Description(about their Clinic)\nDaily OPD Timings (Monday – Friday, excluding Wednesday evening alterations)\nMorning: 10:30 AM to 1:00 PM\nEvening: 5:00 PM to 7:30 PM\n\nWednesday \"Corporate Friendly\" Timings\nEvening: 5:00 PM to 8:30 PM (Extended for working professionals)",
                 rating: 4,
-                doctors: [
-                    {
-                        name: "Dr Dhaivat Desai",
-                        specialization: "M.D.MEDICINE",
-                        daysAvailable: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-                        timing: "10:30 AM to 1:00 PM and 5:00 PM to 7:30 PM"
-                    }
-                ],
+                doctors: [],
                 management_type: "SELF" as const,
                 is_verified: true,
                 plan: "Standard" as const,
@@ -182,8 +261,101 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 has_custom_page: false,
                 is_spotlight: false,
                 priority_support: false,
+                hospitalType: "Private" as const,
+                bedCapacity: 10,
+                specialities: ["General Medicine"],
                 user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c57879681f"),
                 tempPassword: "2cce11e57859be5b"
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796833"),
+                name: "Pillora Civil General Hospital",
+                slug: "pillora-civil-general-hospital",
+                address: "Asarwa, Near Haripura, Ahmedabad, Gujarat 380016",
+                city: "Ahmedabad",
+                image: "/premium-hospital.png",
+                images: ["/premium-hospital.png"],
+                isOpen24Hours: true,
+                consultationFee: 0,
+                governmentSchemes: ["Ayushman Bharat (PM-JAY)", "CGHS", "ESI"],
+                isOnlinePaymentAvailable: false,
+                ambulanceContact: "108",
+                phoneNumbers: ["079 2268 3721"],
+                description: "Pillora Civil General Hospital is a large government-run healthcare facility offering free or subsidized medical procedures under PM-JAY and state health schemes. Offers multi-specialty diagnostics, surgeries, and 24/7 trauma care.",
+                rating: 4.2,
+                doctors: [],
+                management_type: "PILLORA" as const,
+                is_verified: true,
+                plan: "Premium" as const,
+                is_featured: true,
+                has_govt_schemes: true,
+                has_custom_page: true,
+                is_spotlight: true,
+                priority_support: true,
+                hospitalType: "Government" as const,
+                bedCapacity: 1200,
+                specialities: ["Cardiology", "Orthopaedics", "Gynaecology", "Neurology", "General Surgery"],
+                user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796810")
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796844"),
+                name: "Sharda Charitable Trust Hospital",
+                slug: "sharda-charitable-trust-hospital",
+                address: "Ellis Bridge, Opp. Town Hall, Ahmedabad, Gujarat 380006",
+                city: "Ahmedabad",
+                image: "/premium-hospital.png",
+                images: ["/premium-hospital.png"],
+                isOpen24Hours: true,
+                consultationFee: 150,
+                governmentSchemes: ["Ayushman Bharat (PM-JAY)"],
+                isOnlinePaymentAvailable: true,
+                ambulanceContact: "079 2657 7621",
+                phoneNumbers: ["079 2657 7621"],
+                description: "Providing affordable, high-quality medical services to all sections of the community. Run by Sharda Charitable Trust, this hospital offers emergency services and accommodates Ayushman Bharat PM-JAY cardholders.",
+                rating: 3.8,
+                doctors: [],
+                management_type: "SELF" as const,
+                is_verified: true,
+                plan: "Standard" as const,
+                is_featured: false,
+                has_govt_schemes: true,
+                has_custom_page: false,
+                is_spotlight: false,
+                priority_support: false,
+                hospitalType: "Trust" as const,
+                bedCapacity: 85,
+                specialities: ["Paediatrics", "General Surgery"],
+                user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796811")
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796855"),
+                name: "Baroda Mediverse Hospital",
+                slug: "baroda-mediverse-hospital",
+                address: "RC Dutt Rd, Alkapuri, Vadodara, Gujarat 390007",
+                city: "Vadodara",
+                image: "/premium-hospital.png",
+                images: ["/premium-hospital.png"],
+                isOpen24Hours: true,
+                consultationFee: 800,
+                governmentSchemes: ["Ayushman Bharat (PM-JAY)", "MA Vatsalya"],
+                isOnlinePaymentAvailable: true,
+                ambulanceContact: "0265 235 6000",
+                phoneNumbers: ["0265 235 6000"],
+                description: "State of the art tertiary care hospital in Vadodara (Baroda). Known for exceptional cardiology, orthopaedics, and gynaecology department services with online booking available on Pillora.",
+                rating: 4.6,
+                doctors: [],
+                management_type: "SELF" as const,
+                is_verified: true,
+                plan: "Premium" as const,
+                is_featured: true,
+                has_govt_schemes: true,
+                has_custom_page: true,
+                is_spotlight: false,
+                priority_support: false,
+                hospitalType: "Private" as const,
+                bedCapacity: 250,
+                specialities: ["Cardiology", "Orthopaedics", "Gynaecology"],
+                user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796812")
             }
         ];
 
@@ -219,16 +391,6 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 fee: 1000,
                 availability: [
                     { day: 'Monday', startTime: '10:00', endTime: '13:00' },
-                    { day: 'Monday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Tuesday', startTime: '10:00', endTime: '13:00' },
-                    { day: 'Tuesday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Wednesday', startTime: '10:00', endTime: '13:00' },
-                    { day: 'Wednesday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Thursday', startTime: '10:00', endTime: '13:00' },
-                    { day: 'Thursday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Friday', startTime: '10:00', endTime: '13:00' },
-                    { day: 'Friday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Saturday', startTime: '10:00', endTime: '13:00' },
                     { day: 'Saturday', startTime: '17:00', endTime: '19:30' }
                 ],
                 is_active: true,
@@ -244,20 +406,82 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 fee: 700,
                 availability: [
                     { day: 'Monday', startTime: '10:30', endTime: '13:00' },
-                    { day: 'Monday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Tuesday', startTime: '10:30', endTime: '13:00' },
-                    { day: 'Tuesday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Wednesday', startTime: '10:30', endTime: '13:00' },
-                    { day: 'Wednesday', startTime: '17:00', endTime: '20:30' },
-                    { day: 'Thursday', startTime: '10:30', endTime: '13:00' },
-                    { day: 'Thursday', startTime: '17:00', endTime: '19:30' },
-                    { day: 'Friday', startTime: '10:30', endTime: '13:00' },
-                    { day: 'Friday', startTime: '17:00', endTime: '19:30' },
                     { day: 'Saturday', startTime: '10:30', endTime: '15:00' }
                 ],
                 is_active: true,
                 isSpecialtyGroup: false,
                 maxAppointmentsPerSlot: 1,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e311"),
+                hospital: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796833"), // Civil Hospital
+                name: "Dr. Rajesh Verma",
+                specialty: "M.D. Cardiology",
+                department: "Cardiology",
+                fee: 0,
+                availability: [
+                    { day: 'Monday', startTime: '09:00', endTime: '14:00' },
+                    { day: 'Wednesday', startTime: '09:00', endTime: '14:00' },
+                    { day: 'Friday', startTime: '09:00', endTime: '14:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 20,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e312"),
+                hospital: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796833"), // Civil Hospital
+                name: "Dr. Sunita Patel",
+                specialty: "M.S. Gynaecology",
+                department: "Gynaecology",
+                fee: 0,
+                availability: [
+                    { day: 'Tuesday', startTime: '09:00', endTime: '14:00' },
+                    { day: 'Thursday', startTime: '09:00', endTime: '14:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 20,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e313"),
+                hospital: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796844"), // Sharda Trust
+                name: "Dr. Amit Mehta",
+                specialty: "D.Ch. Paediatrics",
+                department: "Paediatrics",
+                fee: 150,
+                availability: [
+                    { day: 'Monday', startTime: '10:00', endTime: '12:30' },
+                    { day: 'Tuesday', startTime: '10:00', endTime: '12:30' },
+                    { day: 'Wednesday', startTime: '10:00', endTime: '12:30' },
+                    { day: 'Thursday', startTime: '10:00', endTime: '12:30' },
+                    { day: 'Friday', startTime: '10:00', endTime: '12:30' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 5,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e314"),
+                hospital: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796855"), // Baroda Mediverse
+                name: "Dr. Vijay Shah",
+                specialty: "M.D. Cardiology",
+                department: "Cardiology",
+                fee: 800,
+                availability: [
+                    { day: 'Monday', startTime: '11:00', endTime: '16:00' },
+                    { day: 'Tuesday', startTime: '11:00', endTime: '16:00' },
+                    { day: 'Wednesday', startTime: '11:00', endTime: '16:00' },
+                    { day: 'Thursday', startTime: '11:00', endTime: '16:00' },
+                    { day: 'Friday', startTime: '11:00', endTime: '16:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 8,
                 doctorsCount: 1
             }
         ];
@@ -290,7 +514,10 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
             phoneNumbers,
             description,
             rating,
-            doctors
+            doctors,
+            hospitalType,
+            bedCapacity,
+            specialities
         } = req.body;
 
         if (!name || !address || !city || (!image && (!images || images.length === 0)) || !consultationFee) {
@@ -339,7 +566,14 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
             phoneNumbers: phoneNumbersArr,
             description: description || '',
             rating: rating ? Number(rating) : 0,
-            doctors: Array.isArray(doctors) ? doctors : []
+            doctors: Array.isArray(doctors) ? doctors : [],
+            hospitalType: hospitalType || 'Private',
+            bedCapacity: bedCapacity ? Number(bedCapacity) : 50,
+            specialities: Array.isArray(specialities)
+                ? specialities
+                : typeof specialities === 'string'
+                    ? specialities.split(',').map((s: string) => s.trim()).filter(Boolean)
+                    : []
         });
 
         res.status(201).json(hospital);
@@ -377,6 +611,12 @@ export const updateHospital = async (req: AuthRequest, res: Response): Promise<v
         }
         if (updateData.images && typeof updateData.images === 'string') {
             updateData.images = updateData.images.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+        if (updateData.bedCapacity !== undefined) {
+            updateData.bedCapacity = Number(updateData.bedCapacity);
+        }
+        if (updateData.specialities && typeof updateData.specialities === 'string') {
+            updateData.specialities = updateData.specialities.split(',').map((s: string) => s.trim()).filter(Boolean);
         }
 
         const hospital = await Hospital.findByIdAndUpdate(req.params.id, updateData, { new: true });

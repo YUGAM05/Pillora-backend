@@ -35,6 +35,9 @@ export interface IHospital extends Document {
     priority_support: boolean;
     user?: mongoose.Types.ObjectId;
     tempPassword?: string;
+    hospitalType?: 'Government' | 'Private' | 'Trust' | 'Charitable';
+    bedCapacity?: number;
+    specialities?: string[];
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -77,6 +80,9 @@ const HospitalSchema: Schema = new Schema({
     priority_support: { type: Boolean, default: false },
     user: { type: Schema.Types.ObjectId, ref: 'User' },
     tempPassword: { type: String },
+    hospitalType: { type: String, enum: ['Government', 'Private', 'Trust', 'Charitable'], default: 'Private' },
+    bedCapacity: { type: Number, default: 50 },
+    specialities: [{ type: String }],
 }, { timestamps: true });
 
 export default mongoose.model<IHospital>('Hospital', HospitalSchema);
