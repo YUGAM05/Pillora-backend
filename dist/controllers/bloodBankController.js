@@ -20,6 +20,7 @@ const whatsappService_1 = require("../utils/whatsappService");
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
 const activityLogger_1 = require("../utils/activityLogger");
 const bloodConnectService_1 = require("../services/bloodConnectService");
+const telegram_1 = require("../utils/telegram");
 // @desc    Register as a blood donor
 // @route   POST /api/blood-bank/donors
 // @access  Private
@@ -206,6 +207,8 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             description: `${patientName} needs ${units} units of ${bloodGroup} at ${hospitalAddress}.`,
             type: 'blood_request'
         });
+        // Send Telegram notification
+        (0, telegram_1.sendTelegramMessage)(`🩸 <b>New Blood Request</b>\n🅰️ Blood Group: ${bloodGroup}\n📍 City: ${city}\n📞 Contact: ${contactNumber}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`).catch(err => console.error('Telegram notification failed:', err));
         // 3. Background Processing: Matching & notifications safe out of flow
         (() => __awaiter(void 0, void 0, void 0, function* () {
             try {

@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import AuditLog from '../models/AuditLog';
 import { logActivity } from '../utils/activityLogger';
 import LoginHistory from '../models/LoginHistory';
+import { sendTelegramMessage } from '../utils/telegram';
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
@@ -109,6 +110,11 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
                 description: `${user.name} joined the platform as a ${user.role}.`,
                 type: 'user'
             });
+
+            // Send Telegram notification
+            sendTelegramMessage(
+                `🆕 <b>New User Registered</b>\n👤 Name: ${user.name}\n📧 Email: ${user.email}\n📱 Phone: ${user.phone || 'N/A'}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+            ).catch(err => console.error('Telegram notification failed:', err));
 
             if (user.status === 'pending') {
                 res.status(201).json({

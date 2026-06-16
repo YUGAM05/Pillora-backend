@@ -7,6 +7,7 @@ import { sendWhatsAppMessage } from '../utils/whatsappService';
 import { verifyAadhaarLocal, validateVerhoeff } from '../utils/aadhaarVerifier';
 import { logActivity } from '../utils/activityLogger';
 import { processKYCResult } from '../services/bloodConnectService';
+import { sendTelegramMessage } from '../utils/telegram';
 
 
 
@@ -212,6 +213,11 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
             description: `${patientName} needs ${units} units of ${bloodGroup} at ${hospitalAddress}.`,
             type: 'blood_request'
         });
+
+        // Send Telegram notification
+        sendTelegramMessage(
+            `🩸 <b>New Blood Request</b>\n🅰️ Blood Group: ${bloodGroup}\n📍 City: ${city}\n📞 Contact: ${contactNumber}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+        ).catch(err => console.error('Telegram notification failed:', err));
 
         // 3. Background Processing: Matching & notifications safe out of flow
         (async () => {

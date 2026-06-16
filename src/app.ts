@@ -12,6 +12,7 @@ import MongoStore from 'connect-mongo';
 // Disable command buffering globally so queries fail immediately in case of database disconnection
 mongoose.set('bufferCommands', false);
 import passport from './config/passport';
+import { initDailyStatsCron } from './cron/dailyStats';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 
@@ -354,5 +355,8 @@ if (process.env.NODE_ENV !== 'production' && !isServerless) {
         }
     }
 }
+
+// Initialize Daily Stats Cron
+initDailyStatsCron();
 
 export default app;

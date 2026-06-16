@@ -26,6 +26,7 @@ const connect_mongo_1 = __importDefault(require("connect-mongo"));
 // Disable command buffering globally so queries fail immediately in case of database disconnection
 mongoose_1.default.set('bufferCommands', false);
 const passport_1 = __importDefault(require("./config/passport"));
+const dailyStats_1 = require("./cron/dailyStats");
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
 const app = (0, express_1.default)();
@@ -328,4 +329,6 @@ else {
         }
     }
 }
+// Initialize Daily Stats Cron
+(0, dailyStats_1.initDailyStatsCron)();
 exports.default = app;

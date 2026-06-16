@@ -57,6 +57,7 @@ const qrcode_1 = __importDefault(require("qrcode"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 const activityLogger_1 = require("../utils/activityLogger");
 const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
+const telegram_1 = require("../utils/telegram");
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -145,6 +146,8 @@ const registerUser = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 description: `${user.name} joined the platform as a ${user.role}.`,
                 type: 'user'
             });
+            // Send Telegram notification
+            (0, telegram_1.sendTelegramMessage)(`🆕 <b>New User Registered</b>\n👤 Name: ${user.name}\n📧 Email: ${user.email}\n📱 Phone: ${user.phone || 'N/A'}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`).catch(err => console.error('Telegram notification failed:', err));
             if (user.status === 'pending') {
                 res.status(201).json({
                     _id: user._id,

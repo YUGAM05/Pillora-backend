@@ -35,7 +35,7 @@ async function verifyFlow() {
         const deliveryEmail = `delivery${timestamp}@test.com`;
 
         console.log('Registering User...');
-        await register({ name: 'Test User', email: userEmail, password: 'password123', role: 'user', phone: '1234567890' });
+        await register({ name: 'Test User', email: userEmail, password: 'password123', role: 'customer', phone: '1234567890' });
         const userLogin = await login({ email: userEmail, password: 'password123' });
         const userToken = userLogin.data.token;
 

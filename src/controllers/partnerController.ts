@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import PartnerRequest from '../models/PartnerRequest';
 import { logActivity } from '../utils/activityLogger';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { sendTelegramMessage } from '../utils/telegram';
 
 export const submitPartnerRequest = async (req: any, res: Response) => {
     try {
@@ -16,6 +17,18 @@ export const submitPartnerRequest = async (req: any, res: Response) => {
             description: `${req.body.name} from ${req.body.organization || 'an organization'} wants to partner with us.`,
             type: 'partner'
         });
+
+        // Send Telegram notification based on partner type
+        const timestamp = new Date((partnerRequest as any).createdAt || Date.now()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        if (partnerRequest.type === 'hospital') {
+            sendTelegramMessage(
+                `👨‍⚕️ <b>New Doctor Partner Request</b>\n👤 Dr. ${partnerRequest.contactPersonName}\n🏥 ${partnerRequest.organizationName}\n📍 ${partnerRequest.city}\n📞 ${partnerRequest.phoneNumber}\n📧 ${partnerRequest.email}\n🕐 ${timestamp}`
+            ).catch(err => console.error('Telegram notification failed:', err));
+        } else if (partnerRequest.type === 'ngo') {
+            sendTelegramMessage(
+                `🏢 <b>New NGO Partner Request</b>\n🏢 ${partnerRequest.organizationName}\n👤 ${partnerRequest.contactPersonName}\n📞 ${partnerRequest.phoneNumber}\n📧 ${partnerRequest.email}\n🕐 ${timestamp}`
+            ).catch(err => console.error('Telegram notification failed:', err));
+        }
     } catch (error: any) {
         console.error('Error submitting partner request:', error);
         res.status(500).json({ success: false, message: error.message || 'Internal server error' });

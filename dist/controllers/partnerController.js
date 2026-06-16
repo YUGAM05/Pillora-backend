@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updatePartnerRequestStatus = exports.getPartnerRequests = exports.submitPartnerRequest = void 0;
 const PartnerRequest_1 = __importDefault(require("../models/PartnerRequest"));
 const activityLogger_1 = require("../utils/activityLogger");
+const telegram_1 = require("../utils/telegram");
 const submitPartnerRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const partnerRequest = new PartnerRequest_1.default(req.body);
@@ -27,6 +28,14 @@ const submitPartnerRequest = (req, res) => __awaiter(void 0, void 0, void 0, fun
             description: `${req.body.name} from ${req.body.organization || 'an organization'} wants to partner with us.`,
             type: 'partner'
         });
+        // Send Telegram notification based on partner type
+        const timestamp = new Date(partnerRequest.createdAt || Date.now()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        if (partnerRequest.type === 'hospital') {
+            (0, telegram_1.sendTelegramMessage)(`👨‍⚕️ <b>New Doctor Partner Request</b>\n👤 Dr. ${partnerRequest.contactPersonName}\n🏥 ${partnerRequest.organizationName}\n📍 ${partnerRequest.city}\n📞 ${partnerRequest.phoneNumber}\n📧 ${partnerRequest.email}\n🕐 ${timestamp}`).catch(err => console.error('Telegram notification failed:', err));
+        }
+        else if (partnerRequest.type === 'ngo') {
+            (0, telegram_1.sendTelegramMessage)(`🏢 <b>New NGO Partner Request</b>\n🏢 ${partnerRequest.organizationName}\n👤 ${partnerRequest.contactPersonName}\n📞 ${partnerRequest.phoneNumber}\n📧 ${partnerRequest.email}\n🕐 ${timestamp}`).catch(err => console.error('Telegram notification failed:', err));
+        }
     }
     catch (error) {
         console.error('Error submitting partner request:', error);
