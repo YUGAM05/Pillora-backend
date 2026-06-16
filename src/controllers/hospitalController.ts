@@ -361,19 +361,20 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 _id: new mongoose.Types.ObjectId("6a25013623badca91c49968a"),
                 name: "Ami Clinic",
                 slug: "ami-clinic",
-                address: "Opposite Yagnik Hall, Near Bhidbhanjan Hanuman, Bapunagar, Ahmedabad, Gujarat 380024",
-                city: "Ahmedabad",
-                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
+                address: "1st Floor, Pavan Arcade, Opp. Ultra Vision School, 80 Feet Road, Jintan Udyognagar, Surendranagar, Gujarat 363002",
+                city: "Surendranagar",
+                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1780809845/pillora-seller/opt2nysztvrxgkiqfoqp.jpg",
                 images: [
-                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg"
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1780809845/pillora-seller/opt2nysztvrxgkiqfoqp.jpg",
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1780809841/pillora-seller/qacoajq8ffjlax8tb0p4.jpg"
                 ],
                 isOpen24Hours: false,
-                consultationFee: 500,
+                consultationFee: 80,
                 governmentSchemes: [],
                 isOnlinePaymentAvailable: true,
                 ambulanceContact: "",
-                phoneNumbers: ["079 2274 3808"],
-                description: "🏥 <b>Ami Clinic</b><br><div><b>Hospital Type :</b> Private\n\nProvide general check-ups, child care, vaccination, and family medicine services. Led by experienced healthcare professionals committed to family health and community wellness.</div>",
+                phoneNumbers: ["99251 73759"],
+                description: "🏥 <b>Ami Clinic</b><br><div><b>Hospital Type :</b> Private\n\nProvides personalized and holistic homeopathic healthcare under the guidance of Dr. Dilip S. Deliwala (D.H.M.S). Committed to family health and community wellness.</div>",
                 rating: 4.5,
                 doctors: [],
                 management_type: "SELF" as const,
@@ -386,7 +387,7 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 priority_support: false,
                 hospitalType: "Private" as const,
                 bedCapacity: 15,
-                specialities: ["General Medicine", "Paediatrics"],
+                specialities: ["Homeopathy", "General Medicine"],
                 user: new mongoose.Types.ObjectId("6a25013623badca91c499680")
             }
         ];
@@ -519,9 +520,9 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
             {
                 _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e315"),
                 hospital: new mongoose.Types.ObjectId("6a25013623badca91c49968a"), // Ami Clinic
-                name: "Dr. Dilip Deliwala",
-                specialty: "M.B.B.S",
-                fee: 500,
+                name: "Dr. Dilip S. Deliwala",
+                specialty: "D.H.M.S. (Homeopathy)",
+                fee: 80,
                 availability: [
                     { day: 'Monday', startTime: '10:00', endTime: '13:00' },
                     { day: 'Tuesday', startTime: '10:00', endTime: '13:00' },
