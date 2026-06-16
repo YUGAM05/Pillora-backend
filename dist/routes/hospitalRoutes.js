@@ -9,6 +9,7 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const multer_1 = __importDefault(require("multer"));
 const router = express_1.default.Router();
 router.get('/', hospitalController_1.getHospitals);
+router.get('/cities', hospitalController_1.getCities);
 router.get('/search', hospitalController_1.searchHospitals);
 router.get('/:id', hospitalController_1.getHospitalById);
 router.post('/seed', hospitalController_1.seedHospitals);

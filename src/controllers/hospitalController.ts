@@ -356,6 +356,38 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 bedCapacity: 250,
                 specialities: ["Cardiology", "Orthopaedics", "Gynaecology"],
                 user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796812")
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a25013623badca91c49968a"),
+                name: "Ami Clinic",
+                slug: "ami-clinic",
+                address: "Opposite Yagnik Hall, Near Bhidbhanjan Hanuman, Bapunagar, Ahmedabad, Gujarat 380024",
+                city: "Ahmedabad",
+                image: "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg",
+                images: [
+                    "https://res.cloudinary.com/djlttfqje/image/upload/v1776592646/hospitals/smopdu5fgyaivcszsbog.jpg"
+                ],
+                isOpen24Hours: false,
+                consultationFee: 500,
+                governmentSchemes: [],
+                isOnlinePaymentAvailable: true,
+                ambulanceContact: "",
+                phoneNumbers: ["079 2274 3808"],
+                description: "🏥 <b>Ami Clinic</b><br><div><b>Hospital Type :</b> Private\n\nProvide general check-ups, child care, vaccination, and family medicine services. Led by experienced healthcare professionals committed to family health and community wellness.</div>",
+                rating: 4.5,
+                doctors: [],
+                management_type: "SELF" as const,
+                is_verified: true,
+                plan: "Standard" as const,
+                is_featured: false,
+                has_govt_schemes: false,
+                has_custom_page: false,
+                is_spotlight: false,
+                priority_support: false,
+                hospitalType: "Private" as const,
+                bedCapacity: 15,
+                specialities: ["General Medicine", "Paediatrics"],
+                user: new mongoose.Types.ObjectId("6a25013623badca91c499680")
             }
         ];
 
@@ -482,6 +514,25 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
                 is_active: true,
                 isSpecialtyGroup: false,
                 maxAppointmentsPerSlot: 8,
+                doctorsCount: 1
+            },
+            {
+                _id: new mongoose.Types.ObjectId("6a0e94371ab452da0a38e315"),
+                hospital: new mongoose.Types.ObjectId("6a25013623badca91c49968a"), // Ami Clinic
+                name: "Dr. Dilip Deliwala",
+                specialty: "M.B.B.S",
+                fee: 500,
+                availability: [
+                    { day: 'Monday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Tuesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Wednesday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Thursday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Friday', startTime: '10:00', endTime: '13:00' },
+                    { day: 'Saturday', startTime: '10:00', endTime: '13:00' }
+                ],
+                is_active: true,
+                isSpecialtyGroup: false,
+                maxAppointmentsPerSlot: 5,
                 doctorsCount: 1
             }
         ];

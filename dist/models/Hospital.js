@@ -73,5 +73,8 @@ const HospitalSchema = new mongoose_1.Schema({
     priority_support: { type: Boolean, default: false },
     user: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     tempPassword: { type: String },
+    hospitalType: { type: String, enum: ['Government', 'Private', 'Trust', 'Charitable'], default: 'Private' },
+    bedCapacity: { type: Number, default: 50 },
+    specialities: [{ type: String }],
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Hospital', HospitalSchema);
