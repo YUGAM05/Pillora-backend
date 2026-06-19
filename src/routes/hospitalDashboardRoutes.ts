@@ -70,8 +70,8 @@ router.post('/patients/:patientId/notes', protect, isHospital, attachHospital, a
 router.get('/patients/autocomplete', protect, isHospital, attachHospital, autocompletePatients);
 router.get('/bookings/autocomplete', protect, isHospital, attachHospital, autocompleteBookingIds);
 router.get('/patients/search', protect, isHospital, attachHospital, searchPatients);
-router.post('/appointments/:id/prescription', protect, isHospital, attachHospital, upload.single('prescription'), uploadAppointmentPrescription);
-router.get('/appointments/:id/prescription', protect, isHospital, attachHospital, getAppointmentPrescription);
+router.post('/appointments/:id/prescription', protect, upload.single('prescription'), uploadAppointmentPrescription);
+router.get('/appointments/:id/prescription', protect, getAppointmentPrescription);
 
 // Payment routes
 router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);

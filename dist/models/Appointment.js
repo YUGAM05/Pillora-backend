@@ -47,9 +47,19 @@ const AppointmentSchema = new mongoose_1.Schema({
     },
     paymentStatus: {
         type: String,
-        enum: ['pending', 'paid', 'failed'],
-        default: 'pending'
+        // 'unpaid'/'paid'/'waived' — new canonical values.
+        // 'pending'/'failed' — legacy values kept for backward compat with existing documents.
+        enum: ['unpaid', 'paid', 'waived', 'pending', 'failed'],
+        default: 'unpaid'
     },
+    // Source field: allows future gateway webhook to override without schema rewrite.
+    paymentSource: {
+        type: String,
+        enum: ['manual', 'gateway'],
+        default: 'manual'
+    },
+    paymentUpdatedAt: { type: Date },
+    paymentUpdatedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
     prescriptionUrl: { type: String },

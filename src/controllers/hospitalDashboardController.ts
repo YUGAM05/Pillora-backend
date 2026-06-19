@@ -1466,8 +1466,8 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
 // @route   POST /api/hospital/dashboard/appointments/:id/prescription
 export const uploadAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const hospital = (req as any).hospital;
         const { id } = req.params;
+        const user = req.user;
 
         if (!req.file) {
             res.status(400).json({ message: 'No file uploaded' });
@@ -1486,9 +1486,36 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
             return;
         }
 
-        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        const appointment = await Appointment.findById(id).populate('patient');
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        // Perform authorization check (only doctor or hospital_admin can upload)
+        let isAuthorized = false;
+        let userHospital: any = null;
+
+        // a) requesting user.role === "doctor" AND user.id === appointment.doctorId
+        if (
+            (user.role === 'doctor') && 
+            (user._id.toString() === appointment.doctor.toString())
+        ) {
+            isAuthorized = true;
+        }
+
+        // b) requesting user.role === "hospital_admin" AND user belongs to appointment.hospitalId
+        if (user.role === 'hospital' || user.role === 'hospital_admin') {
+            userHospital = await Hospital.findOne({ user: user._id });
+            if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
+                isAuthorized = true;
+                // Set req.hospital so downstream logic continues to work
+                (req as any).hospital = userHospital;
+            }
+        }
+
+        if (!isAuthorized) {
+            res.status(403).json({ message: 'You do not have access to this prescription' });
             return;
         }
 
@@ -1528,6 +1555,9 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
         const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
 
         let prescriptionUrl: string;
+        // Generate a cryptographically secure random suffix to make public URL unguessable
+        const crypto = require('crypto');
+        const randomSuffix = crypto.randomBytes(16).toString('hex');
 
         if (isPdf) {
             // PDFs: upload as raw resource
@@ -1537,7 +1567,7 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
                 access_mode: 'public',
                 type: 'upload',
                 format: 'pdf',
-                public_id: `prescription-${appointment._id}`,
+                public_id: `prescription-${appointment._id}-${randomSuffix}`,
                 use_filename: false,
                 unique_filename: true
             });
@@ -1548,7 +1578,7 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
             const result = await cloudinary.uploader.upload(dataUri, {
                 resource_type: 'image',
                 folder: 'pillora-prescriptions',
-                public_id: `prescription-img-${appointment._id}`,
+                public_id: `prescription-img-${appointment._id}-${randomSuffix}`,
                 use_filename: false,
                 unique_filename: true
             });
@@ -1570,10 +1600,18 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
                     ? prescriptionUrl.replace('/raw/upload/', '/raw/upload/fl_attachment:prescription/')
                     : prescriptionUrl;
 
+                let hospitalName = 'Hospital';
+                if ((req as any).hospital) {
+                    hospitalName = (req as any).hospital.name;
+                } else {
+                    const hDoc = await Hospital.findById(appointment.hospital);
+                    if (hDoc) hospitalName = hDoc.name;
+                }
+
                 await sendPrescriptionEmail({
                     toEmail: patientEmail,
                     patientName,
-                    hospitalName: hospital.name,
+                    hospitalName,
                     prescriptionUrl: downloadUrl,
                     date: formatDateIST(appointment.bookingDate)
                 });
@@ -1593,12 +1631,44 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 // @route   GET /api/hospital/dashboard/appointments/:id/prescription
 export const getAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const hospital = (req as any).hospital;
         const { id } = req.params;
+        const user = req.user;
 
-        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id });
+        const appointment = await Appointment.findById(id);
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        // Perform authorization check: doctor, hospital_admin, patient
+        let isAuthorized = false;
+
+        // a) requesting user.role === "doctor" AND user.id === appointment.doctorId
+        if (
+            (user.role === 'doctor') && 
+            (user._id.toString() === appointment.doctor.toString())
+        ) {
+            isAuthorized = true;
+        }
+
+        // b) requesting user.role === "hospital_admin" AND user belongs to appointment.hospitalId
+        if (user.role === 'hospital' || user.role === 'hospital_admin') {
+            const userHospital = await Hospital.findOne({ user: user._id });
+            if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
+                isAuthorized = true;
+            }
+        }
+
+        // c) requesting user.role === "patient" AND user.id === appointment.patientId
+        if (
+            (user.role === 'patient' || user.role === 'customer') && 
+            (user._id.toString() === appointment.patient.toString())
+        ) {
+            isAuthorized = true;
+        }
+
+        if (!isAuthorized) {
+            res.status(403).json({ message: 'You do not have access to this prescription' });
             return;
         }
 
@@ -1607,8 +1677,12 @@ export const getAppointmentPrescription = async (req: AuthRequest, res: Response
             return;
         }
 
-        // Redirect to Cloudinary URL directly (works for both raw PDFs and images)
-        res.redirect(appointment.prescriptionUrl);
+        // Return JSON response as expected by both frontends (Pillora and Pillora-hospital)
+        res.json({
+            success: true,
+            prescriptionUrl: appointment.prescriptionUrl,
+            url: appointment.prescriptionUrl
+        });
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching prescription', error: error.message });
     }

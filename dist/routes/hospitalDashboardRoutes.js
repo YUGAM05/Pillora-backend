@@ -35,11 +35,12 @@ router.post('/patients/:patientId/notes', authMiddleware_1.protect, hospitalMidd
 router.get('/patients/autocomplete', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.autocompletePatients);
 router.get('/bookings/autocomplete', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.autocompleteBookingIds);
 router.get('/patients/search', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.searchPatients);
-router.post('/appointments/:id/prescription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, upload.single('prescription'), hospitalDashboardController_1.uploadAppointmentPrescription);
-router.get('/appointments/:id/prescription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getAppointmentPrescription);
+router.post('/appointments/:id/prescription', authMiddleware_1.protect, upload.single('prescription'), hospitalDashboardController_1.uploadAppointmentPrescription);
+router.get('/appointments/:id/prescription', authMiddleware_1.protect, hospitalDashboardController_1.getAppointmentPrescription);
 // Payment routes
 router.get('/payments/summary', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPaymentSummary);
 router.post('/appointments/:id/payment', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.recordPayment);
+router.patch('/appointments/:id/payment-status', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updatePaymentStatus);
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addDoctor);
 router.put('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.updateDoctor);
