@@ -34,7 +34,8 @@ import {
     autocompletePatients,
     autocompleteBookingIds,
     recordPayment,
-    getPaymentSummary
+    getPaymentSummary,
+    updatePaymentStatus
 } from '../controllers/hospitalDashboardController';
 
 const router = express.Router();
@@ -75,6 +76,7 @@ router.get('/appointments/:id/prescription', protect, isHospital, attachHospital
 // Payment routes
 router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);
 router.post('/appointments/:id/payment', protect, isHospital, attachHospital, recordPayment);
+router.patch('/appointments/:id/payment-status', protect, isHospital, attachHospital, updatePaymentStatus);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);

@@ -1462,7 +1462,7 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
     }
 };
 
-// @desc    Upload Prescription PDF
+// @desc    Upload Prescription (PDF, JPG, PNG — max 5 MB)
 // @route   POST /api/hospital/dashboard/appointments/:id/prescription
 export const uploadAppointmentPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
@@ -1470,12 +1470,19 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
         const { id } = req.params;
 
         if (!req.file) {
-            res.status(400).json({ message: 'No PDF file uploaded' });
+            res.status(400).json({ message: 'No file uploaded' });
             return;
         }
 
-        if (req.file.mimetype !== 'application/pdf') {
-            res.status(400).json({ message: 'Only PDF files are allowed' });
+        const ALLOWED_MIMETYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+        if (!ALLOWED_MIMETYPES.includes(req.file.mimetype)) {
+            res.status(400).json({ message: 'Only PDF, JPG, and PNG files are allowed' });
+            return;
+        }
+
+        const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+        if (req.file.size > MAX_SIZE_BYTES) {
+            res.status(400).json({ message: 'File too large — maximum size is 5 MB' });
             return;
         }
 
@@ -1485,50 +1492,70 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
             return;
         }
 
-        // Check first 4 bytes — valid PDF starts with %PDF
-        const header = req.file.buffer.subarray(0, 4).toString();
-        if (header !== '%PDF') {
-            res.status(400).json({ message: 'File is not a valid PDF — header check failed' });
-            return;
-        }
-
-        // Convert buffer to base64
-        const base64File = req.file.buffer.toString('base64');
-        const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
-
-        // If prescription already exists delete old one from Cloudinary first
-        if (appointment.prescriptionUrl) {
-            try {
-                const oldPublicId = appointment.prescriptionUrl
-                    .split('/').slice(-2).join('/')  // extract folder/filename
-                    .replace('.pdf', '');            // remove extension
-                await cloudinary.uploader.destroy(oldPublicId, { resource_type: 'raw' });
-                console.log('Old prescription deleted from Cloudinary');
-            } catch (err: any) {
-                console.error('Could not delete old prescription:', err.message);
+        // For PDFs: validate magic bytes (%PDF)
+        if (req.file.mimetype === 'application/pdf') {
+            const header = req.file.buffer.subarray(0, 4).toString();
+            if (header !== '%PDF') {
+                res.status(400).json({ message: 'File is not a valid PDF — header check failed' });
+                return;
             }
         }
 
-        // Upload to Cloudinary
-        const result = await cloudinary.uploader.upload(dataUri, {
-            resource_type: 'raw',
-            upload_preset: 'pillora-uploads',
-            folder: 'pillora-prescriptions',
-            access_mode: 'public',
-            type: 'upload',
-            format: 'pdf',
-            public_id: `prescription-${appointment._id}`,
-            use_filename: false,
-            unique_filename: true
-        });
+        const isPdf = req.file.mimetype === 'application/pdf';
+        const isImage = ['image/jpeg', 'image/png'].includes(req.file.mimetype);
 
-        console.log('Prescription URL:', result.secure_url);
-        // Must contain /raw/upload/ not /image/upload/
-
-        let prescriptionUrl = result.secure_url;
-        if (!prescriptionUrl.endsWith('.pdf')) {
-            prescriptionUrl += '.pdf';
+        // If prescription already exists, delete old one from Cloudinary
+        if (appointment.prescriptionUrl) {
+            try {
+                // Determine old resource type from URL path
+                const isOldRaw = appointment.prescriptionUrl.includes('/raw/upload/');
+                const isOldImage = appointment.prescriptionUrl.includes('/image/upload/');
+                const oldResourceType = isOldRaw ? 'raw' : isOldImage ? 'image' : 'raw';
+                // Extract public_id (last two path segments, strip extension)
+                const urlParts = appointment.prescriptionUrl.split('/');
+                const filenameWithExt = urlParts[urlParts.length - 1];
+                const filename = filenameWithExt.replace(/\.[^.]+$/, '');
+                const folder = urlParts[urlParts.length - 2];
+                const oldPublicId = `${folder}/${filename}`;
+                await cloudinary.uploader.destroy(oldPublicId, { resource_type: oldResourceType });
+            } catch (err: any) {
+                console.error('Could not delete old prescription from Cloudinary:', err.message);
+            }
         }
+
+        // Convert buffer to base64 data URI
+        const base64File = req.file.buffer.toString('base64');
+        const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
+
+        let prescriptionUrl: string;
+
+        if (isPdf) {
+            // PDFs: upload as raw resource
+            const result = await cloudinary.uploader.upload(dataUri, {
+                resource_type: 'raw',
+                folder: 'pillora-prescriptions',
+                access_mode: 'public',
+                type: 'upload',
+                format: 'pdf',
+                public_id: `prescription-${appointment._id}`,
+                use_filename: false,
+                unique_filename: true
+            });
+            prescriptionUrl = result.secure_url;
+            if (!prescriptionUrl.endsWith('.pdf')) prescriptionUrl += '.pdf';
+        } else {
+            // Images: upload as image resource
+            const result = await cloudinary.uploader.upload(dataUri, {
+                resource_type: 'image',
+                folder: 'pillora-prescriptions',
+                public_id: `prescription-img-${appointment._id}`,
+                use_filename: false,
+                unique_filename: true
+            });
+            prescriptionUrl = result.secure_url;
+        }
+
+        console.log('Prescription URL:', prescriptionUrl);
 
         appointment.prescriptionUrl = prescriptionUrl;
         appointment.prescriptionUploadedAt = new Date();
@@ -1537,19 +1564,17 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
         const patientEmail = (appointment.patient as any)?.email || appointment.patientEmail;
         const patientName = (appointment.patient as any)?.name || appointment.patientName || 'Patient';
 
-        if (patientEmail) {
+        if (patientEmail && isPdf) {
             try {
-                // Add fl_attachment to force download as PDF in email
-                const downloadUrl = appointment.prescriptionUrl.includes('/raw/upload/')
-                    ? appointment.prescriptionUrl.replace('/raw/upload/', '/raw/upload/fl_attachment:prescription/')
-                    : appointment.prescriptionUrl;
+                const downloadUrl = prescriptionUrl.includes('/raw/upload/')
+                    ? prescriptionUrl.replace('/raw/upload/', '/raw/upload/fl_attachment:prescription/')
+                    : prescriptionUrl;
 
                 await sendPrescriptionEmail({
                     toEmail: patientEmail,
-                    patientName: patientName,
+                    patientName,
                     hospitalName: hospital.name,
                     prescriptionUrl: downloadUrl,
-                    // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
                     date: formatDateIST(appointment.bookingDate)
                 });
             } catch (emailError: any) {
@@ -1582,11 +1607,51 @@ export const getAppointmentPrescription = async (req: AuthRequest, res: Response
             return;
         }
 
-        // Redirect to Cloudinary URL directly
-        res.setHeader('Content-Type', 'application/pdf');
+        // Redirect to Cloudinary URL directly (works for both raw PDFs and images)
         res.redirect(appointment.prescriptionUrl);
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching prescription', error: error.message });
+    }
+};
+
+// @desc    Update payment status manually (placeholder — gateway-ready)
+// @route   PATCH /api/hospital/dashboard/appointments/:id/payment-status
+// @access  Private/Hospital
+// Design note: sets paymentSource='manual' so a future gateway webhook can override
+// by setting paymentSource='gateway' without a schema rewrite.
+export const updatePaymentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const ALLOWED_STATUSES = ['unpaid', 'paid', 'waived'];
+        if (!status || !ALLOWED_STATUSES.includes(status)) {
+            res.status(400).json({
+                message: `Invalid status. Allowed values: ${ALLOWED_STATUSES.join(', ')}`
+            });
+            return;
+        }
+
+        const appointment = await Appointment.findOneAndUpdate(
+            { _id: id, hospital: hospital._id },
+            {
+                paymentStatus: status,
+                paymentSource: 'manual',
+                paymentUpdatedAt: new Date(),
+                paymentUpdatedBy: req.user?._id || req.user?.id
+            },
+            { new: true }
+        );
+
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+
+        res.json({ message: 'Payment status updated', appointment });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating payment status', error: error.message });
     }
 };
 
