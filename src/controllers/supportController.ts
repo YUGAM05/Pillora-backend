@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import SupportTicket from '../models/SupportTicket';
+import { sendTelegramMessage } from '../utils/telegram';
 
 export const createTicket = async (req: any, res: Response) => {
     try {
@@ -14,6 +15,26 @@ export const createTicket = async (req: any, res: Response) => {
         });
 
         await ticket.save();
+
+        // Get requester details from auth user
+        const userName = req.user.name || 'Anonymous';
+        const userEmail = req.user.email || 'N/A';
+        const userPhone = req.user.phone || 'N/A';
+
+        // Format and send Telegram Alert
+        const telegramMsg = `🎫 <b>New Support Ticket</b>\n\n` +
+                            `👤 <b>Name:</b> ${userName}\n` +
+                            `📧 <b>Email:</b> ${userEmail}\n` +
+                            `📱 <b>Phone:</b> ${userPhone}\n` +
+                            `📋 <b>Type:</b> ${type || 'Refund Inquiry'}\n` +
+                            `📌 <b>Subject:</b> ${subject}\n\n` +
+                            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+                            `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+
+        sendTelegramMessage(telegramMsg).catch(err => {
+            console.error('[Telegram] Ticket notification dispatch failed:', err);
+        });
+
         res.status(201).json({ message: "Support ticket created successfully", ticket });
     } catch (error: any) {
         res.status(500).json({ message: error.message });

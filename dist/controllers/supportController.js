@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMyTickets = exports.updateTicketStatus = exports.getAllTickets = exports.createTicket = void 0;
 const SupportTicket_1 = __importDefault(require("../models/SupportTicket"));
+const telegram_1 = require("../utils/telegram");
 const createTicket = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { subject, message, type } = req.body;
@@ -25,6 +26,22 @@ const createTicket = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             type
         });
         yield ticket.save();
+        // Get requester details from auth user
+        const userName = req.user.name || 'Anonymous';
+        const userEmail = req.user.email || 'N/A';
+        const userPhone = req.user.phone || 'N/A';
+        // Format and send Telegram Alert
+        const telegramMsg = `🎫 <b>New Support Ticket</b>\n\n` +
+            `👤 <b>Name:</b> ${userName}\n` +
+            `📧 <b>Email:</b> ${userEmail}\n` +
+            `📱 <b>Phone:</b> ${userPhone}\n` +
+            `📋 <b>Type:</b> ${type || 'Refund Inquiry'}\n` +
+            `📌 <b>Subject:</b> ${subject}\n\n` +
+            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+            `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+        (0, telegram_1.sendTelegramMessage)(telegramMsg).catch(err => {
+            console.error('[Telegram] Ticket notification dispatch failed:', err);
+        });
         res.status(201).json({ message: "Support ticket created successfully", ticket });
     }
     catch (error) {
