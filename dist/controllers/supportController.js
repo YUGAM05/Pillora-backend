@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMyTickets = exports.updateTicketStatus = exports.getAllTickets = exports.createTicket = void 0;
+exports.createGuestTicket = exports.getMyTickets = exports.updateTicketStatus = exports.getAllTickets = exports.createTicket = void 0;
 const SupportTicket_1 = __importDefault(require("../models/SupportTicket"));
 const telegram_1 = require("../utils/telegram");
 const createTicket = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -85,3 +85,46 @@ const getMyTickets = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getMyTickets = getMyTickets;
+const createGuestTicket = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { name, email, phone, subject, message } = req.body;
+        // Map subject to support ticket type
+        let type = 'Other';
+        if (subject && (subject.includes('Appointment') || subject.includes('Issue')))
+            type = 'General Support';
+        else if (subject && (subject.includes('Payment') || subject.includes('Refund')))
+            type = 'Return Inquiry';
+        else if (subject && subject.includes('Prescription'))
+            type = 'Order Issue';
+        else if (subject && subject.includes('Account'))
+            type = 'General Support';
+        else if (subject && subject.includes('Technical'))
+            type = 'Technical Issue';
+        const ticket = new SupportTicket_1.default({
+            guestName: name,
+            guestEmail: email,
+            guestPhone: phone,
+            subject: subject || 'General Query',
+            message: message || '',
+            type
+        });
+        yield ticket.save();
+        // Format and send Telegram Alert
+        const telegramMsg = `🎫 <b>New Support Ticket (GUEST)</b>\n\n` +
+            `👤 <b>Name:</b> ${name || 'Anonymous'}\n` +
+            `📧 <b>Email:</b> ${email || 'N/A'}\n` +
+            `📱 <b>Phone:</b> ${phone || 'N/A'}\n` +
+            `📋 <b>Type:</b> ${type}\n` +
+            `📌 <b>Subject:</b> ${subject || 'General Query'}\n\n` +
+            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+            `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+        (0, telegram_1.sendTelegramMessage)(telegramMsg).catch(err => {
+            console.error('[Telegram] Guest ticket notification dispatch failed:', err);
+        });
+        res.status(201).json({ message: "Guest ticket created successfully", ticket });
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+exports.createGuestTicket = createGuestTicket;

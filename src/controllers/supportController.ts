@@ -80,3 +80,46 @@ export const getMyTickets = async (req: any, res: Response) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+export const createGuestTicket = async (req: Request, res: Response) => {
+    try {
+        const { name, email, phone, subject, message } = req.body;
+
+        // Map subject to support ticket type
+        let type = 'Other';
+        if (subject && (subject.includes('Appointment') || subject.includes('Issue'))) type = 'General Support';
+        else if (subject && (subject.includes('Payment') || subject.includes('Refund'))) type = 'Return Inquiry';
+        else if (subject && subject.includes('Prescription')) type = 'Order Issue';
+        else if (subject && subject.includes('Account')) type = 'General Support';
+        else if (subject && subject.includes('Technical')) type = 'Technical Issue';
+
+        const ticket = new SupportTicket({
+            guestName: name,
+            guestEmail: email,
+            guestPhone: phone,
+            subject: subject || 'General Query',
+            message: message || '',
+            type
+        });
+
+        await ticket.save();
+
+        // Format and send Telegram Alert
+        const telegramMsg = `🎫 <b>New Support Ticket (GUEST)</b>\n\n` +
+                            `👤 <b>Name:</b> ${name || 'Anonymous'}\n` +
+                            `📧 <b>Email:</b> ${email || 'N/A'}\n` +
+                            `📱 <b>Phone:</b> ${phone || 'N/A'}\n` +
+                            `📋 <b>Type:</b> ${type}\n` +
+                            `📌 <b>Subject:</b> ${subject || 'General Query'}\n\n` +
+                            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+                            `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+
+        sendTelegramMessage(telegramMsg).catch(err => {
+            console.error('[Telegram] Guest ticket notification dispatch failed:', err);
+        });
+
+        res.status(201).json({ message: "Guest ticket created successfully", ticket });
+    } catch (error: any) {
+        res.status(500).json({ message: error.message });
+    }
+};

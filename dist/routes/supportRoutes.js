@@ -7,6 +7,8 @@ const express_1 = __importDefault(require("express"));
 const supportController_1 = require("../controllers/supportController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = express_1.default.Router();
+// Public routes
+router.post('/guest', supportController_1.createGuestTicket);
 // User routes
 router.post('/', authMiddleware_1.protect, supportController_1.createTicket);
 router.get('/my-tickets', authMiddleware_1.protect, supportController_1.getMyTickets);

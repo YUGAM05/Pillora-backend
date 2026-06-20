@@ -4,7 +4,19 @@ const supportTicketSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
+    },
+    guestName: {
+        type: String,
+        trim: true
+    },
+    guestEmail: {
+        type: String,
+        trim: true
+    },
+    guestPhone: {
+        type: String,
+        trim: true
     },
     subject: {
         type: String,

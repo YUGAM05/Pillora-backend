@@ -1,8 +1,11 @@
 import express from 'express';
-import { createTicket, getAllTickets, updateTicketStatus, getMyTickets } from '../controllers/supportController';
+import { createTicket, getAllTickets, updateTicketStatus, getMyTickets, createGuestTicket } from '../controllers/supportController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 
 const router = express.Router();
+
+// Public routes
+router.post('/guest', createGuestTicket);
 
 // User routes
 router.post('/', protect, createTicket);
