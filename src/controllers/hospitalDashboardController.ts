@@ -213,7 +213,18 @@ export const getHospitalAppointments = async (req: AuthRequest, res: Response): 
             .populate('slot', 'startTime endTime')
             .sort({ slotTime: 1 });
         
-        res.json(appointments);
+        const appointmentIds = appointments.map(app => app._id);
+        const payments = await Payment.find({ appointmentId: { $in: appointmentIds } });
+
+        const appointmentsWithPayments = appointments.map(app => {
+            const payment = payments.find(p => p.appointmentId.toString() === app._id.toString());
+            return {
+                ...app.toObject(),
+                paymentDetails: payment ? { amount: payment.amount, mode: payment.mode } : null
+            };
+        });
+
+        res.json(appointmentsWithPayments);
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching appointments', error: error.message });
     }
@@ -917,12 +928,26 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 slot: slotId,
                 slotTime: new Date(slotTime),
                 status: 'confirmed',
-                paymentStatus: paymentStatus || 'pending',
+                paymentStatus: paymentStatus === 'paid' ? 'paid' : 'unpaid',
                 notes: notes || '',
                 tokenNumber
             });
 
             await appointment.save({ session });
+
+            if (paymentStatus === 'paid') {
+                const docFee = doctor?.fee || 500;
+                const payment = new Payment({
+                    appointmentId: appointment._id,
+                    hospitalId: hospital._id,
+                    patientName,
+                    amount: docFee,
+                    mode: 'offline',
+                    status: 'paid',
+                    recordedBy: req.user!._id
+                });
+                await payment.save({ session });
+            }
 
             // Increment booked_count atomically
             const updatedSlot = await Slot.findOneAndUpdate(
@@ -1721,6 +1746,10 @@ export const updatePaymentStatus = async (req: AuthRequest, res: Response): Prom
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
             return;
+        }
+
+        if (status === 'unpaid' || status === 'waived') {
+            await Payment.deleteOne({ appointmentId: id });
         }
 
         res.json({ message: 'Payment status updated', appointment });

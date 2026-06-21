@@ -207,7 +207,13 @@ const getHospitalAppointments = (req, res) => __awaiter(void 0, void 0, void 0, 
             .populate('doctor', 'name specialty')
             .populate('slot', 'startTime endTime')
             .sort({ slotTime: 1 });
-        res.json(appointments);
+        const appointmentIds = appointments.map(app => app._id);
+        const payments = yield Payment_1.default.find({ appointmentId: { $in: appointmentIds } });
+        const appointmentsWithPayments = appointments.map(app => {
+            const payment = payments.find(p => p.appointmentId.toString() === app._id.toString());
+            return Object.assign(Object.assign({}, app.toObject()), { paymentDetails: payment ? { amount: payment.amount, mode: payment.mode } : null });
+        });
+        res.json(appointmentsWithPayments);
     }
     catch (error) {
         res.status(500).json({ message: 'Error fetching appointments', error: error.message });
@@ -831,11 +837,24 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
                 slot: slotId,
                 slotTime: new Date(slotTime),
                 status: 'confirmed',
-                paymentStatus: paymentStatus || 'pending',
+                paymentStatus: paymentStatus === 'paid' ? 'paid' : 'unpaid',
                 notes: notes || '',
                 tokenNumber
             });
             yield appointment.save({ session });
+            if (paymentStatus === 'paid') {
+                const docFee = (doctor === null || doctor === void 0 ? void 0 : doctor.fee) || 500;
+                const payment = new Payment_1.default({
+                    appointmentId: appointment._id,
+                    hospitalId: hospital._id,
+                    patientName,
+                    amount: docFee,
+                    mode: 'offline',
+                    status: 'paid',
+                    recordedBy: req.user._id
+                });
+                yield payment.save({ session });
+            }
             // Increment booked_count atomically
             const updatedSlot = yield Slot_1.default.findOneAndUpdate({
                 _id: slotId,
@@ -1532,6 +1551,9 @@ const updatePaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
             return;
+        }
+        if (status === 'unpaid' || status === 'waived') {
+            yield Payment_1.default.deleteOne({ appointmentId: id });
         }
         res.json({ message: 'Payment status updated', appointment });
     }
