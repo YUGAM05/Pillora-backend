@@ -12,15 +12,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getHealthTipById = exports.deleteHealthTip = exports.getAllHealthTips = exports.createHealthTip = void 0;
+exports.getHealthTipById = exports.deleteHealthTip = exports.getAllHealthTips = exports.updateHealthTip = exports.createHealthTip = void 0;
 const HealthTip_1 = __importDefault(require("../models/HealthTip"));
 const createHealthTip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { title, description, imageUrl, date } = req.body;
+        const { title, description, imageUrl, videoUrl, linkUrl, mediaType, date } = req.body;
         const newTip = new HealthTip_1.default({
             title,
             description,
             imageUrl,
+            videoUrl,
+            linkUrl,
+            mediaType,
             date: date || new Date()
         });
         const savedTip = yield newTip.save();
@@ -31,6 +34,21 @@ const createHealthTip = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.createHealthTip = createHealthTip;
+const updateHealthTip = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { title, description, imageUrl, videoUrl, linkUrl, mediaType, date } = req.body;
+        const updatedTip = yield HealthTip_1.default.findByIdAndUpdate(id, { title, description, imageUrl, videoUrl, linkUrl, mediaType, date }, { new: true });
+        if (!updatedTip) {
+            return res.status(404).json({ message: 'Health tip not found' });
+        }
+        res.status(200).json(updatedTip);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error updating health tip', error });
+    }
+});
+exports.updateHealthTip = updateHealthTip;
 const getAllHealthTips = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const mongoose = require('mongoose');

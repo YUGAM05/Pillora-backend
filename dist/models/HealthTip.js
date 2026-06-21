@@ -39,5 +39,8 @@ const HealthTipSchema = new mongoose_1.Schema({
     description: { type: String, required: true },
     date: { type: Date, default: Date.now },
     imageUrl: { type: String },
+    videoUrl: { type: String },
+    linkUrl: { type: String },
+    mediaType: { type: String, enum: ['image', 'video', 'url'], default: 'image' }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('HealthTip', HealthTipSchema);

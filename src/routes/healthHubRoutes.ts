@@ -1,11 +1,15 @@
 import express from 'express';
-import { createHealthTip, getAllHealthTips, deleteHealthTip, getHealthTipById } from '../controllers/healthHubController';
+import { createHealthTip, getAllHealthTips, deleteHealthTip, getHealthTipById, updateHealthTip } from '../controllers/healthHubController';
+import { protect, adminOnly } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
-router.post('/', createHealthTip);
 router.get('/', getAllHealthTips);
 router.get('/:id', getHealthTipById);
-router.delete('/:id', deleteHealthTip);
+
+// Admin-only protected routes
+router.post('/', protect, adminOnly, createHealthTip);
+router.put('/:id', protect, adminOnly, updateHealthTip);
+router.delete('/:id', protect, adminOnly, deleteHealthTip);
 
 export default router;

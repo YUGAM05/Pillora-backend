@@ -3,17 +3,38 @@ import HealthTip from '../models/HealthTip';
 
 export const createHealthTip = async (req: Request, res: Response) => {
     try {
-        const { title, description, imageUrl, date } = req.body;
+        const { title, description, imageUrl, videoUrl, linkUrl, mediaType, date } = req.body;
         const newTip = new HealthTip({
             title,
             description,
             imageUrl,
+            videoUrl,
+            linkUrl,
+            mediaType,
             date: date || new Date()
         });
         const savedTip = await newTip.save();
         res.status(201).json(savedTip);
     } catch (error) {
         res.status(500).json({ message: 'Error creating health tip', error });
+    }
+};
+
+export const updateHealthTip = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { title, description, imageUrl, videoUrl, linkUrl, mediaType, date } = req.body;
+        const updatedTip = await HealthTip.findByIdAndUpdate(
+            id,
+            { title, description, imageUrl, videoUrl, linkUrl, mediaType, date },
+            { new: true }
+        );
+        if (!updatedTip) {
+            return res.status(404).json({ message: 'Health tip not found' });
+        }
+        res.status(200).json(updatedTip);
+    } catch (error) {
+        res.status(500).json({ message: 'Error updating health tip', error });
     }
 };
 
