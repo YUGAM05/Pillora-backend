@@ -24,19 +24,31 @@ cloudinary_1.v2.config({
 });
 // ✅ Use memoryStorage — no local disk needed
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
+// Helper function to upload buffer directly to Cloudinary using stream
+const uploadStream = (fileBuffer, folder) => {
+    return new Promise((resolve, reject) => {
+        const stream = cloudinary_1.v2.uploader.upload_stream({
+            folder: folder,
+            resource_type: 'auto'
+        }, (error, result) => {
+            if (error) {
+                reject(error);
+            }
+            else {
+                resolve(result);
+            }
+        });
+        stream.write(fileBuffer);
+        stream.end();
+    });
+};
 router.post('/', upload.single('file'), (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.file) {
             return res.status(400).json({ message: 'No file uploaded' });
         }
-        // Convert buffer to base64
-        const base64File = req.file.buffer.toString('base64');
-        const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
-        // Upload to Cloudinary
-        const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
-            folder: 'pillora-seller',
-            resource_type: 'auto'
-        });
+        // Upload to Cloudinary using stream
+        const result = yield uploadStream(req.file.buffer, 'pillora-seller');
         // Return the Cloudinary URL
         res.status(200).json({ url: result.secure_url });
     }
