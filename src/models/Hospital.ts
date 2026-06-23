@@ -38,6 +38,7 @@ export interface IHospital extends Document {
     hospitalType?: 'Government' | 'Private' | 'Trust' | 'Charitable';
     bedCapacity?: number;
     specialities?: string[];
+    trialEndDate?: Date;
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -83,6 +84,7 @@ const HospitalSchema: Schema = new Schema({
     hospitalType: { type: String, enum: ['Government', 'Private', 'Trust', 'Charitable'], default: 'Private' },
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
+    trialEndDate: { type: Date },
 }, { timestamps: true });
 
 export default mongoose.model<IHospital>('Hospital', HospitalSchema);

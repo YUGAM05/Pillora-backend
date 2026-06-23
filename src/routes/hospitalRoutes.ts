@@ -1,5 +1,5 @@
 import express from 'express';
-import { getHospitals, getHospitalById, seedHospitals, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities } from '../controllers/hospitalController';
+import { getHospitals, getHospitalById, seedHospitals, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities, getHospitalSettlements } from '../controllers/hospitalController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import multer from 'multer';
 
@@ -8,6 +8,7 @@ const router = express.Router();
 router.get('/', getHospitals);
 router.get('/cities', getCities);
 router.get('/search', searchHospitals);
+router.get('/:hospitalId/settlements', protect, getHospitalSettlements);
 router.get('/:id', getHospitalById);
 router.post('/seed', seedHospitals);
 router.post('/', protect, adminOnly, createHospital);

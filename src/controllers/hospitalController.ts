@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
 import Doctor from '../models/Doctor'; // ✅ Added
+import Settlement from '../models/Settlement';
+import Appointment from '../models/Appointment';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { v2 as cloudinary } from 'cloudinary'; // ✅ Added
 import slugify from 'slugify';
@@ -754,5 +756,38 @@ export const searchHospitals = async (req: Request, res: Response): Promise<void
         res.json(hospitals);
     } catch (error) {
         res.status(500).json({ message: 'Error searching hospitals', error });
+    }
+};
+
+// @desc    Get settlements for a specific hospital (Weekly view / history)
+// @route   GET /api/hospitals/:hospitalId/settlements
+// @access  Private (Hospital admin)
+export const getHospitalSettlements = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { hospitalId } = req.params;
+
+        if (!mongoose.isValidObjectId(hospitalId)) {
+            res.status(400).json({ success: false, message: 'Invalid hospital ID' });
+            return;
+        }
+
+        // Fetch settlements for the hospital, populating appointment details
+        const settlements = await Settlement.find({ hospitalId })
+            .populate({
+                path: 'appointmentId',
+                populate: {
+                    path: 'doctor patient',
+                    select: 'name specialty email'
+                }
+            })
+            .sort({ settledDate: -1 });
+
+        res.json({
+            success: true,
+            settlements
+        });
+    } catch (error: any) {
+        console.error('[GetHospitalSettlementsError]', error.message);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
     }
 };

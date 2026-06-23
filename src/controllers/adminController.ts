@@ -5,6 +5,8 @@ import Inventory from '../models/Inventory';
 import Order from '../models/Order';
 import Notification from '../models/Notification';
 import Hospital from '../models/Hospital';
+import Payment from '../models/Payment';
+import Settlement from '../models/Settlement';
 import { verifyAadhaarLocal } from '../utils/aadhaarVerifier';
 import LoginHistory from '../models/LoginHistory';
 import bcrypt from 'bcryptjs';
@@ -727,5 +729,87 @@ export const getLoginAnalytics = async (req: Request, res: Response): Promise<vo
     } catch (error: any) {
         console.error("Error in getLoginAnalytics:", error);
         res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+// @desc    Get Admin Revenue Analytics (Advance booking fees & Settlements)
+// @route   GET /api/admin/revenue
+// @access  Private/Admin
+export const getRevenueAnalytics = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // 1. Total advance fees collected
+        const collectedResult = await Payment.aggregate([
+            { $match: { status: { $in: ['completed', 'refund_initiated', 'refunded'] } } },
+            { $group: { _id: null, total: { $sum: '$advanceFee' } } }
+        ]);
+        const totalCollected = collectedResult[0]?.total || 0;
+
+        // 2. Breakdown: retained (user cancellations)
+        const retainedResult = await Settlement.aggregate([
+            { $match: { status: 'retained_by_pillora' } },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const retained = retainedResult[0]?.total || 0;
+
+        // 3. Breakdown: refunded (hospital cancellations)
+        const refundedResult = await Settlement.aggregate([
+            { $match: { status: 'refunded' } },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const refunded = refundedResult[0]?.total || 0;
+
+        // 4. Breakdown: active settlements (pending / settled)
+        const activeSettlementsResult = await Settlement.aggregate([
+            { $match: { status: { $in: ['pending_settlement', 'settled'] } } },
+            { 
+                $group: { 
+                    _id: null, 
+                    totalAmount: { $sum: '$amount' },
+                    hospitalShare: { $sum: '$settledAmount' },
+                    pilloraCommission: { $sum: { $subtract: ['$amount', '$settledAmount'] } }
+                } 
+            }
+        ]);
+        const activeSettlements = activeSettlementsResult[0]?.totalAmount || 0;
+        const activeHospitalShare = activeSettlementsResult[0]?.hospitalShare || 0;
+        const activePilloraCommission = activeSettlementsResult[0]?.pilloraCommission || 0;
+
+        // 5. Weekly settlement summary
+        const weeklySummary = await Settlement.aggregate([
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$settledDate" } },
+                    totalAmount: { $sum: "$amount" },
+                    payoutAmount: { $sum: "$settledAmount" },
+                    commissionAmount: { $sum: { $subtract: ["$amount", "$settledAmount"] } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id": -1 } }
+        ]);
+
+        // 6. Recent Payments
+        const recentPayments = await Payment.find({ status: { $ne: 'pending' } })
+            .populate('userId', 'name email')
+            .populate('hospitalId', 'name')
+            .sort({ createdAt: -1 })
+            .limit(20);
+
+        res.json({
+            success: true,
+            totalCollected,
+            breakdown: {
+                retained,
+                refunded,
+                activeSettlements,
+                activeHospitalShare,
+                activePilloraCommission
+            },
+            weeklySummary,
+            recentPayments
+        });
+    } catch (error: any) {
+        console.error("Error in getRevenueAnalytics:", error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
     }
 };

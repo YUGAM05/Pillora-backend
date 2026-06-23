@@ -269,6 +269,16 @@ const hospitalDashboardRoutes = require('./routes/hospitalDashboardRoutes').defa
 app.use('/api/hospital/dashboard', hospitalDashboardRoutes);
 console.log('=== HOSPITAL DASHBOARD ROUTES LOADED ===');
 
+console.log('=== PAYMENT ROUTES LOADING ===');
+const paymentRoutes = require('./routes/paymentRoutes').default || require('./routes/paymentRoutes');
+app.use('/api/payments', paymentRoutes);
+console.log('=== PAYMENT ROUTES LOADED ===');
+
+console.log('=== APPOINTMENT ROUTES LOADING ===');
+const appointmentRoutes = require('./routes/appointmentRoutes').default || require('./routes/appointmentRoutes');
+app.use('/api/appointments', appointmentRoutes);
+console.log('=== APPOINTMENT ROUTES LOADED ===');
+
 console.log('=== ANALYTICS ROUTES LOADING ===');
 const analyticsRoutes = require('./routes/analyticsRoutes').default || require('./routes/analyticsRoutes');
 app.use('/api/metrics', analyticsRoutes);

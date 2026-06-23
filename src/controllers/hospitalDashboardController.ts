@@ -7,6 +7,8 @@ import Appointment from '../models/Appointment';
 import User from '../models/User';
 import PatientNote from '../models/PatientNote';
 import Payment from '../models/Payment';
+import Settlement from '../models/Settlement';
+import Razorpay from 'razorpay';
 import mongoose from 'mongoose';
 import redis from '../utils/redisMock';
 import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
@@ -43,7 +45,8 @@ export const getHospitalStats = async (req: AuthRequest, res: Response): Promise
             stats: {
                 doctors: doctorCount,
                 appointments: appointmentCount,
-                pending: pendingAppointments
+                pending: pendingAppointments,
+                hospital: hospital
             },
             recentAppointments,
             management_type: hospital.management_type
@@ -372,7 +375,7 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
                 hospital: hospitalId,
                 slot: slotId,
                 slotTime: new Date(slotTime),
-                status: 'confirmed',
+                status: 'pending',
                 tokenNumber,
                 patientName,
                 patientPhone,
@@ -426,45 +429,9 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
                 });
             }
 
-            try {
-                const hospitalDoc = await Hospital.findById(hospitalId);
-                const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
-                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
-                const dateStr = formatDateIST(slotTime);
-                const timeSlotStr = formatTimeIST(slotTime);
-                
-                await sendBookingConfirmationEmail({
-                    toEmail: patientEmail,
-                    patientName: patientName,
-                    hospitalName: hospitalNameStr,
-                    date: dateStr,
-                    timeSlot: timeSlotStr,
-                    bookingId: appointment._id.toString()
-                });
-
-                if (hospitalDoc && hospitalDoc.email) {
-                    try {
-                        await sendHospitalNotificationEmail({
-                            hospitalEmail: hospitalDoc.email,
-                            hospitalName: hospitalDoc.name,
-                            patientName: patientName,
-                            patientEmail: patientEmail,
-                            patientPhone: patientPhone,
-                            date: dateStr,
-                            timeSlot: timeSlotStr,
-                            bookingId: appointment._id.toString()
-                        });
-                    } catch (emailError: any) {
-                        console.error('Hospital email failed (non-critical):', emailError.message);
-                    }
-                }
-            } catch (emailError: any) {
-                console.error('Email failed (non-critical):', emailError.message);
-            }
-
             res.status(201).json({
                 success: true,
-                message: 'Appointment booked successfully',
+                message: 'Appointment booking initiated. Please proceed to payment.',
                 appointment: {
                     ...appointment.toObject(),
                     tokenNumber
@@ -709,8 +676,52 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         slot.cancelledBy = (req.user?._id || req.user?.id) as any;
         await slot.save();
 
-        // Update affected bookings to cancelled
-        await Appointment.updateMany({ slot: slot._id }, { status: 'cancelled' });
+        // Update affected bookings to cancelled and refund online payments (hospital initiated)
+        const affectedAppointments = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } });
+        const razorpay = new Razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
+            key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+        });
+
+        for (const app of affectedAppointments) {
+            app.status = 'cancelled';
+            if (reason) {
+                app.notes = app.notes ? `${app.notes}\nCancellation reason: ${reason}` : `Cancellation reason: ${reason}`;
+            }
+            await app.save();
+
+            // Handle refund
+            const payment = await Payment.findOne({ appointmentId: app._id });
+            if (payment && payment.status === 'completed') {
+                payment.status = 'refund_initiated';
+                await payment.save();
+
+                if (payment.razorpayPaymentId) {
+                    try {
+                        const refundAmount = Math.round(payment.amount * 100);
+                        await razorpay.payments.refund(payment.razorpayPaymentId, {
+                            amount: refundAmount,
+                            notes: {
+                                reason: reason || 'Slot cancelled by hospital (doctor unavailable)',
+                                appointmentId: app._id.toString()
+                            }
+                        });
+                    } catch (refundError: any) {
+                        console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refundError.message);
+                    }
+                }
+
+                // Update settlement
+                const settlement = await Settlement.findOne({ appointmentId: app._id });
+                if (settlement) {
+                    settlement.status = 'refunded';
+                    await settlement.save();
+                }
+            } else if (payment && payment.status === 'pending') {
+                payment.status = 'failed';
+                await payment.save();
+            }
+        }
 
         // Emit socket update for real-time lists
         const io = req.app.get('io');
