@@ -183,8 +183,8 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
             const now = new Date();
             if (hospital.trialEndDate) {
                 trialActive = now < new Date(hospital.trialEndDate);
-            } else if (hospital.createdAt) {
-                const trialEnd = new Date(hospital.createdAt);
+            } else if ((hospital as any).createdAt) {
+                const trialEnd = new Date((hospital as any).createdAt);
                 trialEnd.setMonth(trialEnd.getMonth() + 3);
                 trialActive = now < trialEnd;
             } else {
