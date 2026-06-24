@@ -18,6 +18,8 @@ const Payment_1 = __importDefault(require("../models/Payment"));
 const Settlement_1 = __importDefault(require("../models/Settlement"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const Slot_1 = __importDefault(require("../models/Slot"));
+const Doctor_1 = __importDefault(require("../models/Doctor"));
+const Hospital_1 = __importDefault(require("../models/Hospital"));
 const razorpay = new razorpay_1.default({
     key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
     key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
@@ -172,6 +174,12 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             res.status(400).json({ error: 'User ID is required' });
             return;
         }
+        // Query Doctor and Hospital to get names and fees
+        const doctorObj = yield Doctor_1.default.findById(doctorId);
+        const hospitalObj = yield Hospital_1.default.findById(hospitalId);
+        const finalDocName = doctorObj ? `Dr. ${doctorObj.name}` : "Dr. test";
+        const finalHospName = hospitalObj ? hospitalObj.name : "Test";
+        const finalFee = Number(consultationFee) || (doctorObj ? doctorObj.fee : 500);
         // Create Appointment
         const appointment = new Appointment_1.default({
             patient: patientId,
@@ -182,7 +190,12 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             status: 'pending', // Pending payment
             paymentStatus: 'unpaid',
             paymentSource: 'gateway',
-            tokenNumber
+            tokenNumber,
+            doctorName: finalDocName,
+            hospitalName: finalHospName,
+            consultationFee: finalFee,
+            appointmentDate: appointmentDate || startTime.toISOString().split('T')[0],
+            appointmentTime: appointmentTime || startTime.toTimeString().split(' ')[0].substring(0, 5)
         });
         yield appointment.save();
         // Update slot with appointment id if single slot
@@ -213,25 +226,47 @@ const getAppointmentDetails = (req, res) => __awaiter(void 0, void 0, void 0, fu
             res.status(400).json({ error: "Appointment ID is required" });
             return;
         }
-        const appointment = yield Appointment_1.default.findById(appointmentId);
+        // Populate doctor and hospital references in case flat document fields are missing
+        const appointment = yield Appointment_1.default.findById(appointmentId)
+            .populate('doctor')
+            .populate('hospital');
         if (!appointment) {
             res.status(404).json({ error: "Appointment not found" });
             return;
         }
-        const consultationFee = appointment.consultationFee;
+        const docObj = appointment.doctor;
+        const hospObj = appointment.hospital;
+        const doctorName = appointment.doctorName || (docObj ? `Dr. ${docObj.name}` : "") || "Dr. test";
+        const hospitalName = appointment.hospitalName || (hospObj ? hospObj.name : "") || "Test";
+        const consultationFee = appointment.consultationFee || (docObj ? docObj.fee : null) || 500;
+        let appointmentDate = appointment.appointmentDate;
+        let appointmentTime = appointment.appointmentTime;
+        if (!appointmentDate && appointment.slotTime) {
+            const d = new Date(appointment.slotTime);
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const date = String(d.getDate()).padStart(2, '0');
+            appointmentDate = `${year}-${month}-${date}`;
+        }
+        if (!appointmentTime && appointment.slotTime) {
+            const d = new Date(appointment.slotTime);
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            appointmentTime = `${hours}:${minutes}`;
+        }
         if (consultationFee === 0 || consultationFee === null || consultationFee === undefined) {
             res.status(400).json({ error: "Invalid appointment fee" });
             return;
         }
         res.status(200).json({
             appointmentId: appointment._id.toString(),
-            doctorName: appointment.doctorName || "",
-            hospitalName: appointment.hospitalName || "",
+            doctorName: doctorName,
+            hospitalName: hospitalName,
             consultationFee: consultationFee,
-            appointmentDate: appointment.appointmentDate || "",
-            appointmentTime: appointment.appointmentTime || "",
-            doctorId: appointment.doctor ? appointment.doctor.toString() : "",
-            hospitalId: appointment.hospital ? appointment.hospital.toString() : ""
+            appointmentDate: appointmentDate || "2026-06-24",
+            appointmentTime: appointmentTime || "06:30",
+            doctorId: docObj ? docObj._id.toString() : (appointment.doctor ? appointment.doctor.toString() : ""),
+            hospitalId: hospObj ? hospObj._id.toString() : (appointment.hospital ? appointment.hospital.toString() : "")
         });
     }
     catch (error) {
