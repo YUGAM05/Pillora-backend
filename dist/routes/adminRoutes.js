@@ -12,6 +12,7 @@ router.get('/stats', authMiddleware_1.protect, authMiddleware_1.adminOnly, admin
 router.get('/trends', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getAdminTrends); // NEW: Trend data for graphs
 router.get('/activities', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getPlatformActivities); // NEW: Real-time platform activities
 router.get('/login-analytics', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getLoginAnalytics); // NEW: Login analytics stats & logs
+router.get('/revenue', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getRevenueAnalytics);
 // User Management
 const adminController_2 = require("../controllers/adminController");
 router.get('/users', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUsers);

@@ -12,13 +12,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
+exports.getRevenueAnalytics = exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
 const Order_1 = __importDefault(require("../models/Order"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 const Hospital_1 = __importDefault(require("../models/Hospital"));
+const Payment_1 = __importDefault(require("../models/Payment"));
+const Settlement_1 = __importDefault(require("../models/Settlement"));
 const aadhaarVerifier_1 = require("../utils/aadhaarVerifier");
 const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
@@ -675,3 +677,81 @@ const getLoginAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getLoginAnalytics = getLoginAnalytics;
+// @desc    Get Admin Revenue Analytics (Advance booking fees & Settlements)
+// @route   GET /api/admin/revenue
+// @access  Private/Admin
+const getRevenueAnalytics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        // 1. Total advance fees collected
+        const collectedResult = yield Payment_1.default.aggregate([
+            { $match: { status: { $in: ['completed', 'refund_initiated', 'refunded'] } } },
+            { $group: { _id: null, total: { $sum: '$advanceFee' } } }
+        ]);
+        const totalCollected = ((_a = collectedResult[0]) === null || _a === void 0 ? void 0 : _a.total) || 0;
+        // 2. Breakdown: retained (user cancellations)
+        const retainedResult = yield Settlement_1.default.aggregate([
+            { $match: { status: 'retained_by_pillora' } },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const retained = ((_b = retainedResult[0]) === null || _b === void 0 ? void 0 : _b.total) || 0;
+        // 3. Breakdown: refunded (hospital cancellations)
+        const refundedResult = yield Settlement_1.default.aggregate([
+            { $match: { status: 'refunded' } },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+        const refunded = ((_c = refundedResult[0]) === null || _c === void 0 ? void 0 : _c.total) || 0;
+        // 4. Breakdown: active settlements (pending / settled)
+        const activeSettlementsResult = yield Settlement_1.default.aggregate([
+            { $match: { status: { $in: ['pending_settlement', 'settled'] } } },
+            {
+                $group: {
+                    _id: null,
+                    totalAmount: { $sum: '$amount' },
+                    hospitalShare: { $sum: '$settledAmount' },
+                    pilloraCommission: { $sum: { $subtract: ['$amount', '$settledAmount'] } }
+                }
+            }
+        ]);
+        const activeSettlements = ((_d = activeSettlementsResult[0]) === null || _d === void 0 ? void 0 : _d.totalAmount) || 0;
+        const activeHospitalShare = ((_e = activeSettlementsResult[0]) === null || _e === void 0 ? void 0 : _e.hospitalShare) || 0;
+        const activePilloraCommission = ((_f = activeSettlementsResult[0]) === null || _f === void 0 ? void 0 : _f.pilloraCommission) || 0;
+        // 5. Weekly settlement summary
+        const weeklySummary = yield Settlement_1.default.aggregate([
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$settledDate" } },
+                    totalAmount: { $sum: "$amount" },
+                    payoutAmount: { $sum: "$settledAmount" },
+                    commissionAmount: { $sum: { $subtract: ["$amount", "$settledAmount"] } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { "_id": -1 } }
+        ]);
+        // 6. Recent Payments
+        const recentPayments = yield Payment_1.default.find({ status: { $ne: 'pending' } })
+            .populate('userId', 'name email')
+            .populate('hospitalId', 'name')
+            .sort({ createdAt: -1 })
+            .limit(20);
+        res.json({
+            success: true,
+            totalCollected,
+            breakdown: {
+                retained,
+                refunded,
+                activeSettlements,
+                activeHospitalShare,
+                activePilloraCommission
+            },
+            weeklySummary,
+            recentPayments
+        });
+    }
+    catch (error) {
+        console.error("Error in getRevenueAnalytics:", error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+});
+exports.getRevenueAnalytics = getRevenueAnalytics;

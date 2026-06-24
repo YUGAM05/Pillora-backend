@@ -70,5 +70,10 @@ const AppointmentSchema = new mongoose_1.Schema({
     patientPhone: { type: String },
     patientEmail: { type: String },
     patientAge: { type: Number },
+    doctorName: { type: String },
+    hospitalName: { type: String },
+    consultationFee: { type: Number },
+    appointmentDate: { type: String },
+    appointmentTime: { type: String },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Appointment', AppointmentSchema);

@@ -11,6 +11,7 @@ const router = express_1.default.Router();
 router.get('/', hospitalController_1.getHospitals);
 router.get('/cities', hospitalController_1.getCities);
 router.get('/search', hospitalController_1.searchHospitals);
+router.get('/:hospitalId/settlements', authMiddleware_1.protect, hospitalController_1.getHospitalSettlements);
 router.get('/:id', hospitalController_1.getHospitalById);
 router.post('/seed', hospitalController_1.seedHospitals);
 router.post('/', authMiddleware_1.protect, authMiddleware_1.adminOnly, hospitalController_1.createHospital);

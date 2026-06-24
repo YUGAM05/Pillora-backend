@@ -12,9 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = exports.getCities = void 0;
+exports.getHospitalSettlements = exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = exports.getCities = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor")); // ✅ Added
+const Settlement_1 = __importDefault(require("../models/Settlement"));
 const cloudinary_1 = require("cloudinary"); // ✅ Added
 const slugify_1 = __importDefault(require("slugify"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -729,3 +730,34 @@ const searchHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.searchHospitals = searchHospitals;
+// @desc    Get settlements for a specific hospital (Weekly view / history)
+// @route   GET /api/hospitals/:hospitalId/settlements
+// @access  Private (Hospital admin)
+const getHospitalSettlements = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { hospitalId } = req.params;
+        if (!mongoose_1.default.isValidObjectId(hospitalId)) {
+            res.status(400).json({ success: false, message: 'Invalid hospital ID' });
+            return;
+        }
+        // Fetch settlements for the hospital, populating appointment details
+        const settlements = yield Settlement_1.default.find({ hospitalId })
+            .populate({
+            path: 'appointmentId',
+            populate: {
+                path: 'doctor patient',
+                select: 'name specialty email'
+            }
+        })
+            .sort({ settledDate: -1 });
+        res.json({
+            success: true,
+            settlements
+        });
+    }
+    catch (error) {
+        console.error('[GetHospitalSettlementsError]', error.message);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+});
+exports.getHospitalSettlements = getHospitalSettlements;

@@ -76,5 +76,6 @@ const HospitalSchema = new mongoose_1.Schema({
     hospitalType: { type: String, enum: ['Government', 'Private', 'Trust', 'Charitable'], default: 'Private' },
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
+    trialEndDate: { type: Date },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Hospital', HospitalSchema);

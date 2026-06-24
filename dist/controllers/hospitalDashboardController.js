@@ -20,6 +20,8 @@ const Appointment_1 = __importDefault(require("../models/Appointment"));
 const User_1 = __importDefault(require("../models/User"));
 const PatientNote_1 = __importDefault(require("../models/PatientNote"));
 const Payment_1 = __importDefault(require("../models/Payment"));
+const Settlement_1 = __importDefault(require("../models/Settlement"));
+const razorpay_1 = __importDefault(require("razorpay"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
 const holdManager_1 = require("../utils/holdManager");
@@ -51,7 +53,8 @@ const getHospitalStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
             stats: {
                 doctors: doctorCount,
                 appointments: appointmentCount,
-                pending: pendingAppointments
+                pending: pendingAppointments,
+                hospital: hospital
             },
             recentAppointments,
             management_type: hospital.management_type
@@ -339,7 +342,7 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 hospital: hospitalId,
                 slot: slotId,
                 slotTime: new Date(slotTime),
-                status: 'confirmed',
+                status: 'pending',
                 tokenNumber,
                 patientName,
                 patientPhone,
@@ -382,44 +385,9 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                     status: 'booked'
                 });
             }
-            try {
-                const hospitalDoc = yield Hospital_1.default.findById(hospitalId);
-                const hospitalNameStr = hospitalDoc ? hospitalDoc.name : 'Pillora Hospital';
-                // Convert UTC timestamp to IST before passing to email (fixes UTC+5:30 timezone bug)
-                const dateStr = (0, dateHelper_1.formatDateIST)(slotTime);
-                const timeSlotStr = (0, dateHelper_1.formatTimeIST)(slotTime);
-                yield (0, emailService_2.sendBookingConfirmationEmail)({
-                    toEmail: patientEmail,
-                    patientName: patientName,
-                    hospitalName: hospitalNameStr,
-                    date: dateStr,
-                    timeSlot: timeSlotStr,
-                    bookingId: appointment._id.toString()
-                });
-                if (hospitalDoc && hospitalDoc.email) {
-                    try {
-                        yield (0, emailService_2.sendHospitalNotificationEmail)({
-                            hospitalEmail: hospitalDoc.email,
-                            hospitalName: hospitalDoc.name,
-                            patientName: patientName,
-                            patientEmail: patientEmail,
-                            patientPhone: patientPhone,
-                            date: dateStr,
-                            timeSlot: timeSlotStr,
-                            bookingId: appointment._id.toString()
-                        });
-                    }
-                    catch (emailError) {
-                        console.error('Hospital email failed (non-critical):', emailError.message);
-                    }
-                }
-            }
-            catch (emailError) {
-                console.error('Email failed (non-critical):', emailError.message);
-            }
             res.status(201).json({
                 success: true,
-                message: 'Appointment booked successfully',
+                message: 'Appointment booking initiated. Please proceed to payment.',
                 appointment: Object.assign(Object.assign({}, appointment.toObject()), { tokenNumber })
             });
         }
@@ -637,8 +605,50 @@ const cancelSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         slot.cancellationReason = reason || 'Doctor unavailable';
         slot.cancelledBy = (((_a = req.user) === null || _a === void 0 ? void 0 : _a._id) || ((_b = req.user) === null || _b === void 0 ? void 0 : _b.id));
         yield slot.save();
-        // Update affected bookings to cancelled
-        yield Appointment_1.default.updateMany({ slot: slot._id }, { status: 'cancelled' });
+        // Update affected bookings to cancelled and refund online payments (hospital initiated)
+        const affectedAppointments = yield Appointment_1.default.find({ slot: slot._id, status: { $ne: 'cancelled' } });
+        const razorpay = new razorpay_1.default({
+            key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
+            key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+        });
+        for (const app of affectedAppointments) {
+            app.status = 'cancelled';
+            if (reason) {
+                app.notes = app.notes ? `${app.notes}\nCancellation reason: ${reason}` : `Cancellation reason: ${reason}`;
+            }
+            yield app.save();
+            // Handle refund
+            const payment = yield Payment_1.default.findOne({ appointmentId: app._id });
+            if (payment && payment.status === 'completed') {
+                payment.status = 'refund_initiated';
+                yield payment.save();
+                if (payment.razorpayPaymentId) {
+                    try {
+                        const refundAmount = Math.round(payment.amount * 100);
+                        yield razorpay.payments.refund(payment.razorpayPaymentId, {
+                            amount: refundAmount,
+                            notes: {
+                                reason: reason || 'Slot cancelled by hospital (doctor unavailable)',
+                                appointmentId: app._id.toString()
+                            }
+                        });
+                    }
+                    catch (refundError) {
+                        console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refundError.message);
+                    }
+                }
+                // Update settlement
+                const settlement = yield Settlement_1.default.findOne({ appointmentId: app._id });
+                if (settlement) {
+                    settlement.status = 'refunded';
+                    yield settlement.save();
+                }
+            }
+            else if (payment && payment.status === 'pending') {
+                payment.status = 'failed';
+                yield payment.save();
+            }
+        }
         // Emit socket update for real-time lists
         const io = req.app.get('io');
         if (io) {

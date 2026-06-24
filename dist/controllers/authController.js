@@ -275,32 +275,26 @@ const loginUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     });
                     return;
                 }
-                // If MFA is NOT set up → force MFA setup
-                if (!user.mfaSecret) {
-                    const secret = new OTPAuth.Secret().base32;
+                // If MFA is NOT fully enabled (isMfaEnabled is false) → force/allow MFA setup
+                let secret = user.mfaSecret;
+                if (!secret) {
+                    secret = new OTPAuth.Secret().base32;
                     user.mfaSecret = secret;
                     yield user.save();
-                    const totp = new OTPAuth.TOTP({
-                        issuer: 'Pillora Admin',
-                        label: user.email,
-                        secret: OTPAuth.Secret.fromBase32(secret)
-                    });
-                    const otpauthUrl = totp.toString();
-                    const qrCode = yield qrcode_1.default.toDataURL(otpauthUrl);
-                    res.json({
-                        mfaSetupRequired: true,
-                        userId: user._id,
-                        qrCode,
-                        secret,
-                        message: 'MFA setup is required before accessing the admin panel'
-                    });
-                    return;
                 }
-                // MFA secret exists but not enabled → require verification
+                const totp = new OTPAuth.TOTP({
+                    issuer: 'Pillora Admin',
+                    label: user.email,
+                    secret: OTPAuth.Secret.fromBase32(secret)
+                });
+                const otpauthUrl = totp.toString();
+                const qrCode = yield qrcode_1.default.toDataURL(otpauthUrl);
                 res.json({
-                    mfaRequired: true,
+                    mfaSetupRequired: true,
                     userId: user._id,
-                    message: 'Please verify your authenticator code'
+                    qrCode,
+                    secret,
+                    message: 'MFA setup is required before accessing the admin panel'
                 });
                 return;
             }

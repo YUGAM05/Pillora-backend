@@ -25,6 +25,11 @@ export interface IAppointment extends Document {
     patientPhone?: string;
     patientEmail?: string;
     patientAge?: number;
+    doctorName?: string;
+    hospitalName?: string;
+    consultationFee?: number;
+    appointmentDate?: string;
+    appointmentTime?: string;
 }
 
 const AppointmentSchema: Schema = new Schema({
@@ -63,6 +68,11 @@ const AppointmentSchema: Schema = new Schema({
     patientPhone: { type: String },
     patientEmail: { type: String },
     patientAge: { type: Number },
+    doctorName: { type: String },
+    hospitalName: { type: String },
+    consultationFee: { type: Number },
+    appointmentDate: { type: String },
+    appointmentTime: { type: String },
 }, { timestamps: true });
 
 export default mongoose.model<IAppointment>('Appointment', AppointmentSchema);

@@ -34,22 +34,19 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
-const PaymentSchema = new mongoose_1.Schema({
-    appointmentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment', required: true, unique: true }, // one payment per appointment
-    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+const SettlementSchema = new mongoose_1.Schema({
     hospitalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
-    patientName: { type: String, required: false },
+    appointmentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment', required: true },
     amount: { type: Number, required: true, min: 0 },
-    consultationFee: { type: Number, required: false },
-    advanceFee: { type: Number, required: false },
-    razorpayOrderId: { type: String, required: false },
-    razorpayPaymentId: { type: String, required: false },
-    mode: { type: String, enum: ['online', 'offline'], required: false, default: 'online' },
+    type: { type: String, enum: ['advance_fee'], default: 'advance_fee', required: true },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed', 'refund_initiated', 'refunded', 'paid'],
-        default: 'pending'
+        enum: ['pending_settlement', 'settled', 'refunded', 'retained_by_pillora'],
+        default: 'pending_settlement',
+        required: true
     },
-    recordedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false }
+    trialActive: { type: Boolean, default: false, required: true },
+    settledDate: { type: Date, required: true },
+    settledAmount: { type: Number, required: true, min: 0 },
 }, { timestamps: true });
-exports.default = mongoose_1.default.model('Payment', PaymentSchema);
+exports.default = mongoose_1.default.model('Settlement', SettlementSchema);
