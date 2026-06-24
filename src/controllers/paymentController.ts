@@ -7,6 +7,7 @@ import Hospital from '../models/Hospital';
 import Settlement from '../models/Settlement';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
+import { sendAppointmentNotification } from '../services/pushNotificationService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import User from '../models/User';
 
@@ -285,6 +286,22 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                         } catch (emailError: any) {
                             console.error('Hospital confirmation email failure (non-critical):', emailError.message);
                         }
+                    }
+
+                    // Trigger real-time browser push notification to hospital admin
+                    try {
+                        const patName = populatedApp.patientName || (populatedApp.patient as any).name || 'Patient';
+                        const docName = populatedApp.doctorName || (populatedApp.doctor as any).name || 'Doctor';
+                        const hospitalId = (populatedApp.hospital as any)._id?.toString() || populatedApp.hospital.toString();
+                        await sendAppointmentNotification(hospitalId, {
+                            appointmentId: populatedApp._id.toString(),
+                            patientName: patName,
+                            doctorName: docName,
+                            appointmentDate: dateStr,
+                            appointmentTime: timeSlotStr
+                        });
+                    } catch (pushErr: any) {
+                        console.error('Web Push notification broadcast failure (non-critical):', pushErr.message);
                     }
                 }
             } catch (emailError: any) {
