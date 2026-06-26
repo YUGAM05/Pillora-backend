@@ -195,8 +195,8 @@ const createAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
             doctorName: finalDocName,
             hospitalName: finalHospName,
             consultationFee: finalFee,
-            appointmentDate: appointmentDate || startTime.toISOString().split('T')[0],
-            appointmentTime: appointmentTime || startTime.toTimeString().split(' ')[0].substring(0, 5)
+            appointmentDate: appointmentDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
+            appointmentTime: appointmentTime || new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
         });
         yield appointment.save();
         // Update slot with appointment id if single slot
@@ -242,18 +242,20 @@ const getAppointmentDetails = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const consultationFee = appointment.consultationFee || (docObj ? docObj.fee : null) || 500;
         let appointmentDate = appointment.appointmentDate;
         let appointmentTime = appointment.appointmentTime;
-        if (!appointmentDate && appointment.slotTime) {
+        if (appointment.slotTime) {
             const d = new Date(appointment.slotTime);
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const date = String(d.getDate()).padStart(2, '0');
-            appointmentDate = `${year}-${month}-${date}`;
-        }
-        if (!appointmentTime && appointment.slotTime) {
-            const d = new Date(appointment.slotTime);
-            const hours = String(d.getHours()).padStart(2, '0');
-            const minutes = String(d.getMinutes()).padStart(2, '0');
-            appointmentTime = `${hours}:${minutes}`;
+            appointmentDate = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(d);
+            appointmentTime = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).format(d);
         }
         if (consultationFee === 0 || consultationFee === null || consultationFee === undefined) {
             res.status(400).json({ error: "Invalid appointment fee" });
@@ -357,8 +359,8 @@ const holdAppointment = (req, res) => __awaiter(void 0, void 0, void 0, function
                 doctorName: finalDocName,
                 hospitalName: finalHospName,
                 consultationFee: finalFee,
-                appointmentDate: date || startTime.toISOString().split('T')[0],
-                appointmentTime: slotStart.includes('T') ? startTime.toTimeString().split(' ')[0].substring(0, 5) : slotStart
+                appointmentDate: date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
+                appointmentTime: new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
             });
             yield appointment.save();
         }

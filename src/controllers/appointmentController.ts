@@ -198,8 +198,8 @@ export const createAppointment = async (req: any, res: Response): Promise<void> 
             doctorName: finalDocName,
             hospitalName: finalHospName,
             consultationFee: finalFee,
-            appointmentDate: appointmentDate || startTime.toISOString().split('T')[0],
-            appointmentTime: appointmentTime || startTime.toTimeString().split(' ')[0].substring(0, 5)
+            appointmentDate: appointmentDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
+            appointmentTime: appointmentTime || new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
         });
 
         await appointment.save();
@@ -254,18 +254,21 @@ export const getAppointmentDetails = async (req: any, res: Response): Promise<vo
         let appointmentDate = appointment.appointmentDate;
         let appointmentTime = appointment.appointmentTime;
 
-        if (!appointmentDate && appointment.slotTime) {
+        if (appointment.slotTime) {
             const d = new Date(appointment.slotTime);
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const date = String(d.getDate()).padStart(2, '0');
-            appointmentDate = `${year}-${month}-${date}`;
-        }
-        if (!appointmentTime && appointment.slotTime) {
-            const d = new Date(appointment.slotTime);
-            const hours = String(d.getHours()).padStart(2, '0');
-            const minutes = String(d.getMinutes()).padStart(2, '0');
-            appointmentTime = `${hours}:${minutes}`;
+            appointmentDate = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(d);
+            
+            appointmentTime = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).format(d);
         }
 
         if (consultationFee === 0 || consultationFee === null || consultationFee === undefined) {
@@ -381,8 +384,8 @@ export const holdAppointment = async (req: AuthRequest, res: Response): Promise<
                 doctorName: finalDocName,
                 hospitalName: finalHospName,
                 consultationFee: finalFee,
-                appointmentDate: date || startTime.toISOString().split('T')[0],
-                appointmentTime: slotStart.includes('T') ? startTime.toTimeString().split(' ')[0].substring(0, 5) : slotStart
+                appointmentDate: date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
+                appointmentTime: new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
             });
 
             await appointment.save();
