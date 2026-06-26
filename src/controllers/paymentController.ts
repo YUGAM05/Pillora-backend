@@ -335,6 +335,19 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
             return;
         }
 
+        const amountNum = Number(amount);
+        if (isNaN(amountNum) || amountNum <= 0) {
+            res.status(400).json({ error: 'Invalid payment amount' });
+            return;
+        }
+
+        // Check payment not already completed to avoid E11000 duplicate key error
+        const existingCompletedPayment = await Payment.findOne({ appointmentId, status: 'completed' });
+        if (existingCompletedPayment) {
+            res.status(400).json({ error: 'Appointment already paid' });
+            return;
+        }
+
         const appointment = await Appointment.findById(appointmentId);
         if (!appointment) {
             res.status(404).json({ error: 'Appointment not found' });
@@ -386,7 +399,8 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
             success: true,
             orderId: order.id,
             amount: order.amount,
-            currency: 'INR'
+            currency: 'INR',
+            keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn'
         });
     } catch (error: any) {
         console.error('[CreatePaymentOrderError]', error.message);
