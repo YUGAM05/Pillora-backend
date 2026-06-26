@@ -65,6 +65,12 @@ const verifyAadhaarLocal = (imageBuffer, patientName) => __awaiter(void 0, void 
             if (imageBuffer.startsWith('data:')) {
                 console.log("[Agent] Detected Data URL format.");
             }
+            else if (imageBuffer.startsWith('http://') || imageBuffer.startsWith('https://')) {
+                console.log("[Agent] Detected remote URL, downloading as buffer...");
+                const axios = require('axios');
+                const response = yield axios.get(imageBuffer, { responseType: 'arraybuffer' });
+                processedImage = Buffer.from(response.data);
+            }
             else {
                 console.log("[Agent] Detected raw base64 string, converting to Buffer...");
                 try {
