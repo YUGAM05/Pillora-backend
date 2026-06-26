@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAppointmentDetails = exports.createAppointment = exports.cancelAppointment = void 0;
+exports.holdAppointment = exports.getAppointmentDetails = exports.createAppointment = exports.cancelAppointment = void 0;
 const Appointment_1 = __importDefault(require("../models/Appointment"));
 const Payment_1 = __importDefault(require("../models/Payment"));
 const Settlement_1 = __importDefault(require("../models/Settlement"));
@@ -20,6 +20,7 @@ const razorpay_1 = __importDefault(require("razorpay"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Hospital_1 = __importDefault(require("../models/Hospital"));
+const holdManager_1 = require("../utils/holdManager");
 const razorpay = new razorpay_1.default({
     key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
     key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
@@ -275,3 +276,100 @@ const getAppointmentDetails = (req, res) => __awaiter(void 0, void 0, void 0, fu
     }
 });
 exports.getAppointmentDetails = getAppointmentDetails;
+/**
+ * @desc    Hold an appointment slot temporarily (acts as placeholder before payment completion)
+ * @route   POST /api/appointments/hold
+ * @access  Private
+ */
+const holdAppointment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { doctorId, slotStart, slotEnd, date } = req.body;
+        const patientId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.id) || ((_b = req.user) === null || _b === void 0 ? void 0 : _b._id);
+        if (!patientId) {
+            res.status(401).json({ success: false, message: 'User not authenticated' });
+            return;
+        }
+        if (!doctorId || !slotStart || !slotEnd || !date) {
+            res.status(400).json({ success: false, message: 'Missing required fields' });
+            return;
+        }
+        const doctorObj = yield Doctor_1.default.findById(doctorId);
+        if (!doctorObj) {
+            res.status(404).json({ success: false, message: 'Doctor not found' });
+            return;
+        }
+        const hospitalId = doctorObj.hospital;
+        let startTime = slotStart.includes('T') ? new Date(slotStart) : new Date(`${date}T${slotStart}`);
+        let endTime = slotEnd.includes('T') ? new Date(slotEnd) : new Date(`${date}T${slotEnd}`);
+        // Find or create slot
+        let slot = yield Slot_1.default.findOne({
+            doctor: doctorId,
+            hospital: hospitalId,
+            startTime: startTime
+        });
+        if (!slot) {
+            slot = new Slot_1.default({
+                doctor: doctorId,
+                hospital: hospitalId,
+                startTime: startTime,
+                endTime: endTime,
+                status: 'available',
+                booked_count: 0,
+                max_appointments: 1,
+                hold_count: 0
+            });
+            yield slot.save();
+        }
+        // Create temporary hold via holdManager
+        const io = req.app.get('io');
+        const holdResult = yield (0, holdManager_1.createHold)(slot._id.toString(), patientId.toString(), io);
+        if (!holdResult.success && holdResult.message !== 'Slot already held by you') {
+            res.status(400).json({ success: false, message: holdResult.message });
+            return;
+        }
+        // Create Appointment record if not already exists for this slot and patient
+        let appointment = yield Appointment_1.default.findOne({
+            patient: patientId,
+            slot: slot._id,
+            status: 'pending'
+        });
+        if (!appointment) {
+            const activeAppointmentsCount = yield Appointment_1.default.countDocuments({
+                slot: slot._id,
+                status: { $ne: 'cancelled' }
+            });
+            const tokenNumber = activeAppointmentsCount + 1;
+            const hospitalObj = yield Hospital_1.default.findById(hospitalId);
+            const finalDocName = `Dr. ${doctorObj.name}`;
+            const finalHospName = hospitalObj ? hospitalObj.name : "Hospital";
+            const finalFee = doctorObj.fee || 500;
+            appointment = new Appointment_1.default({
+                patient: patientId,
+                doctor: doctorId,
+                hospital: hospitalId,
+                slot: slot._id,
+                slotTime: startTime,
+                status: 'pending',
+                paymentStatus: 'unpaid',
+                paymentSource: 'gateway',
+                tokenNumber,
+                doctorName: finalDocName,
+                hospitalName: finalHospName,
+                consultationFee: finalFee,
+                appointmentDate: date || startTime.toISOString().split('T')[0],
+                appointmentTime: slotStart.includes('T') ? startTime.toTimeString().split(' ')[0].substring(0, 5) : slotStart
+            });
+            yield appointment.save();
+        }
+        res.status(200).json({
+            success: true,
+            appointmentId: appointment._id.toString()
+        });
+    }
+    catch (error) {
+        console.error('[HoldAppointmentError]', error.message);
+        res.status(500).json({ success: false, message: 'Failed to hold appointment', error: error.message });
+    }
+});
+exports.holdAppointment = holdAppointment;

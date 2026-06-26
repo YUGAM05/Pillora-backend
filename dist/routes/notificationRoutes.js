@@ -14,7 +14,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const authMiddleware_1 = require("../middleware/authMiddleware");
+const hospitalMiddleware_1 = require("../middleware/hospitalMiddleware");
 const Notification_1 = __importDefault(require("../models/Notification"));
+const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
 const router = express_1.default.Router();
 // @desc    Get all notifications for logged in user
 // @route   GET /api/notifications
@@ -52,6 +54,45 @@ router.put('/read-all', authMiddleware_1.protect, (req, res) => __awaiter(void 0
     }
     catch (error) {
         res.status(500).json({ message: 'Error updating notifications' });
+    }
+}));
+// @desc    Subscribe to push notifications
+// @route   POST /api/notifications/subscribe
+// @access  Private/Hospital
+router.post('/subscribe', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { subscription, hospitalId } = req.body;
+        const targetHospitalId = hospitalId || ((_a = req.hospital) === null || _a === void 0 ? void 0 : _a._id);
+        if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+            res.status(400).json({ message: 'Missing push subscription payload or keys' });
+            return;
+        }
+        if (!targetHospitalId) {
+            res.status(400).json({ message: 'Hospital context is required' });
+            return;
+        }
+        // Verify that the logged in hospital user is authorized for this hospital ID
+        if (((_b = req.hospital) === null || _b === void 0 ? void 0 : _b._id.toString()) !== targetHospitalId.toString() && req.user.role !== 'admin') {
+            res.status(403).json({ message: 'Unauthorized hospital operation' });
+            return;
+        }
+        // Upsert the subscription using the endpoint as search criteria
+        const updatedSubscription = yield PushSubscription_1.default.findOneAndUpdate({ 'subscription.endpoint': subscription.endpoint }, {
+            hospitalId: targetHospitalId,
+            subscription: {
+                endpoint: subscription.endpoint,
+                keys: {
+                    p256dh: subscription.keys.p256dh,
+                    auth: subscription.keys.auth
+                }
+            }
+        }, { upsert: true, new: true });
+        res.status(200).json({ success: true, data: updatedSubscription });
+    }
+    catch (error) {
+        console.error('[PushSubscribeError]', error.message);
+        res.status(500).json({ message: 'Failed to subscribe to push notifications', error: error.message });
     }
 }));
 exports.default = router;

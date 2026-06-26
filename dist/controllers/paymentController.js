@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyPayment = exports.initiatePayment = void 0;
+exports.createPaymentOrder = exports.verifyPayment = exports.initiatePayment = void 0;
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const Payment_1 = __importDefault(require("../models/Payment"));
@@ -21,6 +21,7 @@ const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Settlement_1 = __importDefault(require("../models/Settlement"));
 const dateHelper_1 = require("../utils/dateHelper");
 const emailService_1 = require("../services/emailService");
+const pushNotificationService_1 = require("../services/pushNotificationService");
 const User_1 = __importDefault(require("../models/User"));
 // Initialize Razorpay
 // We default to fallback test keys if env variables are not present.
@@ -122,7 +123,7 @@ exports.initiatePayment = initiatePayment;
  * @access  Public (Webhook / Callback endpoint)
  */
 const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         let razorpayPaymentId = '';
         let razorpayOrderId = '';
@@ -278,6 +279,22 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                             console.error('Hospital confirmation email failure (non-critical):', emailError.message);
                         }
                     }
+                    // Trigger real-time browser push notification to hospital admin
+                    try {
+                        const patName = populatedApp.patientName || populatedApp.patient.name || 'Patient';
+                        const docName = populatedApp.doctorName || populatedApp.doctor.name || 'Doctor';
+                        const hospitalId = ((_b = populatedApp.hospital._id) === null || _b === void 0 ? void 0 : _b.toString()) || populatedApp.hospital.toString();
+                        yield (0, pushNotificationService_1.sendAppointmentNotification)(hospitalId, {
+                            appointmentId: populatedApp._id.toString(),
+                            patientName: patName,
+                            doctorName: docName,
+                            appointmentDate: dateStr,
+                            appointmentTime: timeSlotStr
+                        });
+                    }
+                    catch (pushErr) {
+                        console.error('Web Push notification broadcast failure (non-critical):', pushErr.message);
+                    }
                 }
             }
             catch (emailError) {
@@ -296,3 +313,77 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.verifyPayment = verifyPayment;
+/**
+ * @desc    Create Razorpay payment order and update appointment patient details
+ * @route   POST /api/payments/create-order
+ * @access  Private
+ */
+const createPaymentOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { appointmentId, amount, patientName, patientPhone, patientEmail, patientAge } = req.body;
+        const userId = ((_a = req.user) === null || _a === void 0 ? void 0 : _a.id) || ((_b = req.user) === null || _b === void 0 ? void 0 : _b._id);
+        if (!appointmentId || !amount) {
+            res.status(400).json({ error: 'Missing required parameters: appointmentId, amount' });
+            return;
+        }
+        const appointment = yield Appointment_1.default.findById(appointmentId);
+        if (!appointment) {
+            res.status(404).json({ error: 'Appointment not found' });
+            return;
+        }
+        // Update patient details if provided
+        if (patientName)
+            appointment.patientName = patientName;
+        if (patientPhone)
+            appointment.patientPhone = patientPhone;
+        if (patientEmail)
+            appointment.patientEmail = patientEmail;
+        if (patientAge)
+            appointment.patientAge = Number(patientAge);
+        yield appointment.save();
+        // Create Razorpay order
+        let order;
+        try {
+            order = yield razorpay.orders.create({
+                amount: Math.round(amount), // paise
+                currency: 'INR',
+                receipt: appointmentId.toString(),
+                payment_capture: 1
+            });
+        }
+        catch (rzpErr) {
+            console.error('[RazorpayOrderError]', rzpErr.message);
+            res.status(500).json({ error: 'Payment gateway error' });
+            return;
+        }
+        // Delete any existing non-completed payment documents to avoid uniqueness violation
+        yield Payment_1.default.deleteMany({ appointmentId, status: { $ne: 'completed' } });
+        // Save to DB
+        const feeNum = appointment.consultationFee || 500;
+        const advanceFee = feeNum * 0.20;
+        const payment = new Payment_1.default({
+            appointmentId,
+            userId: userId || appointment.patient,
+            hospitalId: appointment.hospital,
+            consultationFee: feeNum,
+            advanceFee,
+            amount: advanceFee, // satisfies Mongoose schema validation requirement
+            razorpayOrderId: order.id,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        yield payment.save();
+        res.status(200).json({
+            success: true,
+            orderId: order.id,
+            amount: order.amount,
+            currency: 'INR'
+        });
+    }
+    catch (error) {
+        console.error('[CreatePaymentOrderError]', error.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+exports.createPaymentOrder = createPaymentOrder;

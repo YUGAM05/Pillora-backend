@@ -319,3 +319,77 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         res.status(500).json({ success: false, message: 'Payment verification failed', error: error.message });
     }
 };
+
+/**
+ * @desc    Create Razorpay payment order and update appointment patient details
+ * @route   POST /api/payments/create-order
+ * @access  Private
+ */
+export const createPaymentOrder = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { appointmentId, amount, patientName, patientPhone, patientEmail, patientAge } = req.body;
+        const userId = req.user?.id || req.user?._id;
+
+        if (!appointmentId || !amount) {
+            res.status(400).json({ error: 'Missing required parameters: appointmentId, amount' });
+            return;
+        }
+
+        const appointment = await Appointment.findById(appointmentId);
+        if (!appointment) {
+            res.status(404).json({ error: 'Appointment not found' });
+            return;
+        }
+
+        // Update patient details if provided
+        if (patientName) appointment.patientName = patientName;
+        if (patientPhone) appointment.patientPhone = patientPhone;
+        if (patientEmail) appointment.patientEmail = patientEmail;
+        if (patientAge) appointment.patientAge = Number(patientAge);
+        await appointment.save();
+
+        // Create Razorpay order
+        let order;
+        try {
+            order = await razorpay.orders.create({
+                amount: Math.round(amount), // paise
+                currency: 'INR',
+                receipt: appointmentId.toString(),
+                payment_capture: 1 as any
+            });
+        } catch (rzpErr: any) {
+            console.error('[RazorpayOrderError]', rzpErr.message);
+            res.status(500).json({ error: 'Payment gateway error' });
+            return;
+        }
+
+        // Delete any existing non-completed payment documents to avoid uniqueness violation
+        await Payment.deleteMany({ appointmentId, status: { $ne: 'completed' } });
+
+        // Save to DB
+        const feeNum = appointment.consultationFee || 500;
+        const advanceFee = feeNum * 0.20;
+        const payment = new Payment({
+            appointmentId,
+            userId: userId || appointment.patient,
+            hospitalId: appointment.hospital,
+            consultationFee: feeNum,
+            advanceFee,
+            amount: advanceFee, // satisfies Mongoose schema validation requirement
+            razorpayOrderId: order.id,
+            status: 'pending',
+            createdAt: new Date()
+        });
+        await payment.save();
+
+        res.status(200).json({
+            success: true,
+            orderId: order.id,
+            amount: order.amount,
+            currency: 'INR'
+        });
+    } catch (error: any) {
+        console.error('[CreatePaymentOrderError]', error.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};

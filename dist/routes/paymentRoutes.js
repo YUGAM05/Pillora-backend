@@ -8,5 +8,6 @@ const paymentController_1 = require("../controllers/paymentController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = express_1.default.Router();
 router.post('/initiate', authMiddleware_1.protect, paymentController_1.initiatePayment);
+router.post('/create-order', authMiddleware_1.protect, paymentController_1.createPaymentOrder);
 router.post('/verify', paymentController_1.verifyPayment);
 exports.default = router;
