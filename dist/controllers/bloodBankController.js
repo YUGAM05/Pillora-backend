@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.updateDonorAdmin = exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.standardizeDonor = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const bloodCompatibility_1 = require("../utils/bloodCompatibility");
@@ -125,9 +125,16 @@ const findMatches = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
         // Get all compatible blood groups
         const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
         let query = {
             bloodGroup: { $in: compatibleGroups },
-            isAvailable: true
+            isAvailable: true,
+            $or: [
+                { lastDonationDate: { $exists: false } },
+                { lastDonationDate: null },
+                { lastDonationDate: { $lte: ninetyDaysAgo } }
+            ]
         };
         // Filter by city if provided
         if (city) {
@@ -217,12 +224,19 @@ const createRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 yield (0, bloodConnectService_1.processKYCResult)(request._id.toString(), kycPassed);
                 // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
+                    const ninetyDaysAgo = new Date();
+                    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
                     const compatibleGroups = (0, bloodCompatibility_1.getCompatibleDonors)(bloodGroup);
                     const matchedDonorsRaw = yield BloodDonor_1.default.find({
                         bloodGroup: { $in: compatibleGroups },
                         city: new RegExp(city, 'i'),
                         area: new RegExp(area, 'i'),
-                        isAvailable: true
+                        isAvailable: true,
+                        $or: [
+                            { lastDonationDate: { $exists: false } },
+                            { lastDonationDate: null },
+                            { lastDonationDate: { $lte: ninetyDaysAgo } }
+                        ]
                     }).limit(5);
                     const matchedDonors = matchedDonorsRaw.map(d => ({ name: d.name, phone: d.phone }));
                     if (matchedDonors.length > 0) {
@@ -295,6 +309,50 @@ exports.getRequests = getRequests;
 // @desc    Get all donors for admin
 // @route   GET /api/blood-bank/admin/donors
 // @access  Private/Admin
+const standardizeDonor = (d) => {
+    var _a;
+    const lastDonation = d.lastDonationDate;
+    let eligibleFromDate = null;
+    let status = 'Eligible';
+    let daysRemaining = 0;
+    if (lastDonation) {
+        const donationDate = new Date(lastDonation);
+        const eligibleDate = new Date(donationDate.getTime());
+        eligibleDate.setDate(donationDate.getDate() + 90);
+        eligibleFromDate = eligibleDate;
+        const today = new Date();
+        const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const eligibleZero = new Date(eligibleDate.getFullYear(), eligibleDate.getMonth(), eligibleDate.getDate());
+        if (todayZero >= eligibleZero) {
+            status = 'Eligible';
+        }
+        else {
+            status = 'Not Eligible';
+            const diffTime = eligibleZero.getTime() - todayZero.getTime();
+            daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+    }
+    return {
+        _id: d._id,
+        name: d.name,
+        email: d.email || ((_a = d.user) === null || _a === void 0 ? void 0 : _a.email) || 'N/A',
+        bloodGroup: d.bloodGroup,
+        age: d.age,
+        gender: d.gender,
+        phone: d.phone,
+        city: d.city,
+        area: d.area,
+        address: d.address,
+        isAvailable: d.isAvailable,
+        source: d.source || 'user_panel',
+        lastDonationDate: lastDonation || null,
+        eligibleFromDate,
+        eligibilityStatus: status,
+        daysRemaining,
+        createdAt: d.createdAt
+    };
+};
+exports.standardizeDonor = standardizeDonor;
 const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -307,24 +365,7 @@ const getAllDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             .skip(skip)
             .limit(limit);
         console.log(`[AdminDonors] Total in DB: ${total}, Returning: ${donors.length}`);
-        const standardizedDonors = donors.map(d => {
-            var _a;
-            return ({
-                _id: d._id,
-                name: d.name,
-                email: d.email || ((_a = d.user) === null || _a === void 0 ? void 0 : _a.email) || 'N/A',
-                bloodGroup: d.bloodGroup,
-                age: d.age,
-                gender: d.gender,
-                phone: d.phone,
-                city: d.city,
-                area: d.area,
-                address: d.address,
-                isAvailable: d.isAvailable,
-                source: d.source || 'user_panel',
-                createdAt: d.createdAt
-            });
-        });
+        const standardizedDonors = donors.map(d => (0, exports.standardizeDonor)(d));
         res.status(200).json({
             donors: standardizedDonors,
             pagination: {
@@ -508,3 +549,45 @@ const deleteMyRequest = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.deleteMyRequest = deleteMyRequest;
+// @desc    Update donor details (Admin)
+// @route   PATCH /api/blood-bank/admin/donors/:id
+// @access  Private/Admin
+const updateDonorAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { lastDonationDate, isAvailable, name, email, phone, age, gender, address, area, city } = req.body;
+        const updateData = {};
+        if (lastDonationDate !== undefined) {
+            updateData.lastDonationDate = lastDonationDate ? new Date(lastDonationDate) : null;
+        }
+        if (isAvailable !== undefined) {
+            updateData.isAvailable = isAvailable;
+        }
+        if (name !== undefined)
+            updateData.name = name;
+        if (email !== undefined)
+            updateData.email = email;
+        if (phone !== undefined)
+            updateData.phone = phone;
+        if (age !== undefined)
+            updateData.age = Number(age);
+        if (gender !== undefined)
+            updateData.gender = gender;
+        if (address !== undefined)
+            updateData.address = address;
+        if (area !== undefined)
+            updateData.area = area;
+        if (city !== undefined)
+            updateData.city = city;
+        const donor = yield BloodDonor_1.default.findByIdAndUpdate(id, updateData, { new: true });
+        if (!donor) {
+            res.status(404).json({ message: 'Donor not found' });
+            return;
+        }
+        res.json((0, exports.standardizeDonor)(donor));
+    }
+    catch (error) {
+        res.status(500).json({ message: error.message || 'Server Error', error });
+    }
+});
+exports.updateDonorAdmin = updateDonorAdmin;

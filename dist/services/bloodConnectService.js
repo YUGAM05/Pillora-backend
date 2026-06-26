@@ -63,16 +63,29 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
         const escapedBloodGroup = escapeRegex(bloodGroupVal);
         const escapedCity = escapeRegex(cityVal);
         const escapedArea = escapeRegex(areaVal);
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
         // Now search with filters
-        // Fix 2 & 3: Use case-insensitive regex for bloodGroup, trim fields, and check isAvailable condition
+        // Filter only donors whose status is Eligible (completed 90-day mandatory waiting period)
         let donors = yield BloodDonor_1.default.find({
             bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
             city: { $regex: escapedCity, $options: 'i' },
             area: { $regex: escapedArea, $options: 'i' },
-            $or: [
-                { isAvailable: true },
-                { isAvailable: { $exists: false } },
-                { isAvailable: null }
+            $and: [
+                {
+                    $or: [
+                        { isAvailable: true },
+                        { isAvailable: { $exists: false } },
+                        { isAvailable: null }
+                    ]
+                },
+                {
+                    $or: [
+                        { lastDonationDate: { $exists: false } },
+                        { lastDonationDate: null },
+                        { lastDonationDate: { $lte: ninetyDaysAgo } }
+                    ]
+                }
             ]
         });
         console.log('Matching donors found (strict city + area):', donors.length);
@@ -82,10 +95,21 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
             donors = yield BloodDonor_1.default.find({
                 bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
                 city: { $regex: escapedCity, $options: 'i' },
-                $or: [
-                    { isAvailable: true },
-                    { isAvailable: { $exists: false } },
-                    { isAvailable: null }
+                $and: [
+                    {
+                        $or: [
+                            { isAvailable: true },
+                            { isAvailable: { $exists: false } },
+                            { isAvailable: null }
+                        ]
+                    },
+                    {
+                        $or: [
+                            { lastDonationDate: { $exists: false } },
+                            { lastDonationDate: null },
+                            { lastDonationDate: { $lte: ninetyDaysAgo } }
+                        ]
+                    }
                 ]
             });
             console.log('Matching donors found (city fallback):', donors.length);

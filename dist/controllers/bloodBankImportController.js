@@ -93,6 +93,9 @@ const importDonorsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 // Address mapping
                 else if (header.includes('address'))
                     currentMap['address'] = colNumber;
+                // Last Blood Donation Date mapping
+                else if (header.includes('last') || header.includes('donation') || header.includes('date') || header.includes('prev'))
+                    currentMap['lastDonationDate'] = colNumber;
             });
             const missingFields = requiredFields.filter(f => !currentMap[f]);
             if (missingFields.length === 0) {
@@ -122,6 +125,14 @@ const importDonorsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 bloodGroup = bloodGroup.replace(/POSITIVE|POS|\+VE/g, '+')
                     .replace(/NEGATIVE|NEG|\-VE/g, '-')
                     .replace(/\s/g, '');
+                const lastDonVal = headerMap['lastDonationDate'] ? row.getCell(headerMap['lastDonationDate']).value : null;
+                let parsedLastDonDate = undefined;
+                if (lastDonVal) {
+                    const parsedDate = new Date(lastDonVal.toString());
+                    if (!isNaN(parsedDate.getTime())) {
+                        parsedLastDonDate = parsedDate;
+                    }
+                }
                 const donor = {
                     name: ((_b = row.getCell(headerMap['name']).value) === null || _b === void 0 ? void 0 : _b.toString().trim()) || '',
                     email: headerMap['email'] ? (((_c = row.getCell(headerMap['email']).value) === null || _c === void 0 ? void 0 : _c.toString().trim()) || '') : '',
@@ -132,6 +143,7 @@ const importDonorsFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, fu
                     city: headerMap['city'] ? (((_g = row.getCell(headerMap['city']).value) === null || _g === void 0 ? void 0 : _g.toString().trim()) || 'Unknown') : 'Unknown',
                     area: headerMap['area'] ? (((_h = row.getCell(headerMap['area']).value) === null || _h === void 0 ? void 0 : _h.toString().trim()) || 'Unknown') : 'Unknown',
                     address: headerMap['address'] ? (((_j = row.getCell(headerMap['address']).value) === null || _j === void 0 ? void 0 : _j.toString().trim()) || 'N/A') : 'N/A',
+                    lastDonationDate: parsedLastDonDate,
                     source: 'google_form',
                     isAvailable: true,
                     location: {

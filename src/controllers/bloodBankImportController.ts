@@ -94,6 +94,10 @@ export const importDonorsFromExcel = async (req: AuthRequest, res: Response): Pr
                 // Address mapping
                 else if (header.includes('address'))
                     currentMap['address'] = colNumber;
+
+                // Last Blood Donation Date mapping
+                else if (header.includes('last') || header.includes('donation') || header.includes('date') || header.includes('prev'))
+                    currentMap['lastDonationDate'] = colNumber;
             });
 
             const missingFields = requiredFields.filter(f => !currentMap[f]);
@@ -126,6 +130,15 @@ export const importDonorsFromExcel = async (req: AuthRequest, res: Response): Pr
                     .replace(/NEGATIVE|NEG|\-VE/g, '-')
                     .replace(/\s/g, '');
 
+                const lastDonVal = headerMap['lastDonationDate'] ? row.getCell(headerMap['lastDonationDate']).value : null;
+                let parsedLastDonDate: Date | undefined = undefined;
+                if (lastDonVal) {
+                    const parsedDate = new Date(lastDonVal.toString());
+                    if (!isNaN(parsedDate.getTime())) {
+                        parsedLastDonDate = parsedDate;
+                    }
+                }
+
                 const donor = {
                     name: row.getCell(headerMap['name']).value?.toString().trim() || '',
                     email: headerMap['email'] ? (row.getCell(headerMap['email']).value?.toString().trim() || '') : '',
@@ -136,6 +149,7 @@ export const importDonorsFromExcel = async (req: AuthRequest, res: Response): Pr
                     city: headerMap['city'] ? (row.getCell(headerMap['city']).value?.toString().trim() || 'Unknown') : 'Unknown',
                     area: headerMap['area'] ? (row.getCell(headerMap['area']).value?.toString().trim() || 'Unknown') : 'Unknown',
                     address: headerMap['address'] ? (row.getCell(headerMap['address']).value?.toString().trim() || 'N/A') : 'N/A',
+                    lastDonationDate: parsedLastDonDate,
                     source: 'google_form',
                     isAvailable: true,
                     location: {

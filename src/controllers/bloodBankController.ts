@@ -126,9 +126,17 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
         // Get all compatible blood groups
         const compatibleGroups = getCompatibleDonors(bloodGroup as string);
 
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
         let query: any = {
             bloodGroup: { $in: compatibleGroups },
-            isAvailable: true
+            isAvailable: true,
+            $or: [
+                { lastDonationDate: { $exists: false } },
+                { lastDonationDate: null },
+                { lastDonationDate: { $lte: ninetyDaysAgo } }
+            ]
         };
 
         // Filter by city if provided
@@ -228,12 +236,20 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
 
                 // Perform WhatsApp Matching & Notifications if verified
                 if (aiStatus === 'Verified') {
+                    const ninetyDaysAgo = new Date();
+                    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
                     const compatibleGroups = getCompatibleDonors(bloodGroup);
                     const matchedDonorsRaw = await BloodDonor.find({
                         bloodGroup: { $in: compatibleGroups },
                         city: new RegExp(city, 'i'),
                         area: new RegExp(area, 'i'),
-                        isAvailable: true
+                        isAvailable: true,
+                        $or: [
+                            { lastDonationDate: { $exists: false } },
+                            { lastDonationDate: null },
+                            { lastDonationDate: { $lte: ninetyDaysAgo } }
+                        ]
                     }).limit(5);
                     const matchedDonors = matchedDonorsRaw.map(d => ({ name: d.name, phone: d.phone }));
                     if (matchedDonors.length > 0) {
@@ -301,6 +317,52 @@ export const getRequests = async (req: Request, res: Response): Promise<void> =>
 // @desc    Get all donors for admin
 // @route   GET /api/blood-bank/admin/donors
 // @access  Private/Admin
+export const standardizeDonor = (d: any) => {
+  const lastDonation = d.lastDonationDate;
+  let eligibleFromDate = null;
+  let status = 'Eligible';
+  let daysRemaining = 0;
+
+  if (lastDonation) {
+    const donationDate = new Date(lastDonation);
+    const eligibleDate = new Date(donationDate.getTime());
+    eligibleDate.setDate(donationDate.getDate() + 90);
+    eligibleFromDate = eligibleDate;
+
+    const today = new Date();
+    const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const eligibleZero = new Date(eligibleDate.getFullYear(), eligibleDate.getMonth(), eligibleDate.getDate());
+
+    if (todayZero >= eligibleZero) {
+      status = 'Eligible';
+    } else {
+      status = 'Not Eligible';
+      const diffTime = eligibleZero.getTime() - todayZero.getTime();
+      daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    }
+  }
+
+  return {
+    _id: d._id,
+    name: d.name,
+    email: d.email || (d.user as any)?.email || 'N/A',
+    bloodGroup: d.bloodGroup,
+    age: d.age,
+    gender: d.gender,
+    phone: d.phone,
+    city: d.city,
+    area: d.area,
+    address: d.address,
+    isAvailable: d.isAvailable,
+    source: d.source || 'user_panel',
+    lastDonationDate: lastDonation || null,
+    eligibleFromDate,
+    eligibilityStatus: status,
+    daysRemaining,
+    createdAt: d.createdAt
+  };
+};
+
 export const getAllDonors = async (req: Request, res: Response): Promise<void> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -316,21 +378,7 @@ export const getAllDonors = async (req: Request, res: Response): Promise<void> =
 
     console.log(`[AdminDonors] Total in DB: ${total}, Returning: ${donors.length}`);
 
-    const standardizedDonors = donors.map(d => ({
-      _id: d._id,
-      name: d.name,
-      email: d.email || (d.user as any)?.email || 'N/A',
-      bloodGroup: d.bloodGroup,
-      age: d.age,
-      gender: d.gender,
-      phone: d.phone,
-      city: d.city,
-      area: d.area,
-      address: d.address,
-      isAvailable: d.isAvailable,
-      source: d.source || 'user_panel',
-      createdAt: d.createdAt
-    }));
+    const standardizedDonors = donors.map(d => standardizeDonor(d));
 
     res.status(200).json({
       donors: standardizedDonors,
@@ -536,6 +584,43 @@ export const deleteMyRequest = async (req: AuthRequest, res: Response): Promise<
         res.json({ message: 'Request deleted successfully' });
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Server Error' });
+    }
+};
+
+// @desc    Update donor details (Admin)
+// @route   PATCH /api/blood-bank/admin/donors/:id
+// @access  Private/Admin
+export const updateDonorAdmin = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const { lastDonationDate, isAvailable, name, email, phone, age, gender, address, area, city } = req.body;
+
+        const updateData: any = {};
+        if (lastDonationDate !== undefined) {
+            updateData.lastDonationDate = lastDonationDate ? new Date(lastDonationDate) : null;
+        }
+        if (isAvailable !== undefined) {
+            updateData.isAvailable = isAvailable;
+        }
+        if (name !== undefined) updateData.name = name;
+        if (email !== undefined) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
+        if (age !== undefined) updateData.age = Number(age);
+        if (gender !== undefined) updateData.gender = gender;
+        if (address !== undefined) updateData.address = address;
+        if (area !== undefined) updateData.area = area;
+        if (city !== undefined) updateData.city = city;
+
+        const donor = await BloodDonor.findByIdAndUpdate(id, updateData, { new: true });
+
+        if (!donor) {
+            res.status(404).json({ message: 'Donor not found' });
+            return;
+        }
+
+        res.json(standardizeDonor(donor));
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Server Error', error });
     }
 };
 

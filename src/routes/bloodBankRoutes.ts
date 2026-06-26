@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { protect, adminOnly } from '../middleware/authMiddleware';
-import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, deleteRequest, deleteMyRequest, getMyRequests, getMyDonorProfile, verifyRequestWithAI, updateKycStatus } from '../controllers/bloodBankController';
+import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, getAllRequestsAdmin, updateRequestStatus, findMatches, deleteDonor, deleteRequest, deleteMyRequest, getMyRequests, getMyDonorProfile, verifyRequestWithAI, updateKycStatus, updateDonorAdmin } from '../controllers/bloodBankController';
 import { exportDonorsToExcel, exportRequestsToExcel, exportDonorsToPDF, exportRequestsToPDF } from '../controllers/bloodBankExportController';
 import { importDonorsFromExcel, getDonorStats } from '../controllers/bloodBankImportController';
 import { downloadDonorTemplate } from '../controllers/bloodBankTemplateController';
@@ -15,6 +15,7 @@ router.post('/donors', protect, registerDonor);
 router.get('/donors', findDonors);
 router.get('/matches', findMatches);
 router.get('/admin/donors', protect, adminOnly, getAllDonors);
+router.patch('/admin/donors/:id', protect, adminOnly, updateDonorAdmin);
 router.delete('/admin/donors/:id', protect, adminOnly, deleteDonor);
 
 router.post('/requests', protect, createRequest);
