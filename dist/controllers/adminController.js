@@ -833,7 +833,7 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 headers.push('');
             }
         }
-        const expectedHeaders = ['Name', 'Age', 'Blood Group', 'Last Blood Donate Date', 'Address', 'City', 'Area'];
+        const expectedHeaders = ['Name', 'Age', 'Blood Group', 'Last Blood Donate Date', 'Phone Number', 'Address', 'City', 'Area'];
         const normalizedHeaders = headers.map(h => h.toLowerCase());
         const missingHeaders = expectedHeaders.filter(h => !normalizedHeaders.includes(h.toLowerCase()));
         if (missingHeaders.length > 0) {
@@ -863,10 +863,11 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
             const ageVal = getRowValue(row, 'Age');
             const bgVal = getRowValue(row, 'Blood Group');
             const dateVal = getRowValue(row, 'Last Blood Donate Date');
+            const phoneVal = getRowValue(row, 'Phone Number');
             const addressVal = getRowValue(row, 'Address');
             const cityVal = getRowValue(row, 'City');
             const areaVal = getRowValue(row, 'Area');
-            // 1. Check if all 7 fields are present (non-empty)
+            // 1. Check if all 8 fields are present (non-empty)
             const missingFields = [];
             if (nameVal === undefined || nameVal === null || String(nameVal).trim() === '')
                 missingFields.push('Name');
@@ -876,6 +877,8 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 missingFields.push('Blood Group');
             if (dateVal === undefined || dateVal === null || String(dateVal).trim() === '')
                 missingFields.push('Last Blood Donate Date');
+            if (phoneVal === undefined || phoneVal === null || String(phoneVal).trim() === '')
+                missingFields.push('Phone Number');
             if (addressVal === undefined || addressVal === null || String(addressVal).trim() === '')
                 missingFields.push('Address');
             if (cityVal === undefined || cityVal === null || String(cityVal).trim() === '')
@@ -930,8 +933,18 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
             const trimmedName = String(nameVal).trim();
             const trimmedCity = String(cityVal).trim();
             const trimmedArea = String(areaVal).trim();
+            const trimmedPhone = String(phoneVal).trim();
             try {
-                // 5. Check if donor already exists (name, age, bloodGroup, city, area)
+                // 5. Check if phone number is already registered by another donor
+                const existingByPhone = yield BloodDonor_1.default.findOne({ phone: trimmedPhone });
+                if (existingByPhone) {
+                    errors.push({
+                        row: excelRowNum,
+                        reason: `Phone number "${phoneVal}" is already registered by another donor`
+                    });
+                    continue;
+                }
+                // 6. Check if donor already exists by 5 fields together
                 const existingDonor = yield BloodDonor_1.default.findOne({
                     name: { $regex: new RegExp(`^${escapeRegex(trimmedName)}$`, 'i') },
                     age: ageNum,
@@ -943,12 +956,13 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
                     skipped++;
                     continue;
                 }
-                // 6. Insert new donor document
+                // 7. Insert new donor document
                 const newDonor = new BloodDonor_1.default({
                     name: trimmedName,
                     age: ageNum,
                     bloodGroup: bgStr,
                     lastDonationDate,
+                    phone: trimmedPhone,
                     address: String(addressVal).trim(),
                     city: trimmedCity,
                     area: trimmedArea,
@@ -996,6 +1010,7 @@ const downloadBulkImportTemplate = (req, res) => __awaiter(void 0, void 0, void 
             { header: 'Age', key: 'age', width: 10 },
             { header: 'Blood Group', key: 'bloodGroup', width: 15 },
             { header: 'Last Blood Donate Date', key: 'lastDonationDate', width: 25 },
+            { header: 'Phone Number', key: 'phone', width: 15 },
             { header: 'Address', key: 'address', width: 40 },
             { header: 'City', key: 'city', width: 15 },
             { header: 'Area', key: 'area', width: 15 }
@@ -1006,6 +1021,7 @@ const downloadBulkImportTemplate = (req, res) => __awaiter(void 0, void 0, void 
             age: 28,
             bloodGroup: 'B+',
             lastDonationDate: '2026-03-15',
+            phone: '9876543210',
             address: '456 Green Valley Road',
             city: 'Mumbai',
             area: 'Andheri'
@@ -1016,6 +1032,7 @@ const downloadBulkImportTemplate = (req, res) => __awaiter(void 0, void 0, void 
             age: 35,
             bloodGroup: 'O-',
             lastDonationDate: '2026-05-10',
+            phone: '9876543211',
             address: '789 Oak Avenue Apt 4B',
             city: 'Delhi',
             area: 'Connaught Place'
