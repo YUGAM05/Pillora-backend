@@ -6,7 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const adminController_1 = require("../controllers/adminController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
+const multer_1 = __importDefault(require("multer"));
 const router = express_1.default.Router();
+const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 // Protect stats route with Admin check
 router.get('/stats', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getSystemStats);
 router.get('/trends', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_1.getAdminTrends); // NEW: Trend data for graphs
@@ -20,6 +22,9 @@ router.put('/users/:id/status', authMiddleware_1.protect, authMiddleware_1.admin
 router.post('/users/:id/verify-aadhaar', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.verifyUserAadhaar);
 router.get('/users/:id/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getUserOrders);
 router.get('/orders', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAllOrders); // NEW: Get all system orders
+// Donor Bulk Import Management
+router.post('/donors/bulk-import', authMiddleware_1.protect, authMiddleware_1.adminOnly, upload.single('file'), adminController_2.bulkImportDonors);
+router.get('/donors/bulk-import/template', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.downloadBulkImportTemplate);
 // Hospital Management
 router.post('/hospitals/register', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.registerHospital);
 router.get('/hospitals', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitals);

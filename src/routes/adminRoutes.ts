@@ -1,8 +1,10 @@
 import express from 'express';
 import { getSystemStats, getAdminTrends, getPlatformActivities, getLoginAnalytics, getRevenueAnalytics } from '../controllers/adminController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
+import multer from 'multer';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Protect stats route with Admin check
 router.get('/stats', protect, adminOnly, getSystemStats);
@@ -28,13 +30,19 @@ import {
     toggleHospitalManagement,
     getAdminHospitalDoctors,
     adminAddDoctor,
-    adminBulkGenerateSlots
+    adminBulkGenerateSlots,
+    bulkImportDonors,
+    downloadBulkImportTemplate
 } from '../controllers/adminController';
 router.get('/users', protect, adminOnly, getUsers);
 router.put('/users/:id/status', protect, adminOnly, updateUserStatus);
 router.post('/users/:id/verify-aadhaar', protect, adminOnly, verifyUserAadhaar);
 router.get('/users/:id/orders', protect, adminOnly, getUserOrders);
 router.get('/orders', protect, adminOnly, getAllOrders); // NEW: Get all system orders
+
+// Donor Bulk Import Management
+router.post('/donors/bulk-import', protect, adminOnly, upload.single('file'), bulkImportDonors);
+router.get('/donors/bulk-import/template', protect, adminOnly, downloadBulkImportTemplate);
 
 // Hospital Management
 router.post('/hospitals/register', protect, adminOnly, registerHospital);

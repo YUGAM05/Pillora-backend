@@ -6,8 +6,8 @@ export interface IBloodDonor extends Document {
     email?: string;
     bloodGroup: 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
     age: number;
-    phone: string;
-    gender: 'Male' | 'Female' | 'Other';
+    phone?: string;
+    gender?: 'Male' | 'Female' | 'Other';
     address: string;
     area: string;
     city: string;
@@ -31,9 +31,9 @@ const BloodDonorSchema: Schema = new Schema({
         enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
         required: true
     },
-    gender: { type: String, enum: ['Male', 'Female', 'Other'], required: true },
+    gender: { type: String, enum: ['Male', 'Female', 'Other'], required: false, default: 'Other' },
     age: { type: Number, required: true },
-    phone: { type: String, required: true, unique: true },
+    phone: { type: String, required: false, unique: true, sparse: true },
     address: { type: String, required: true },
     area: { type: String, required: true },
     city: { type: String, required: true },

@@ -51,7 +51,8 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "ua-parser-js": "^2.0.9",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

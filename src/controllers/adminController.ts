@@ -18,6 +18,8 @@ import PlatformActivity from '../models/PlatformActivity';
 import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
 import mongoose from 'mongoose';
+import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 // @desc    Get platform activities
 // @route   GET /api/admin/activities
@@ -811,5 +813,264 @@ export const getRevenueAnalytics = async (req: Request, res: Response): Promise<
     } catch (error: any) {
         console.error("Error in getRevenueAnalytics:", error);
         res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+};
+
+// @desc    Bulk import blood donors from Excel (.xlsx) file
+// @route   POST /api/admin/donors/bulk-import
+// @access  Private/Admin
+export const bulkImportDonors = async (req: Request, res: Response): Promise<void> => {
+    try {
+        if (!req.file) {
+            res.status(400).json({ message: 'No file uploaded' });
+            return;
+        }
+
+        console.log(`[Bulk Import] Received file: ${req.file.originalname}, Size: ${req.file.size} bytes`);
+
+        // Drop the index 'phone_1' if it exists so Mongoose can rebuild it as sparse and optional
+        try {
+            await BloodDonor.collection.dropIndex('phone_1');
+        } catch (idxError) {
+            console.log('[Bulk Import] phone_1 index drop skipped (might not exist)');
+        }
+        
+        try {
+            await BloodDonor.ensureIndexes();
+        } catch (ensureErr: any) {
+            console.warn('[Bulk Import] Rebuilding indexes warning:', ensureErr.message);
+        }
+
+        // Read workbook using sheetjs
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+            res.status(400).json({ message: 'Excel file has no sheets' });
+            return;
+        }
+
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Parse columns to verify headers
+        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+        const headers: string[] = [];
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+            if (cell && cell.v) {
+                headers.push(cell.v.toString().trim());
+            } else {
+                headers.push('');
+            }
+        }
+
+        const expectedHeaders = ['Name', 'Age', 'Blood Group', 'Last Blood Donate Date', 'Address', 'City', 'Area'];
+        const normalizedHeaders = headers.map(h => h.toLowerCase());
+        const missingHeaders = expectedHeaders.filter(h => !normalizedHeaders.includes(h.toLowerCase()));
+
+        if (missingHeaders.length > 0) {
+            res.status(400).json({
+                message: `Missing required column headers: ${missingHeaders.join(', ')}`,
+                error: `The Excel file must contain the following columns: ${expectedHeaders.join(', ')}`
+            });
+            return;
+        }
+
+        // Convert worksheet rows to JSON
+        const rawRows = XLSX.utils.sheet_to_json<any>(worksheet, { defval: '' });
+
+        const errors: Array<{ row: number; reason: string }> = [];
+        let inserted = 0;
+        let skipped = 0;
+
+        const getRowValue = (row: any, headerName: string): any => {
+            const key = Object.keys(row).find(k => k.trim().toLowerCase() === headerName.toLowerCase());
+            return key ? row[key] : undefined;
+        };
+
+        const escapeRegex = (str: string) => {
+            return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        };
+
+        const validBloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+        for (let i = 0; i < rawRows.length; i++) {
+            const row = rawRows[i];
+            const excelRowNum = i + 2; // Row 1 is header
+
+            const nameVal = getRowValue(row, 'Name');
+            const ageVal = getRowValue(row, 'Age');
+            const bgVal = getRowValue(row, 'Blood Group');
+            const dateVal = getRowValue(row, 'Last Blood Donate Date');
+            const addressVal = getRowValue(row, 'Address');
+            const cityVal = getRowValue(row, 'City');
+            const areaVal = getRowValue(row, 'Area');
+
+            // 1. Check if all 7 fields are present (non-empty)
+            const missingFields: string[] = [];
+            if (nameVal === undefined || nameVal === null || String(nameVal).trim() === '') missingFields.push('Name');
+            if (ageVal === undefined || ageVal === null || String(ageVal).trim() === '') missingFields.push('Age');
+            if (bgVal === undefined || bgVal === null || String(bgVal).trim() === '') missingFields.push('Blood Group');
+            if (dateVal === undefined || dateVal === null || String(dateVal).trim() === '') missingFields.push('Last Blood Donate Date');
+            if (addressVal === undefined || addressVal === null || String(addressVal).trim() === '') missingFields.push('Address');
+            if (cityVal === undefined || cityVal === null || String(cityVal).trim() === '') missingFields.push('City');
+            if (areaVal === undefined || areaVal === null || String(areaVal).trim() === '') missingFields.push('Area');
+
+            if (missingFields.length > 0) {
+                errors.push({
+                    row: excelRowNum,
+                    reason: `Missing required fields: ${missingFields.join(', ')}`
+                });
+                continue;
+            }
+
+            // 2. Validate Age is a positive integer
+            const ageNum = Number(ageVal);
+            if (isNaN(ageNum) || !Number.isInteger(ageNum) || ageNum <= 0) {
+                errors.push({
+                    row: excelRowNum,
+                    reason: `Age must be a positive integer (got: "${ageVal}")`
+                });
+                continue;
+            }
+
+            // 3. Validate Blood Group is valid
+            const bgStr = String(bgVal).trim().toUpperCase();
+            if (!validBloodGroups.includes(bgStr)) {
+                errors.push({
+                    row: excelRowNum,
+                    reason: `Invalid blood group "${bgVal}" (must be one of: ${validBloodGroups.join(', ')})`
+                });
+                continue;
+            }
+
+            // 4. Validate and parse Last Blood Donate Date
+            let lastDonationDate: Date;
+            if (dateVal instanceof Date) {
+                lastDonationDate = dateVal;
+            } else if (typeof dateVal === 'number' && !isNaN(dateVal)) {
+                const utc_days = Math.floor(dateVal - 25569);
+                const utc_value = utc_days * 86400;
+                lastDonationDate = new Date(utc_value * 1000);
+            } else {
+                lastDonationDate = new Date(String(dateVal).trim());
+            }
+
+            if (isNaN(lastDonationDate.getTime())) {
+                errors.push({
+                    row: excelRowNum,
+                    reason: `Invalid date format for Last Blood Donate Date (got: "${dateVal}")`
+                });
+                continue;
+            }
+
+            const trimmedName = String(nameVal).trim();
+            const trimmedCity = String(cityVal).trim();
+            const trimmedArea = String(areaVal).trim();
+
+            try {
+                // 5. Check if donor already exists (name, age, bloodGroup, city, area)
+                const existingDonor = await BloodDonor.findOne({
+                    name: { $regex: new RegExp(`^${escapeRegex(trimmedName)}$`, 'i') },
+                    age: ageNum,
+                    bloodGroup: bgStr,
+                    city: { $regex: new RegExp(`^${escapeRegex(trimmedCity)}$`, 'i') },
+                    area: { $regex: new RegExp(`^${escapeRegex(trimmedArea)}$`, 'i') }
+                });
+
+                if (existingDonor) {
+                    skipped++;
+                    continue;
+                }
+
+                // 6. Insert new donor document
+                const newDonor = new BloodDonor({
+                    name: trimmedName,
+                    age: ageNum,
+                    bloodGroup: bgStr,
+                    lastDonationDate,
+                    address: String(addressVal).trim(),
+                    city: trimmedCity,
+                    area: trimmedArea,
+                    gender: 'Other',
+                    isAvailable: true,
+                    source: 'google_form',
+                    location: {
+                        type: 'Point',
+                        coordinates: [0, 0]
+                    }
+                });
+
+                await newDonor.save();
+                inserted++;
+            } catch (dbError: any) {
+                console.error(`[Bulk Import] Error saving row ${excelRowNum}:`, dbError);
+                errors.push({
+                    row: excelRowNum,
+                    reason: `Database error: ${dbError.message}`
+                });
+            }
+        }
+
+        res.status(200).json({
+            totalRows: rawRows.length,
+            inserted,
+            skipped,
+            errors
+        });
+
+    } catch (error: any) {
+        console.error('[Bulk Import] Error:', error);
+        res.status(500).json({ message: 'Internal Server Error during bulk import', error: error.message });
+    }
+};
+
+// @desc    Download sample template Excel file for bulk donor import
+// @route   GET /api/admin/donors/bulk-import/template
+// @access  Private/Admin
+export const downloadBulkImportTemplate = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Bulk Donors Import Template');
+
+        worksheet.columns = [
+            { header: 'Name', key: 'name', width: 25 },
+            { header: 'Age', key: 'age', width: 10 },
+            { header: 'Blood Group', key: 'bloodGroup', width: 15 },
+            { header: 'Last Blood Donate Date', key: 'lastDonationDate', width: 25 },
+            { header: 'Address', key: 'address', width: 40 },
+            { header: 'City', key: 'city', width: 15 },
+            { header: 'Area', key: 'area', width: 15 }
+        ];
+
+        // Sample Row 1
+        worksheet.addRow({
+            name: 'Jane Doe',
+            age: 28,
+            bloodGroup: 'B+',
+            lastDonationDate: '2026-03-15',
+            address: '456 Green Valley Road',
+            city: 'Mumbai',
+            area: 'Andheri'
+        });
+
+        // Sample Row 2
+        worksheet.addRow({
+            name: 'John Smith',
+            age: 35,
+            bloodGroup: 'O-',
+            lastDonationDate: '2026-05-10',
+            address: '789 Oak Avenue Apt 4B',
+            city: 'Delhi',
+            area: 'Connaught Place'
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename=bulk_donor_import_template.xlsx');
+
+        await workbook.xlsx.write(res);
+        res.status(200).end();
+    } catch (error: any) {
+        console.error('Template generation error:', error);
+        res.status(500).json({ message: 'Failed to generate template', error: error.message });
     }
 };
