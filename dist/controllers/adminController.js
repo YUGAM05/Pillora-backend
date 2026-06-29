@@ -921,7 +921,18 @@ const bulkImportDonors = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 lastDonationDate = new Date(utc_value * 1000);
             }
             else {
-                lastDonationDate = new Date(String(dateVal).trim());
+                const dateStr = String(dateVal).trim();
+                const dmyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+                const match = dateStr.match(dmyRegex);
+                if (match) {
+                    const day = parseInt(match[1], 10);
+                    const month = parseInt(match[2], 10) - 1; // 0-indexed month
+                    const year = parseInt(match[3], 10);
+                    lastDonationDate = new Date(year, month, day);
+                }
+                else {
+                    lastDonationDate = new Date(dateStr);
+                }
             }
             if (isNaN(lastDonationDate.getTime())) {
                 errors.push({
