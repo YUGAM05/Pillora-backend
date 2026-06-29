@@ -10,6 +10,7 @@ export interface IBlog extends Document {
     authorRole?: string;
     readTime: string;
     date: Date;
+    slug?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -24,6 +25,10 @@ const BlogSchema: Schema = new Schema({
     authorRole: { type: String, default: 'Author' },
     readTime: { type: String, required: true },
     date: { type: Date, default: Date.now },
+    slug: { type: String, unique: true, sparse: true, trim: true }
 }, { timestamps: true });
+
+// Create a database index on the slug field for fast lookups
+BlogSchema.index({ slug: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model<IBlog>('Blog', BlogSchema);

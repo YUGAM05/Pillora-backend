@@ -13,5 +13,6 @@ router.get('/:id', blogController_1.getBlogById);
 // Admin only routes
 router.post('/', authMiddleware_1.protect, authMiddleware_1.adminOnly, blogController_1.createBlog);
 router.put('/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, blogController_1.updateBlog);
+router.patch('/:id/slug', authMiddleware_1.protect, authMiddleware_1.adminOnly, blogController_1.updateBlogSlug);
 router.delete('/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, blogController_1.deleteBlog);
 exports.default = router;

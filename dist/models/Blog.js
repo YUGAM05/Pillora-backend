@@ -44,5 +44,8 @@ const BlogSchema = new mongoose_1.Schema({
     authorRole: { type: String, default: 'Author' },
     readTime: { type: String, required: true },
     date: { type: Date, default: Date.now },
+    slug: { type: String, unique: true, sparse: true, trim: true }
 }, { timestamps: true });
+// Create a database index on the slug field for fast lookups
+BlogSchema.index({ slug: 1 }, { unique: true, sparse: true });
 exports.default = mongoose_1.default.model('Blog', BlogSchema);
