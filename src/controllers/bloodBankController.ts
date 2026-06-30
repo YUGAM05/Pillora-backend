@@ -449,6 +449,25 @@ export const deleteDonor = async (req: Request, res: Response): Promise<void> =>
     }
 };
 
+// @desc    Delete multiple donors
+// @route   POST /api/blood-bank/admin/donors/delete-many
+// @access  Private/Admin
+export const deleteManyDonors = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { ids } = req.body;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            res.status(400).json({ message: 'Invalid or empty IDs list' });
+            return;
+        }
+
+        const result = await BloodDonor.deleteMany({ _id: { $in: ids } });
+
+        res.json({ message: `${result.deletedCount} donors removed successfully` });
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+};
+
 // @desc    Delete a request
 // @route   DELETE /api/blood-bank/admin/requests/:id
 // @access  Private/Admin

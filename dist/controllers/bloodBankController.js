@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateDonorAdmin = exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.standardizeDonor = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
+exports.updateDonorAdmin = exports.deleteMyRequest = exports.updateKycStatus = exports.verifyRequestWithAI = exports.deleteRequest = exports.deleteManyDonors = exports.deleteDonor = exports.updateRequestStatus = exports.getAllRequestsAdmin = exports.getAllDonors = exports.standardizeDonor = exports.getRequests = exports.getMyDonorProfile = exports.getMyRequests = exports.createRequest = exports.findMatches = exports.findDonors = exports.registerDonor = void 0;
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const bloodCompatibility_1 = require("../utils/bloodCompatibility");
@@ -431,6 +431,24 @@ const deleteDonor = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.deleteDonor = deleteDonor;
+// @desc    Delete multiple donors
+// @route   POST /api/blood-bank/admin/donors/delete-many
+// @access  Private/Admin
+const deleteManyDonors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { ids } = req.body;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            res.status(400).json({ message: 'Invalid or empty IDs list' });
+            return;
+        }
+        const result = yield BloodDonor_1.default.deleteMany({ _id: { $in: ids } });
+        res.json({ message: `${result.deletedCount} donors removed successfully` });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Server Error', error });
+    }
+});
+exports.deleteManyDonors = deleteManyDonors;
 // @desc    Delete a request
 // @route   DELETE /api/blood-bank/admin/requests/:id
 // @access  Private/Admin
