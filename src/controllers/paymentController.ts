@@ -190,9 +190,10 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        // Success: Update payment record
+        // Success: Update payment record and set its settlement status to Waiting for Razorpay Settlement
         payment.status = 'completed';
         payment.razorpayPaymentId = razorpayPaymentId;
+        payment.settlementStatus = 'Waiting for Razorpay Settlement';
         await payment.save();
 
         // Update appointment status to confirmed and paymentStatus to paid
@@ -206,49 +207,6 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         } else {
             console.error(`[VerifyPayment] Appointment not found for ID: ${payment.appointmentId}`);
         }
-
-        // Determine if hospital is under 3-month free trial
-        const hospital = await Hospital.findById(payment.hospitalId);
-        let trialActive = false;
-        if (hospital) {
-            const now = new Date();
-            if (hospital.trialEndDate) {
-                trialActive = now < new Date(hospital.trialEndDate);
-            } else if ((hospital as any).createdAt) {
-                const trialEnd = new Date((hospital as any).createdAt);
-                trialEnd.setMonth(trialEnd.getMonth() + 3);
-                trialActive = now < trialEnd;
-            } else {
-                trialActive = false;
-            }
-        }
-
-        // Calculate settlement share
-        const advanceFee = payment.advanceFee || payment.amount;
-        const settledAmount = trialActive ? advanceFee : Math.round(advanceFee * 0.80);
-
-        // Next Friday at 5:00 PM settlement date calculation
-        const getNextWeeklyPayoutDate = (from = new Date()): Date => {
-            const result = new Date(from);
-            const day = result.getDay();
-            const daysUntilFriday = (5 - day + 7) % 7 || 7;
-            result.setDate(result.getDate() + daysUntilFriday);
-            result.setHours(17, 0, 0, 0);
-            return result;
-        };
-        const settledDate = getNextWeeklyPayoutDate();
-
-        // Create settlement record
-        await Settlement.create({
-            hospitalId: payment.hospitalId,
-            appointmentId: payment.appointmentId,
-            amount: advanceFee,
-            type: 'advance_fee',
-            status: 'pending_settlement',
-            trialActive,
-            settledDate,
-            settledAmount
-        });
 
         // Trigger booking confirmation email notifications
         if (appointment) {

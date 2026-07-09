@@ -54,12 +54,12 @@ export const cancelAppointment = async (req: AuthRequest, res: Response): Promis
 
         // 2. Load Payment Record
         const payment = await Payment.findOne({ appointmentId });
-        const settlement = await Settlement.findOne({ appointmentId });
 
         if (payment && payment.status === 'completed') {
             if (isHospitalOrAdmin) {
                 // Hospital Initiates Cancellation: FULL REFUND
                 payment.status = 'refund_initiated';
+                payment.settlementStatus = 'refunded';
                 await payment.save();
 
                 // Trigger Razorpay Refund
@@ -78,33 +78,18 @@ export const cancelAppointment = async (req: AuthRequest, res: Response): Promis
                         // We do not throw or revert, as handle webhook refund verification or manual check covers this
                     }
                 }
-
-                // Update Settlement Record
-                if (settlement) {
-                    settlement.status = 'refunded';
-                    await settlement.save();
-                }
             } else {
                 // User Initiates Cancellation: NO REFUND
                 // Payment remains status = "completed" (or we can tag as "completed" to signify retained)
                 payment.status = 'completed';
+                payment.settlementStatus = 'retained_by_pillora';
                 await payment.save();
-
-                // Update Settlement Record
-                if (settlement) {
-                    settlement.status = 'retained_by_pillora';
-                    await settlement.save();
-                }
             }
         } else if (payment && payment.status === 'pending') {
             // Unpaid pending appointments being cancelled
             payment.status = 'failed';
+            payment.settlementStatus = 'refunded';
             await payment.save();
-            
-            if (settlement) {
-                settlement.status = 'refunded'; // Or deleted
-                await settlement.save();
-            }
         }
 
         res.status(200).json({

@@ -77,5 +77,13 @@ const HospitalSchema = new mongoose_1.Schema({
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
     trialEndDate: { type: Date },
+    bankDetails: {
+        accountHolderName: { type: String, default: '' },
+        bankName: { type: String, default: '' },
+        branchName: { type: String, default: '' },
+        accountNumber: { type: String, default: '' },
+        ifscCode: { type: String, default: '' },
+        upiId: { type: String, default: '' }
+    }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Hospital', HospitalSchema);

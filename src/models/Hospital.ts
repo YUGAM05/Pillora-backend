@@ -39,6 +39,14 @@ export interface IHospital extends Document {
     bedCapacity?: number;
     specialities?: string[];
     trialEndDate?: Date;
+    bankDetails?: {
+        accountHolderName?: string;
+        bankName?: string;
+        branchName?: string;
+        accountNumber?: string;
+        ifscCode?: string;
+        upiId?: string;
+    };
 }
 
 const DoctorSchema: Schema = new Schema({
@@ -85,6 +93,14 @@ const HospitalSchema: Schema = new Schema({
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
     trialEndDate: { type: Date },
+    bankDetails: {
+        accountHolderName: { type: String, default: '' },
+        bankName: { type: String, default: '' },
+        branchName: { type: String, default: '' },
+        accountNumber: { type: String, default: '' },
+        ifscCode: { type: String, default: '' },
+        upiId: { type: String, default: '' }
+    }
 }, { timestamps: true });
 
 export default mongoose.model<IHospital>('Hospital', HospitalSchema);

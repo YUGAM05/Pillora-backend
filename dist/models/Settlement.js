@@ -34,19 +34,41 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const SettlementTimelineSchema = new mongoose_1.Schema({
+    status: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now },
+    note: { type: String }
+}, { _id: false });
+const SettlementAuditSchema = new mongoose_1.Schema({
+    performedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    action: { type: String, required: true },
+    previousStatus: { type: String, required: true },
+    newStatus: { type: String, required: true },
+    notes: { type: String },
+    timestamp: { type: Date, default: Date.now }
+}, { _id: false });
 const SettlementSchema = new mongoose_1.Schema({
+    settlementId: { type: String, required: true, unique: true },
     hospitalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', required: true },
-    appointmentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment', required: true },
-    amount: { type: Number, required: true, min: 0 },
-    type: { type: String, enum: ['advance_fee'], default: 'advance_fee', required: true },
     status: {
         type: String,
-        enum: ['pending_settlement', 'settled', 'refunded', 'retained_by_pillora'],
-        default: 'pending_settlement',
+        enum: ['Waiting for Razorpay Settlement', 'Ready for Settlement', 'Payment Initiated', 'Awaiting Hospital Confirmation', 'Settlement Completed', 'Failed', 'On Hold', 'Under Review'],
+        default: 'Waiting for Razorpay Settlement',
         required: true
     },
-    trialActive: { type: Boolean, default: false, required: true },
-    settledDate: { type: Date, required: true },
-    settledAmount: { type: Number, required: true, min: 0 },
+    grossCollection: { type: Number, required: true, default: 0 },
+    razorpayCharges: { type: Number, required: true, default: 0 },
+    gstCharges: { type: Number, required: true, default: 0 },
+    netAmount: { type: Number, required: true, default: 0 },
+    transferDate: { type: Date },
+    transferMethod: { type: String, enum: ['NEFT', 'RTGS', 'IMPS', 'UPI'] },
+    utrNumber: { type: String },
+    notes: { type: String },
+    confirmationDate: { type: Date },
+    eligibleDate: { type: Date, required: true },
+    paymentIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Payment' }],
+    appointmentIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Appointment' }],
+    timeline: [SettlementTimelineSchema],
+    auditLogs: [SettlementAuditSchema]
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Settlement', SettlementSchema);

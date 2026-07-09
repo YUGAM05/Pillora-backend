@@ -17,8 +17,6 @@ const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const Payment_1 = __importDefault(require("../models/Payment"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
-const Hospital_1 = __importDefault(require("../models/Hospital"));
-const Settlement_1 = __importDefault(require("../models/Settlement"));
 const dateHelper_1 = require("../utils/dateHelper");
 const emailService_1 = require("../services/emailService");
 const pushNotificationService_1 = require("../services/pushNotificationService");
@@ -187,9 +185,10 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(200).json({ success: true, message: 'Payment already verified and completed', payment });
             return;
         }
-        // Success: Update payment record
+        // Success: Update payment record and set its settlement status to Waiting for Razorpay Settlement
         payment.status = 'completed';
         payment.razorpayPaymentId = razorpayPaymentId;
+        payment.settlementStatus = 'Waiting for Razorpay Settlement';
         yield payment.save();
         // Update appointment status to confirmed and paymentStatus to paid
         const appointment = yield Appointment_1.default.findById(payment.appointmentId);
@@ -203,47 +202,6 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         else {
             console.error(`[VerifyPayment] Appointment not found for ID: ${payment.appointmentId}`);
         }
-        // Determine if hospital is under 3-month free trial
-        const hospital = yield Hospital_1.default.findById(payment.hospitalId);
-        let trialActive = false;
-        if (hospital) {
-            const now = new Date();
-            if (hospital.trialEndDate) {
-                trialActive = now < new Date(hospital.trialEndDate);
-            }
-            else if (hospital.createdAt) {
-                const trialEnd = new Date(hospital.createdAt);
-                trialEnd.setMonth(trialEnd.getMonth() + 3);
-                trialActive = now < trialEnd;
-            }
-            else {
-                trialActive = false;
-            }
-        }
-        // Calculate settlement share
-        const advanceFee = payment.advanceFee || payment.amount;
-        const settledAmount = trialActive ? advanceFee : Math.round(advanceFee * 0.80);
-        // Next Friday at 5:00 PM settlement date calculation
-        const getNextWeeklyPayoutDate = (from = new Date()) => {
-            const result = new Date(from);
-            const day = result.getDay();
-            const daysUntilFriday = (5 - day + 7) % 7 || 7;
-            result.setDate(result.getDate() + daysUntilFriday);
-            result.setHours(17, 0, 0, 0);
-            return result;
-        };
-        const settledDate = getNextWeeklyPayoutDate();
-        // Create settlement record
-        yield Settlement_1.default.create({
-            hospitalId: payment.hospitalId,
-            appointmentId: payment.appointmentId,
-            amount: advanceFee,
-            type: 'advance_fee',
-            status: 'pending_settlement',
-            trialActive,
-            settledDate,
-            settledAmount
-        });
         // Trigger booking confirmation email notifications
         if (appointment) {
             try {

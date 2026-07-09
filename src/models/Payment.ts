@@ -13,6 +13,8 @@ export interface IPayment extends Document {
     mode?: 'online' | 'offline';
     status: 'pending' | 'completed' | 'failed' | 'refund_initiated' | 'refunded' | 'paid';
     recordedBy?: mongoose.Types.ObjectId; // ID of the hospital admin who recorded the payment
+    settlementStatus?: 'Waiting for Razorpay Settlement' | 'Ready for Settlement' | 'Payment Initiated' | 'Awaiting Hospital Confirmation' | 'Settlement Completed' | 'Failed' | 'On Hold' | 'Under Review' | 'refunded' | 'retained_by_pillora';
+    settlementId?: mongoose.Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -33,7 +35,13 @@ const PaymentSchema: Schema = new Schema({
         enum: ['pending', 'completed', 'failed', 'refund_initiated', 'refunded', 'paid'], 
         default: 'pending' 
     },
-    recordedBy: { type: Schema.Types.ObjectId, required: false }
+    recordedBy: { type: Schema.Types.ObjectId, required: false },
+    settlementStatus: {
+        type: String,
+        enum: ['Waiting for Razorpay Settlement', 'Ready for Settlement', 'Payment Initiated', 'Awaiting Hospital Confirmation', 'Settlement Completed', 'Failed', 'On Hold', 'Under Review', 'refunded', 'retained_by_pillora'],
+        default: 'Waiting for Razorpay Settlement'
+    },
+    settlementId: { type: Schema.Types.ObjectId, ref: 'Settlement', required: false }
 }, { timestamps: true });
 
 export default mongoose.model<IPayment>('Payment', PaymentSchema);

@@ -709,16 +709,11 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
                     } catch (refundError: any) {
                         console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refundError.message);
                     }
-                }
-
-                // Update settlement
-                const settlement = await Settlement.findOne({ appointmentId: app._id });
-                if (settlement) {
-                    settlement.status = 'refunded';
-                    await settlement.save();
-                }
+                }                payment.settlementStatus = 'refunded';
+                await payment.save();
             } else if (payment && payment.status === 'pending') {
                 payment.status = 'failed';
+                payment.settlementStatus = 'refunded';
                 await payment.save();
             }
         }

@@ -274,6 +274,11 @@ const paymentRoutes = require('./routes/paymentRoutes').default || require('./ro
 app.use('/api/payments', paymentRoutes);
 console.log('=== PAYMENT ROUTES LOADED ===');
 
+console.log('=== SETTLEMENT ROUTES LOADING ===');
+const settlementRoutes = require('./routes/settlementRoutes').default || require('./routes/settlementRoutes');
+app.use('/api/settlements', settlementRoutes);
+console.log('=== SETTLEMENT ROUTES LOADED ===');
+
 console.log('=== APPOINTMENT ROUTES LOADING ===');
 const appointmentRoutes = require('./routes/appointmentRoutes').default || require('./routes/appointmentRoutes');
 app.use('/api/appointments', appointmentRoutes);

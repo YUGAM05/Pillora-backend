@@ -15,7 +15,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.holdAppointment = exports.getAppointmentDetails = exports.createAppointment = exports.cancelAppointment = void 0;
 const Appointment_1 = __importDefault(require("../models/Appointment"));
 const Payment_1 = __importDefault(require("../models/Payment"));
-const Settlement_1 = __importDefault(require("../models/Settlement"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
@@ -60,11 +59,11 @@ const cancelAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
         yield appointment.save();
         // 2. Load Payment Record
         const payment = yield Payment_1.default.findOne({ appointmentId });
-        const settlement = yield Settlement_1.default.findOne({ appointmentId });
         if (payment && payment.status === 'completed') {
             if (isHospitalOrAdmin) {
                 // Hospital Initiates Cancellation: FULL REFUND
                 payment.status = 'refund_initiated';
+                payment.settlementStatus = 'refunded';
                 yield payment.save();
                 // Trigger Razorpay Refund
                 if (payment.razorpayPaymentId) {
@@ -83,32 +82,20 @@ const cancelAppointment = (req, res) => __awaiter(void 0, void 0, void 0, functi
                         // We do not throw or revert, as handle webhook refund verification or manual check covers this
                     }
                 }
-                // Update Settlement Record
-                if (settlement) {
-                    settlement.status = 'refunded';
-                    yield settlement.save();
-                }
             }
             else {
                 // User Initiates Cancellation: NO REFUND
                 // Payment remains status = "completed" (or we can tag as "completed" to signify retained)
                 payment.status = 'completed';
+                payment.settlementStatus = 'retained_by_pillora';
                 yield payment.save();
-                // Update Settlement Record
-                if (settlement) {
-                    settlement.status = 'retained_by_pillora';
-                    yield settlement.save();
-                }
             }
         }
         else if (payment && payment.status === 'pending') {
             // Unpaid pending appointments being cancelled
             payment.status = 'failed';
+            payment.settlementStatus = 'refunded';
             yield payment.save();
-            if (settlement) {
-                settlement.status = 'refunded'; // Or deleted
-                yield settlement.save();
-            }
         }
         res.status(200).json({
             success: true,

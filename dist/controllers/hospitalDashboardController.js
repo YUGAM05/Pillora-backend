@@ -20,7 +20,6 @@ const Appointment_1 = __importDefault(require("../models/Appointment"));
 const User_1 = __importDefault(require("../models/User"));
 const PatientNote_1 = __importDefault(require("../models/PatientNote"));
 const Payment_1 = __importDefault(require("../models/Payment"));
-const Settlement_1 = __importDefault(require("../models/Settlement"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const redisMock_1 = __importDefault(require("../utils/redisMock"));
@@ -637,15 +636,12 @@ const cancelSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                         console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refundError.message);
                     }
                 }
-                // Update settlement
-                const settlement = yield Settlement_1.default.findOne({ appointmentId: app._id });
-                if (settlement) {
-                    settlement.status = 'refunded';
-                    yield settlement.save();
-                }
+                payment.settlementStatus = 'refunded';
+                yield payment.save();
             }
             else if (payment && payment.status === 'pending') {
                 payment.status = 'failed';
+                payment.settlementStatus = 'refunded';
                 yield payment.save();
             }
         }

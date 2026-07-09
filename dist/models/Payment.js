@@ -50,6 +50,12 @@ const PaymentSchema = new mongoose_1.Schema({
         enum: ['pending', 'completed', 'failed', 'refund_initiated', 'refunded', 'paid'],
         default: 'pending'
     },
-    recordedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false }
+    recordedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false },
+    settlementStatus: {
+        type: String,
+        enum: ['Waiting for Razorpay Settlement', 'Ready for Settlement', 'Payment Initiated', 'Awaiting Hospital Confirmation', 'Settlement Completed', 'Failed', 'On Hold', 'Under Review', 'refunded', 'retained_by_pillora'],
+        default: 'Waiting for Razorpay Settlement'
+    },
+    settlementId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Settlement', required: false }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Payment', PaymentSchema);
