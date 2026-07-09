@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getHospitalSettlements = exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.getHospitalById = exports.getHospitals = exports.getCities = void 0;
+exports.getHospitalSettlements = exports.searchHospitals = exports.uploadHospitalImages = exports.deleteHospital = exports.updateHospital = exports.createHospital = exports.seedHospitals = exports.performSeeding = exports.getHospitalById = exports.getHospitals = exports.getCities = void 0;
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor")); // ✅ Added
 const Settlement_1 = __importDefault(require("../models/Settlement"));
@@ -44,6 +44,10 @@ exports.getCities = getCities;
 // @access  Public
 const getHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const count = yield Hospital_1.default.countDocuments({});
+        if (count === 0) {
+            yield (0, exports.performSeeding)();
+        }
         const { city, speciality, pmjay, govtSchemes, hospitalType, bedCapacity, emergency, booking, minRating, sortBy } = req.query;
         let query = {};
         if (city) {
@@ -196,7 +200,7 @@ exports.getHospitalById = getHospitalById;
 // @desc    Seed hospitals (Temporary for data population)
 // @route   POST /api/hospitals/seed
 // @access  Public (Should be private in prod)
-const seedHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const performSeeding = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // Clear both Hospital and Doctor collections for a clean, deterministic seeding state
         yield Hospital_1.default.deleteMany({});
@@ -539,6 +543,16 @@ const seedHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         ];
         yield Doctor_1.default.insertMany(doctorsToSeed);
+    }
+    catch (error) {
+        console.error('Failed to auto-seed database:', error);
+        throw error;
+    }
+});
+exports.performSeeding = performSeeding;
+const seedHospitals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        yield (0, exports.performSeeding)();
         res.json({ message: 'Hospitals and Doctors seeded successfully' });
     }
     catch (error) {

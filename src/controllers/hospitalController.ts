@@ -33,6 +33,11 @@ export const getCities = async (req: Request, res: Response): Promise<void> => {
 // @access  Public
 export const getHospitals = async (req: Request, res: Response): Promise<void> => {
     try {
+        const count = await Hospital.countDocuments({});
+        if (count === 0) {
+            await performSeeding();
+        }
+
         const { 
             city, 
             speciality, 
@@ -194,7 +199,7 @@ export const getHospitalById = async (req: Request, res: Response): Promise<void
 // @desc    Seed hospitals (Temporary for data population)
 // @route   POST /api/hospitals/seed
 // @access  Public (Should be private in prod)
-export const seedHospitals = async (req: Request, res: Response): Promise<void> => {
+export const performSeeding = async (): Promise<void> => {
     try {
         // Clear both Hospital and Doctor collections for a clean, deterministic seeding state
         await Hospital.deleteMany({});
@@ -541,7 +546,15 @@ export const seedHospitals = async (req: Request, res: Response): Promise<void> 
         ];
 
         await Doctor.insertMany(doctorsToSeed);
+    } catch (error) {
+        console.error('Failed to auto-seed database:', error);
+        throw error;
+    }
+};
 
+export const seedHospitals = async (req: Request, res: Response): Promise<void> => {
+    try {
+        await performSeeding();
         res.json({ message: 'Hospitals and Doctors seeded successfully' });
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
