@@ -12,7 +12,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPaymentSummary = exports.recordPayment = exports.autocompleteBookingIds = exports.autocompletePatients = exports.updatePaymentStatus = exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.getPaymentSummary = exports.recordPayment = exports.autocompleteBookingIds = exports.autocompletePatients = exports.updatePaymentStatus = exports.getAppointmentPrescriptionFile = exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
@@ -1387,8 +1388,8 @@ const uploadAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, vo
         }
         const isPdf = req.file.mimetype === 'application/pdf';
         const isImage = ['image/jpeg', 'image/png'].includes(req.file.mimetype);
-        // If prescription already exists, delete old one from Cloudinary
-        if (appointment.prescriptionUrl) {
+        // If prescription already exists, delete old one from Cloudinary (only if it was stored on Cloudinary)
+        if (appointment.prescriptionUrl && appointment.prescriptionUrl.includes('res.cloudinary.com')) {
             try {
                 // Determine old resource type from URL path
                 const isOldRaw = appointment.prescriptionUrl.includes('/raw/upload/');
@@ -1409,39 +1410,14 @@ const uploadAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, vo
         // Convert buffer to base64 data URI
         const base64File = req.file.buffer.toString('base64');
         const dataUri = `data:${req.file.mimetype};base64,${base64File}`;
-        let prescriptionUrl;
         // Generate a cryptographically secure random suffix to make public URL unguessable
         const crypto = require('crypto');
         const randomSuffix = crypto.randomBytes(16).toString('hex');
-        if (isPdf) {
-            // PDFs: upload as raw resource
-            const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
-                resource_type: 'raw',
-                folder: 'pillora-prescriptions',
-                access_mode: 'public',
-                type: 'upload',
-                format: 'pdf',
-                public_id: `prescription-${appointment._id}-${randomSuffix}`,
-                use_filename: false,
-                unique_filename: true
-            });
-            prescriptionUrl = result.secure_url;
-            if (!prescriptionUrl.endsWith('.pdf'))
-                prescriptionUrl += '.pdf';
-        }
-        else {
-            // Images: upload as image resource
-            const result = yield cloudinary_1.v2.uploader.upload(dataUri, {
-                resource_type: 'image',
-                folder: 'pillora-prescriptions',
-                public_id: `prescription-img-${appointment._id}-${randomSuffix}`,
-                use_filename: false,
-                unique_filename: true
-            });
-            prescriptionUrl = result.secure_url;
-        }
-        console.log('Prescription URL:', prescriptionUrl);
+        // Construct backend file URL with secure query key
+        const prescriptionUrl = `${req.protocol}://${req.get('host')}/api/hospital/dashboard/appointments/${appointment._id}/prescription/file?key=${randomSuffix}`;
+        console.log('Local Prescription URL:', prescriptionUrl);
         appointment.prescriptionUrl = prescriptionUrl;
+        appointment.prescriptionBase64 = dataUri;
         appointment.prescriptionUploadedAt = new Date();
         yield appointment.save();
         const patientEmail = ((_a = appointment.patient) === null || _a === void 0 ? void 0 : _a.email) || appointment.patientEmail;
@@ -1518,11 +1494,23 @@ const getAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, void 
             res.status(404).json({ message: 'Prescription not uploaded yet' });
             return;
         }
+        // Get the auth token from req headers to pass to the query string for window.open query auth
+        let token = '';
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            token = req.headers.authorization.split(/\s+/)[1];
+        }
+        let finalUrl = appointment.prescriptionUrl;
+        if (finalUrl && finalUrl.includes('/prescription/file')) {
+            // Append token for query auth if not already present
+            if (!finalUrl.includes('token=')) {
+                finalUrl += `&token=${token}`;
+            }
+        }
         // Return JSON response as expected by both frontends (Pillora and Pillora-hospital)
         res.json({
             success: true,
-            prescriptionUrl: appointment.prescriptionUrl,
-            url: appointment.prescriptionUrl
+            prescriptionUrl: finalUrl,
+            url: finalUrl
         });
     }
     catch (error) {
@@ -1530,6 +1518,115 @@ const getAppointmentPrescription = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.getAppointmentPrescription = getAppointmentPrescription;
+// @desc    Stream prescription file directly to bypass Cloudinary ACL/401 blocks
+// @route   GET /api/hospital/dashboard/appointments/:id/prescription/file
+const getAppointmentPrescriptionFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        let token = req.query.token;
+        if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            token = req.headers.authorization.split(/\s+/)[1];
+        }
+        if (!token) {
+            res.status(401).json({ message: 'Not authorized, no token' });
+            return;
+        }
+        // Validate token manually using the same secrets
+        const secretsToTry = [
+            process.env.JWT_SECRET,
+            'supersecretkey_dev_only',
+            'pillora_jwt_secret_fallback_2024',
+            'defaultSecret'
+        ].filter((s) => typeof s === 'string' && s.length > 0);
+        let decoded = null;
+        for (const secret of secretsToTry) {
+            try {
+                decoded = jsonwebtoken_1.default.verify(token, secret);
+                break;
+            }
+            catch (err) {
+                // Try next
+            }
+        }
+        if (!decoded) {
+            res.status(401).json({ message: 'Not authorized, token failed' });
+            return;
+        }
+        const userId = decoded.id || decoded.userId;
+        const user = yield User_1.default.findById(userId);
+        if (!user) {
+            res.status(401).json({ message: 'Not authorized, user not found' });
+            return;
+        }
+        const appointment = yield Appointment_1.default.findById(id);
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        // Perform authorization check: doctor, hospital_admin, patient
+        let isAuthorized = false;
+        if (user.role === 'doctor' && user._id.toString() === appointment.doctor.toString()) {
+            isAuthorized = true;
+        }
+        if (user.role === 'hospital' || user.role === 'hospital_admin') {
+            const userHospital = yield Hospital_1.default.findOne({ user: user._id });
+            if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
+                isAuthorized = true;
+            }
+        }
+        if ((user.role === 'patient' || user.role === 'customer') && user._id.toString() === appointment.patient.toString()) {
+            isAuthorized = true;
+        }
+        if (!isAuthorized) {
+            res.status(403).json({ message: 'You do not have access to this prescription' });
+            return;
+        }
+        if (!appointment.prescriptionUrl) {
+            res.status(404).json({ message: 'Prescription not uploaded yet' });
+            return;
+        }
+        // Secure key check
+        let expectedKey = null;
+        try {
+            if (appointment.prescriptionUrl.startsWith('http')) {
+                const urlObj = new URL(appointment.prescriptionUrl);
+                expectedKey = urlObj.searchParams.get('key');
+            }
+        }
+        catch (e) {
+            // Ignore
+        }
+        const providedKey = req.query.key;
+        if (expectedKey && expectedKey !== providedKey) {
+            res.status(403).json({ message: 'Invalid or expired secure access key' });
+            return;
+        }
+        // Serve base64 PDF/image data from DB if available
+        if (appointment.prescriptionBase64 && appointment.prescriptionBase64.startsWith('data:')) {
+            const matches = appointment.prescriptionBase64.match(/^data:([^;]+);base64,(.+)$/);
+            if (matches) {
+                const contentType = matches[1];
+                const base64Data = matches[2];
+                const buffer = Buffer.from(base64Data, 'base64');
+                res.contentType(contentType);
+                if (contentType === 'application/pdf') {
+                    res.setHeader('Content-Disposition', 'inline; filename="prescription.pdf"');
+                }
+                else {
+                    res.setHeader('Content-Disposition', 'inline; filename="prescription"');
+                }
+                res.send(buffer);
+                return;
+            }
+        }
+        // Fallback for legacy Cloudinary URLs
+        res.redirect(appointment.prescriptionUrl);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error streaming prescription file', error: error.message });
+    }
+});
+exports.getAppointmentPrescriptionFile = getAppointmentPrescriptionFile;
 // @desc    Update payment status manually (placeholder — gateway-ready)
 // @route   PATCH /api/hospital/dashboard/appointments/:id/payment-status
 // @access  Private/Hospital

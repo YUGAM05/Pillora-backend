@@ -31,6 +31,7 @@ import {
     searchPatients,
     uploadAppointmentPrescription,
     getAppointmentPrescription,
+    getAppointmentPrescriptionFile,
     autocompletePatients,
     autocompleteBookingIds,
     recordPayment,
@@ -72,6 +73,7 @@ router.get('/bookings/autocomplete', protect, isHospital, attachHospital, autoco
 router.get('/patients/search', protect, isHospital, attachHospital, searchPatients);
 router.post('/appointments/:id/prescription', protect, upload.single('prescription'), uploadAppointmentPrescription);
 router.get('/appointments/:id/prescription', protect, getAppointmentPrescription);
+router.get('/appointments/:id/prescription/file', getAppointmentPrescriptionFile);
 
 // Payment routes
 router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);

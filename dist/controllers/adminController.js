@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.downloadBulkImportTemplate = exports.bulkImportDonors = exports.getRevenueAnalytics = exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
+exports.getVoiceConfigs = exports.createOrUpdateVoiceConfig = exports.downloadBulkImportTemplate = exports.bulkImportDonors = exports.getRevenueAnalytics = exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
@@ -63,8 +63,10 @@ const slugify_1 = __importDefault(require("slugify"));
 const PlatformActivity_1 = __importDefault(require("../models/PlatformActivity"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
 const Slot_1 = __importDefault(require("../models/Slot"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
+const VoiceHospitalConfig_1 = __importDefault(require("../models/VoiceHospitalConfig"));
 // @desc    Get platform activities
 // @route   GET /api/admin/activities
 // @access  Private/Admin
@@ -1059,3 +1061,67 @@ const downloadBulkImportTemplate = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.downloadBulkImportTemplate = downloadBulkImportTemplate;
+// @desc    Create or update VoiceHospitalConfig
+// @route   POST /api/admin/voice-config
+// @access  Private/Admin
+const createOrUpdateVoiceConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { hospitalId, exotelNumber, isEnabled } = req.body;
+        if (!hospitalId || !exotelNumber) {
+            res.status(400).json({ error: 'hospitalId and exotelNumber are required' });
+            return;
+        }
+        if (!mongoose_1.default.Types.ObjectId.isValid(hospitalId)) {
+            res.status(400).json({ error: 'Invalid hospitalId format' });
+            return;
+        }
+        const hospitalExists = yield Hospital_1.default.findById(hospitalId);
+        if (!hospitalExists) {
+            res.status(404).json({ error: 'Hospital not found' });
+            return;
+        }
+        // Upsert VoiceHospitalConfig by hospitalId or exotelNumber
+        let config = yield VoiceHospitalConfig_1.default.findOne({
+            $or: [
+                { hospitalId: new mongoose_1.default.Types.ObjectId(hospitalId) },
+                { exotelNumber }
+            ]
+        });
+        if (config) {
+            config.hospitalId = new mongoose_1.default.Types.ObjectId(hospitalId);
+            config.exotelNumber = exotelNumber;
+            if (isEnabled !== undefined) {
+                config.isEnabled = isEnabled;
+            }
+            yield config.save();
+        }
+        else {
+            config = new VoiceHospitalConfig_1.default({
+                hospitalId: new mongoose_1.default.Types.ObjectId(hospitalId),
+                exotelNumber,
+                isEnabled: isEnabled !== undefined ? isEnabled : true
+            });
+            yield config.save();
+        }
+        res.status(200).json({ success: true, config });
+    }
+    catch (error) {
+        console.error('[AdminVoiceConfigUpsertError]', error.message);
+        res.status(500).json({ error: 'Server error', details: error.message });
+    }
+});
+exports.createOrUpdateVoiceConfig = createOrUpdateVoiceConfig;
+// @desc    Get all VoiceHospitalConfigs
+// @route   GET /api/admin/voice-config
+// @access  Private/Admin
+const getVoiceConfigs = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const configs = yield VoiceHospitalConfig_1.default.find().populate('hospitalId', 'name').lean();
+        res.status(200).json({ success: true, configs });
+    }
+    catch (error) {
+        console.error('[AdminVoiceConfigGetError]', error.message);
+        res.status(500).json({ error: 'Server error', details: error.message });
+    }
+});
+exports.getVoiceConfigs = getVoiceConfigs;

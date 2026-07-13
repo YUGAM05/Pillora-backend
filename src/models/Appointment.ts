@@ -18,6 +18,7 @@ export interface IAppointment extends Document {
     bookingDate: Date;
     notes?: string;
     prescriptionUrl?: string;
+    prescriptionBase64?: string;
     prescriptionUploadedAt?: Date;
     invoiceUrl?: string;
     tokenNumber?: number;
@@ -61,6 +62,7 @@ const AppointmentSchema: Schema = new Schema({
     bookingDate: { type: Date, default: Date.now },
     notes: { type: String },
     prescriptionUrl: { type: String },
+    prescriptionBase64: { type: String },
     prescriptionUploadedAt: { type: Date },
     invoiceUrl: { type: String },
     tokenNumber: { type: Number },

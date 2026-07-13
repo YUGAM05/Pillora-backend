@@ -20,6 +20,7 @@ import Slot from '../models/Slot';
 import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+import VoiceHospitalConfig from '../models/VoiceHospitalConfig';
 
 // @desc    Get platform activities
 // @route   GET /api/admin/activities
@@ -1099,5 +1100,72 @@ export const downloadBulkImportTemplate = async (req: Request, res: Response): P
     } catch (error: any) {
         console.error('Template generation error:', error);
         res.status(500).json({ message: 'Failed to generate template', error: error.message });
+    }
+};
+
+// @desc    Create or update VoiceHospitalConfig
+// @route   POST /api/admin/voice-config
+// @access  Private/Admin
+export const createOrUpdateVoiceConfig = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { hospitalId, exotelNumber, isEnabled } = req.body;
+
+        if (!hospitalId || !exotelNumber) {
+            res.status(400).json({ error: 'hospitalId and exotelNumber are required' });
+            return;
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(hospitalId)) {
+            res.status(400).json({ error: 'Invalid hospitalId format' });
+            return;
+        }
+
+        const hospitalExists = await Hospital.findById(hospitalId);
+        if (!hospitalExists) {
+            res.status(404).json({ error: 'Hospital not found' });
+            return;
+        }
+
+        // Upsert VoiceHospitalConfig by hospitalId or exotelNumber
+        let config = await VoiceHospitalConfig.findOne({
+            $or: [
+                { hospitalId: new mongoose.Types.ObjectId(hospitalId) },
+                { exotelNumber }
+            ]
+        });
+
+        if (config) {
+            config.hospitalId = new mongoose.Types.ObjectId(hospitalId);
+            config.exotelNumber = exotelNumber;
+            if (isEnabled !== undefined) {
+                config.isEnabled = isEnabled;
+            }
+            await config.save();
+        } else {
+            config = new VoiceHospitalConfig({
+                hospitalId: new mongoose.Types.ObjectId(hospitalId),
+                exotelNumber,
+                isEnabled: isEnabled !== undefined ? isEnabled : true
+            });
+            await config.save();
+        }
+
+        res.status(200).json({ success: true, config });
+    } catch (error: any) {
+        console.error('[AdminVoiceConfigUpsertError]', error.message);
+        res.status(500).json({ error: 'Server error', details: error.message });
+    }
+};
+
+// @desc    Get all VoiceHospitalConfigs
+// @route   GET /api/admin/voice-config
+// @access  Private/Admin
+export const getVoiceConfigs = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const configs = await VoiceHospitalConfig.find().populate('hospitalId', 'name').lean();
+        res.status(200).json({ success: true, configs });
+    } catch (error: any) {
+        console.error('[AdminVoiceConfigGetError]', error.message);
+        res.status(500).json({ error: 'Server error', details: error.message });
     }
 };

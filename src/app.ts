@@ -289,6 +289,16 @@ const analyticsRoutes = require('./routes/analyticsRoutes').default || require('
 app.use('/api/metrics', analyticsRoutes);
 console.log('=== ANALYTICS ROUTES LOADED ===');
 
+console.log('=== VOICE ROUTES LOADING ===');
+const voiceRoutes = require('./routes/voice.routes').default || require('./routes/voice.routes');
+app.use('/api/voice', voiceRoutes);
+console.log('=== VOICE ROUTES LOADED ===');
+
+console.log('=== VOICE TTS ROUTES LOADING ===');
+const voiceTtsRoutes = require('./routes/voiceTts').default || require('./routes/voiceTts');
+app.use(voiceTtsRoutes);
+console.log('=== VOICE TTS ROUTES LOADED ===');
+
 app.get('/', (req, res) => {
     res.status(200).json({
         message: 'Pillora API is running with Sockets',

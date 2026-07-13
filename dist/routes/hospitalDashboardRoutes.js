@@ -37,6 +37,7 @@ router.get('/bookings/autocomplete', authMiddleware_1.protect, hospitalMiddlewar
 router.get('/patients/search', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.searchPatients);
 router.post('/appointments/:id/prescription', authMiddleware_1.protect, upload.single('prescription'), hospitalDashboardController_1.uploadAppointmentPrescription);
 router.get('/appointments/:id/prescription', authMiddleware_1.protect, hospitalDashboardController_1.getAppointmentPrescription);
+router.get('/appointments/:id/prescription/file', hospitalDashboardController_1.getAppointmentPrescriptionFile);
 // Payment routes
 router.get('/payments/summary', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPaymentSummary);
 router.post('/appointments/:id/payment', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.recordPayment);

@@ -38,4 +38,7 @@ router.put('/inventory/:id/status', authMiddleware_1.protect, authMiddleware_1.a
 router.put('/inventory/:id/deal', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.toggleDealStatus); // NEW: Toggle deal status
 router.put('/inventory/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.updateProduct); // NEW: Edit product details
 router.delete('/inventory/:id', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.deleteProduct);
+// Voice Configuration Management
+router.post('/voice-config', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.createOrUpdateVoiceConfig);
+router.get('/voice-config', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getVoiceConfigs);
 exports.default = router;

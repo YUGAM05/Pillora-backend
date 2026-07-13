@@ -32,7 +32,9 @@ import {
     adminAddDoctor,
     adminBulkGenerateSlots,
     bulkImportDonors,
-    downloadBulkImportTemplate
+    downloadBulkImportTemplate,
+    createOrUpdateVoiceConfig,
+    getVoiceConfigs
 } from '../controllers/adminController';
 router.get('/users', protect, adminOnly, getUsers);
 router.put('/users/:id/status', protect, adminOnly, updateUserStatus);
@@ -58,5 +60,9 @@ router.put('/inventory/:id/status', protect, adminOnly, updateProductStatus);
 router.put('/inventory/:id/deal', protect, adminOnly, toggleDealStatus);  // NEW: Toggle deal status
 router.put('/inventory/:id', protect, adminOnly, updateProduct); // NEW: Edit product details
 router.delete('/inventory/:id', protect, adminOnly, deleteProduct);
+
+// Voice Configuration Management
+router.post('/voice-config', protect, adminOnly, createOrUpdateVoiceConfig);
+router.get('/voice-config', protect, adminOnly, getVoiceConfigs);
 
 export default router;
