@@ -54,8 +54,12 @@ router.use((req, res, next) => {
  * Returns active doctors for req.hospitalId, optionally filtered by specialty (case-insensitive partial match).
  */
 router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_middleware_1.resolveVoiceHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const toolCall = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.toolCallList) === null || _c === void 0 ? void 0 : _c[0];
+    const toolCallId = toolCall === null || toolCall === void 0 ? void 0 : toolCall.id;
+    const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
-        const { specialty } = req.body;
+        const { specialty } = args;
         const query = {
             hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId),
             is_active: true
@@ -69,11 +73,15 @@ router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
             name: d.name,
             specialty: d.specialty
         }));
-        res.status(200).json({ doctors: responseDoctors });
+        res.status(200).json({
+            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors }) }]
+        });
     }
     catch (error) {
         console.error('[VoiceDoctorsError]', error.message);
-        res.status(500).json({ error: "internal_server_error" });
+        res.status(500).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
+        });
     }
 }));
 /**
@@ -82,18 +90,28 @@ router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
  * Returns available (unbooked) slots for that doctor on that date in HH:mm 24hr format.
  */
 router.post('/slots', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_middleware_1.resolveVoiceHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const toolCall = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.toolCallList) === null || _c === void 0 ? void 0 : _c[0];
+    const toolCallId = toolCall === null || toolCall === void 0 ? void 0 : toolCall.id;
+    const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
-        const { doctorId, date } = req.body;
+        const { doctorId, date } = args;
         if (!doctorId || !date) {
-            res.status(400).json({ error: "invalid_input", details: "Missing required fields (doctorId, date)" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Missing required fields (doctorId, date)" }) }]
+            });
             return;
         }
         if (!mongoose_1.default.Types.ObjectId.isValid(doctorId)) {
-            res.status(400).json({ error: "invalid_input", details: "Invalid doctorId format" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Invalid doctorId format" }) }]
+            });
             return;
         }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            res.status(400).json({ error: "invalid_input", details: "Date must be in YYYY-MM-DD format" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Date must be in YYYY-MM-DD format" }) }]
+            });
             return;
         }
         // Validate doctor belongs to req.hospitalId
@@ -102,7 +120,9 @@ router.post('/slots', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_mid
             hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId)
         }).select('_id').lean();
         if (!doctor) {
-            res.status(404).json({ error: "doctor_not_found" });
+            res.status(404).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "doctor_not_found" }) }]
+            });
             return;
         }
         // Query slots on date (IST local timezone)
@@ -131,11 +151,15 @@ router.post('/slots', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_mid
                 time: timeStr
             };
         });
-        res.status(200).json({ slots: formattedSlots });
+        res.status(200).json({
+            results: [{ toolCallId, result: JSON.stringify({ slots: formattedSlots }) }]
+        });
     }
     catch (error) {
         console.error('[VoiceSlotsError]', error.message);
-        res.status(500).json({ error: "internal_server_error" });
+        res.status(500).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
+        });
     }
 }));
 /**
@@ -144,21 +168,31 @@ router.post('/slots', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_mid
  * Books appointment, normalizes phone, limits rates, creates patient if needed, uses transaction for race check.
  */
 router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_middleware_1.resolveVoiceHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const toolCall = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.toolCallList) === null || _c === void 0 ? void 0 : _c[0];
+    const toolCallId = toolCall === null || toolCall === void 0 ? void 0 : toolCall.id;
+    const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
-        const { doctorId, slotId, patientName, patientPhone } = req.body;
+        const { doctorId, slotId, patientName, patientPhone } = args;
         if (!doctorId || !slotId || !patientName || !patientPhone) {
-            res.status(400).json({ error: "invalid_input", details: "Missing required booking fields (doctorId, slotId, patientName, patientPhone)" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Missing required booking fields (doctorId, slotId, patientName, patientPhone)" }) }]
+            });
             return;
         }
         if (!mongoose_1.default.Types.ObjectId.isValid(doctorId) || !mongoose_1.default.Types.ObjectId.isValid(slotId)) {
-            res.status(400).json({ error: "invalid_input", details: "Invalid doctorId or slotId format" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Invalid doctorId or slotId format" }) }]
+            });
             return;
         }
         // Validate and normalize phone to E.164 (Indian mobile)
         const cleanPhone = patientPhone.replace(/[\s-()]/g, '');
         const phoneMatch = cleanPhone.match(/^(?:\+?91|0)?([6-9]\d{9})$/);
         if (!phoneMatch) {
-            res.status(400).json({ error: "invalid_input", details: "Invalid phone number format. Must be a valid 10-digit Indian mobile number." });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Invalid phone number format. Must be a valid 10-digit Indian mobile number." }) }]
+            });
             return;
         }
         const tenDigitCore = phoneMatch[1];
@@ -168,7 +202,9 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
         const timestamps = bookingRateLimiter.get(normalizedPhone) || [];
         const recentTimestamps = timestamps.filter(ts => nowMs - ts < 3600000);
         if (recentTimestamps.length >= 3) {
-            res.status(429).json({ error: "rate_limit_exceeded", details: "Max 3 bookings per phone number per hour." });
+            res.status(429).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "rate_limit_exceeded", details: "Max 3 bookings per phone number per hour." }) }]
+            });
             return;
         }
         recentTimestamps.push(nowMs);
@@ -179,7 +215,9 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
             hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId)
         }).lean();
         if (!doctor) {
-            res.status(400).json({ error: "invalid_input", details: "Doctor not found or does not belong to this hospital" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Doctor not found or does not belong to this hospital" }) }]
+            });
             return;
         }
         // Retrieve Hospital
@@ -211,20 +249,26 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
                 hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId)
             }).session(session);
             if (!freshSlot) {
-                res.status(400).json({ error: "invalid_input", details: "Slot not found or mismatch" });
+                res.status(400).json({
+                    results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Slot not found or mismatch" }) }]
+                });
                 yield session.abortTransaction();
                 session.endSession();
                 return;
             }
             if (freshSlot.status === 'cancelled' || freshSlot.status === 'blocked') {
-                res.status(409).json({ error: "slot_unavailable" });
+                res.status(409).json({
+                    results: [{ toolCallId, result: JSON.stringify({ error: "slot_unavailable" }) }]
+                });
                 yield session.abortTransaction();
                 session.endSession();
                 return;
             }
             const maxAppts = freshSlot.max_appointments || doctor.maxAppointmentsPerSlot || 1;
             if (freshSlot.booked_count >= maxAppts || freshSlot.status === 'booked') {
-                res.status(409).json({ error: "slot_unavailable" });
+                res.status(409).json({
+                    results: [{ toolCallId, result: JSON.stringify({ error: "slot_unavailable" }) }]
+                });
                 yield session.abortTransaction();
                 session.endSession();
                 return;
@@ -277,7 +321,9 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
                 }
             }, { session, new: true });
             if (!updatedSlot) {
-                res.status(409).json({ error: "slot_unavailable" });
+                res.status(409).json({
+                    results: [{ toolCallId, result: JSON.stringify({ error: "slot_unavailable" }) }]
+                });
                 yield session.abortTransaction();
                 session.endSession();
                 return;
@@ -297,11 +343,16 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
                 io.emit('appointmentsUpdated', { hospitalId: req.hospitalId });
             }
             res.status(201).json({
-                appointmentId: appointment._id.toString(),
-                status: "confirmed",
-                doctorName: `Dr. ${doctor.name}`,
-                time: appointmentTimeStr,
-                date: appointmentDateStr
+                results: [{
+                        toolCallId,
+                        result: JSON.stringify({
+                            appointmentId: appointment._id.toString(),
+                            status: "confirmed",
+                            doctorName: `Dr. ${doctor.name}`,
+                            time: appointmentTimeStr,
+                            date: appointmentDateStr
+                        })
+                    }]
             });
         }
         catch (txnError) {
@@ -312,7 +363,9 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
     }
     catch (error) {
         console.error('[VoiceBookError]', error.message);
-        res.status(500).json({ error: "internal_server_error" });
+        res.status(500).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
+        });
     }
 }));
 /**
@@ -321,14 +374,22 @@ router.post('/book', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_midd
  * Triggers SMS confirmation if appointment belongs to req.hospitalId.
  */
 router.post('/confirm', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_middleware_1.resolveVoiceHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const toolCall = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.toolCallList) === null || _c === void 0 ? void 0 : _c[0];
+    const toolCallId = toolCall === null || toolCall === void 0 ? void 0 : toolCall.id;
+    const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
-        const { appointmentId } = req.body;
+        const { appointmentId } = args;
         if (!appointmentId) {
-            res.status(400).json({ error: "invalid_input", details: "Appointment ID is required" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Appointment ID is required" }) }]
+            });
             return;
         }
         if (!mongoose_1.default.Types.ObjectId.isValid(appointmentId)) {
-            res.status(400).json({ error: "invalid_input", details: "Invalid appointmentId format" });
+            res.status(400).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Invalid appointmentId format" }) }]
+            });
             return;
         }
         const appointment = yield Appointment_1.default.findOne({
@@ -336,7 +397,9 @@ router.post('/confirm', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
             hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId)
         }).lean();
         if (!appointment) {
-            res.status(404).json({ error: "appointment_not_found" });
+            res.status(404).json({
+                results: [{ toolCallId, result: JSON.stringify({ error: "appointment_not_found" }) }]
+            });
             return;
         }
         const phone = appointment.patientPhone;
@@ -345,13 +408,20 @@ router.post('/confirm', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
             yield (0, sms_service_1.sendSms)(phone, msg);
         }
         res.status(200).json({
-            sent: true,
-            appointmentId: appointment._id.toString()
+            results: [{
+                    toolCallId,
+                    result: JSON.stringify({
+                        sent: true,
+                        appointmentId: appointment._id.toString()
+                    })
+                }]
         });
     }
     catch (error) {
         console.error('[VoiceConfirmError]', error.message);
-        res.status(500).json({ error: "internal_server_error" });
+        res.status(500).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
+        });
     }
 }));
 exports.default = router;
