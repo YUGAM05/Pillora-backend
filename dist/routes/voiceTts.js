@@ -22,7 +22,7 @@ router.post('/api/voice/tts-gujarati', (req, res) => __awaiter(void 0, void 0, v
     try {
         console.log('[DEBUG] Incoming headers:', JSON.stringify(req.headers));
         console.log('[DEBUG] Expected secret from env:', process.env.VAPI_TTS_SECRET);
-        const incomingSecret = req.headers['x-vapi-secret'];
+        const incomingSecret = req.headers['x-tts-proxy-key'];
         if (!incomingSecret || incomingSecret !== process.env.VAPI_TTS_SECRET) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
