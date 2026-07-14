@@ -9,6 +9,9 @@ const sarvam = new SarvamAIClient({
 
 router.post('/api/voice/tts-gujarati', async (req: Request, res: Response): Promise<any> => {
   try {
+    console.log('[DEBUG] Incoming headers:', JSON.stringify(req.headers));
+    console.log('[DEBUG] Expected secret from env:', process.env.VAPI_TTS_SECRET);
+    
     const incomingSecret = req.headers['x-vapi-secret'];
     if (!incomingSecret || incomingSecret !== process.env.VAPI_TTS_SECRET) {
       return res.status(401).json({ error: 'Unauthorized' });
