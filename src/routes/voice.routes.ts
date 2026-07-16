@@ -100,6 +100,7 @@ router.post('/slots', voiceAuth, resolveVoiceHospital, async (req: Request, res:
     const args = toolCall?.function?.arguments || {};
     try {
         const { doctorId, date } = args;
+        console.log('[DEBUG] Slots query args:', JSON.stringify({ doctorId, date }));
 
         if (!doctorId || !date) {
             res.status(400).json({
