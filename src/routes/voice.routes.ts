@@ -72,6 +72,9 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
             specialty: d.specialty
         }));
 
+        // DEBUG: confirm toolCallId is populated before sending response
+        console.log('[DEBUG] Sending tool response:', JSON.stringify({ toolCallId, resultPreview: responseDoctors }));
+
         res.status(200).json({
             results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors }) }]
         });
