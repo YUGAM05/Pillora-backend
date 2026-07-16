@@ -7,11 +7,10 @@ interface Request extends ExpressRequest {
 
 export const resolveVoiceHospital = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-        // Log req.body during testing to identify fields sent by Vapi webhook
         console.log('[ResolveVoiceHospital] Request body:', JSON.stringify(req.body, null, 2));
 
-        const exotelNumber = 
-            req.body?.message?.call?.phoneNumber?.number || 
+        const exotelNumber =
+            req.body?.message?.call?.phoneNumber?.number ||
             req.body?.message?.phoneNumber?.number ||
             req.body?.call?.phoneNumber?.number ||
             req.body?.phoneNumber ||
@@ -20,13 +19,18 @@ export const resolveVoiceHospital = async (req: Request, res: Response, next: Ne
             req.body?.calledNumber;
 
         if (!exotelNumber) {
+            const fallbackHospitalId = process.env.DEFAULT_VOICE_HOSPITAL_ID;
+            if (fallbackHospitalId) {
+                console.warn('[ResolveVoiceHospital] No phone number found — using DEFAULT_VOICE_HOSPITAL_ID fallback (test mode)');
+                req.hospitalId = fallbackHospitalId;
+                return next();
+            }
             console.warn('[ResolveVoiceHospital] No phone number extracted from request body');
             res.status(403).json({ error: "voice_booking_not_enabled_for_this_number" });
             return;
         }
 
         const config = await VoiceHospitalConfig.findOne({ exotelNumber });
-
         if (!config || !config.isEnabled) {
             console.warn(`[ResolveVoiceHospital] Voice config not found or disabled for exotelNumber: ${exotelNumber}`);
             res.status(403).json({ error: "voice_booking_not_enabled_for_this_number" });
@@ -40,3 +44,4 @@ export const resolveVoiceHospital = async (req: Request, res: Response, next: Ne
         res.status(500).json({ error: "internal_server_error" });
     }
 };
+
