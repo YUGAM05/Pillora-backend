@@ -55,20 +55,29 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
     const args = toolCall?.function?.arguments || {};
     try {
         const { specialty, name } = args;
-        const query: any = {
+        const baseQuery: any = {
             hospital: new mongoose.Types.ObjectId(req.hospitalId),
             is_active: true
         };
 
+        const filteredQuery: any = { ...baseQuery };
         if (specialty && typeof specialty === 'string') {
-            query.specialty = { $regex: new RegExp(specialty.trim(), 'i') };
+            filteredQuery.specialty = { $regex: new RegExp(specialty.trim(), 'i') };
         }
         if (name && typeof name === 'string') {
-            query.name = { $regex: new RegExp(name.trim(), 'i') };
+            filteredQuery.name = { $regex: new RegExp(name.trim(), 'i') };
         }
 
-        const doctors = await Doctor.find(query).select('name specialty').lean();
-        
+        let doctors = await Doctor.find(filteredQuery).select('name specialty').lean();
+
+        // If a name or specialty filter was applied but matched nothing,
+        // fall back to the full active doctor list so the caller/model
+        // can still resolve a name that may have been mistranscribed
+        // (e.g. spoken in Gujarati script vs. an English-stored name).
+        if (doctors.length === 0 && (name || specialty)) {
+            doctors = await Doctor.find(baseQuery).select('name specialty').lean();
+        }
+
         const responseDoctors = doctors.map(d => ({
             doctorId: d._id.toString(),
             name: d.name,
