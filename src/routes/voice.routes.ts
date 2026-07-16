@@ -46,15 +46,15 @@ router.use((req: Request, res: Response, next) => {
 
 /**
  * 1. POST /api/voice/doctors
- * Body: { specialty?: string }
- * Returns active doctors for req.hospitalId, optionally filtered by specialty (case-insensitive partial match).
+ * Body: { specialty?: string, name?: string }
+ * Returns active doctors for req.hospitalId, optionally filtered by specialty or name (case-insensitive partial match).
  */
 router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, res: Response): Promise<void> => {
     const toolCall = req.body?.message?.toolCallList?.[0];
     const toolCallId = toolCall?.id;
     const args = toolCall?.function?.arguments || {};
     try {
-        const { specialty } = args;
+        const { specialty, name } = args;
         const query: any = {
             hospital: new mongoose.Types.ObjectId(req.hospitalId),
             is_active: true
@@ -62,6 +62,9 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
 
         if (specialty && typeof specialty === 'string') {
             query.specialty = { $regex: new RegExp(specialty.trim(), 'i') };
+        }
+        if (name && typeof name === 'string') {
+            query.name = { $regex: new RegExp(name.trim(), 'i') };
         }
 
         const doctors = await Doctor.find(query).select('name specialty').lean();
