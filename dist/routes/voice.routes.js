@@ -50,8 +50,8 @@ router.use((req, res, next) => {
 });
 /**
  * 1. POST /api/voice/doctors
- * Body: { specialty?: string }
- * Returns active doctors for req.hospitalId, optionally filtered by specialty (case-insensitive partial match).
+ * Body: { specialty?: string, name?: string }
+ * Returns active doctors for req.hospitalId, optionally filtered by specialty or name (case-insensitive partial match).
  */
 router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_middleware_1.resolveVoiceHospital, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
@@ -59,20 +59,33 @@ router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
     const toolCallId = toolCall === null || toolCall === void 0 ? void 0 : toolCall.id;
     const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
-        const { specialty } = args;
-        const query = {
+        const { specialty, name } = args;
+        const baseQuery = {
             hospital: new mongoose_1.default.Types.ObjectId(req.hospitalId),
             is_active: true
         };
+        const filteredQuery = Object.assign({}, baseQuery);
         if (specialty && typeof specialty === 'string') {
-            query.specialty = { $regex: new RegExp(specialty.trim(), 'i') };
+            filteredQuery.specialty = { $regex: new RegExp(specialty.trim(), 'i') };
         }
-        const doctors = yield Doctor_1.default.find(query).select('name specialty').lean();
+        if (name && typeof name === 'string') {
+            filteredQuery.name = { $regex: new RegExp(name.trim(), 'i') };
+        }
+        let doctors = yield Doctor_1.default.find(filteredQuery).select('name specialty').lean();
+        // If a name or specialty filter was applied but matched nothing,
+        // fall back to the full active doctor list so the caller/model
+        // can still resolve a name that may have been mistranscribed
+        // (e.g. spoken in Gujarati script vs. an English-stored name).
+        if (doctors.length === 0 && (name || specialty)) {
+            doctors = yield Doctor_1.default.find(baseQuery).select('name specialty').lean();
+        }
         const responseDoctors = doctors.map(d => ({
             doctorId: d._id.toString(),
             name: d.name,
             specialty: d.specialty
         }));
+        // DEBUG: confirm toolCallId is populated before sending response
+        console.log('[DEBUG] Sending tool response:', JSON.stringify({ toolCallId, resultPreview: responseDoctors }));
         res.status(200).json({
             results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors }) }]
         });
@@ -96,6 +109,7 @@ router.post('/slots', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_mid
     const args = ((_d = toolCall === null || toolCall === void 0 ? void 0 : toolCall.function) === null || _d === void 0 ? void 0 : _d.arguments) || {};
     try {
         const { doctorId, date } = args;
+        console.log('[DEBUG] Slots query args:', JSON.stringify({ doctorId, date }));
         if (!doctorId || !date) {
             res.status(400).json({
                 results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details: "Missing required fields (doctorId, date)" }) }]

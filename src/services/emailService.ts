@@ -371,3 +371,63 @@ export const sendDonorFoundEmail = async ({
   }
 };
 
+interface PasswordResetProps {
+  toEmail: string;
+  name: string;
+  resetLink: string;
+}
+
+export const sendPasswordResetEmail = async ({
+  toEmail,
+  name,
+  resetLink
+}: PasswordResetProps) => {
+  const mailOptions = {
+    from: `"Pillora" <team@pillora.in>`,
+    to: toEmail,
+    subject: 'Reset Your Pillora Password',
+    html: `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background-color: #f8fafc;">
+        <div style="background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h2 style="color: #3b82f6; margin: 0; font-size: 28px; font-weight: 800; tracking-tight: -0.025em;">Pillora</h2>
+            <p style="color: #64748b; font-size: 14px; margin-top: 4px; font-weight: 500;">Your Health, Secure and Connected</p>
+          </div>
+          
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 30px;" />
+          
+          <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 24px;">Hello ${name},</p>
+          
+          <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 24px;">We received a request to reset your password. Click the button below to create a new password.</p>
+          
+          <div style="text-align: center; margin: 35px 0;">
+            <a href="${resetLink}" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #ffffff; text-decoration: none; padding: 16px 32px; border-radius: 12px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2); transition: all 0.2s ease;">Reset Password</a>
+          </div>
+          
+          <p style="font-size: 14px; color: #ef4444; background-color: #fef2f2; border: 1px solid #fee2e2; padding: 12px 16px; border-radius: 8px; font-weight: 500; margin-bottom: 24px;">
+            ⚠️ This link expires in 15 minutes.
+          </p>
+          
+          <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 30px;">If you didn't request this, you can safely ignore this email.</p>
+          
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 24px;" />
+          
+          <p style="font-size: 14px; color: #64748b; margin: 0; line-height: 1.5;">Regards,<br><strong style="color: #334155;">Team Pillora</strong></p>
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+          <p style="font-size: 12px; color: #94a3b8; margin: 0;">This is an automated email from Pillora. Please do not reply.</p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Password reset email sent to', toEmail);
+  } catch (error) {
+    console.error('Error sending Password Reset email:', error);
+    throw error;
+  }
+};
+
+

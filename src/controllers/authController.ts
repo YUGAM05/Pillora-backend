@@ -11,6 +11,10 @@ import AuditLog from '../models/AuditLog';
 import { logActivity } from '../utils/activityLogger';
 import LoginHistory from '../models/LoginHistory';
 import { sendTelegramMessage } from '../utils/telegram';
+import crypto from 'crypto';
+import PasswordResetToken from '../models/PasswordResetToken';
+import { sendPasswordResetEmail } from '../services/emailService';
+
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
@@ -736,3 +740,175 @@ export const changePassword = async (req: any, res: Response): Promise<void> => 
         res.status(500).json({ message: 'Error updating password', error: error.message });
     }
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FORGOT PASSWORD FLOW
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/auth/forgot-password
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { email, portal } = req.body;
+
+        if (!email || !portal || !['patient', 'hospital'].includes(portal)) {
+            res.status(400).json({ message: 'Email and valid portal are required.' });
+            return;
+        }
+
+        const successMessage = "If an account exists with this email address, we've sent a password reset link.";
+        const normalizedEmail = email.trim().toLowerCase();
+
+        // Check if user exists
+        const user = await User.findOne({ email: normalizedEmail });
+        if (!user) {
+            // Always return success to prevent account enumeration
+            res.status(200).json({ message: successMessage });
+            return;
+        }
+
+        // Restrict based on role compatibility for security
+        let isRoleAllowed = false;
+        if (portal === 'hospital') {
+            isRoleAllowed = ['hospital', 'admin'].includes(user.role);
+        } else if (portal === 'patient') {
+            isRoleAllowed = ['customer', 'seller', 'delivery'].includes(user.role);
+        }
+
+        if (!isRoleAllowed) {
+            res.status(200).json({ message: successMessage });
+            return;
+        }
+
+        // Generate secure random token
+        const token = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+        // Invalidate active reset tokens for the same user
+        await PasswordResetToken.updateMany({ userId: user._id, portal }, { used: true });
+
+        // Save hashed token
+        await PasswordResetToken.create({
+            userId: user._id,
+            email: normalizedEmail,
+            portal,
+            tokenHash,
+            expiresAt,
+            used: false
+        });
+
+        // Determine portal URL prefix
+        let baseUrl = '';
+        if (portal === 'patient') {
+            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pillora.in';
+        } else {
+            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3002' : 'https://pillorahospital.in';
+        }
+
+        const resetLink = `${baseUrl}/reset-password?token=${token}`;
+
+        // Send email
+        await sendPasswordResetEmail({
+            toEmail: normalizedEmail,
+            name: user.name,
+            resetLink
+        });
+
+        res.status(200).json({ message: successMessage });
+    } catch (error: any) {
+        console.error('Forgot Password Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+};
+
+// GET /api/auth/verify-reset-token
+export const verifyResetToken = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { token } = req.query;
+
+        if (!token) {
+            res.status(400).json({ valid: false, message: 'Token is required.' });
+            return;
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token.toString()).digest('hex');
+
+        const resetToken = await PasswordResetToken.findOne({
+            tokenHash,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!resetToken) {
+            res.status(200).json({ valid: false, message: 'Reset link is invalid or has expired.' });
+            return;
+        }
+
+        res.status(200).json({ valid: true, message: 'Token is valid.' });
+    } catch (error: any) {
+        console.error('Verify Reset Token Error:', error);
+        res.status(500).json({ valid: false, message: 'Server Error', error: error.message || error });
+    }
+};
+
+// POST /api/auth/reset-password
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { token, password } = req.body;
+
+        if (!token || !password) {
+            res.status(400).json({ message: 'Token and password are required.' });
+            return;
+        }
+
+        // Real password regex verification on backend
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/~`\-]).{8,}$/;
+        if (!passwordRegex.test(password)) {
+            res.status(400).json({
+                message: 'Password must be at least 8 characters long, containing at least one uppercase letter, one lowercase letter, one number, and one special character.'
+            });
+            return;
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+        const resetToken = await PasswordResetToken.findOne({
+            tokenHash,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+
+        if (!resetToken) {
+            res.status(400).json({ message: 'Reset link is invalid or has expired.' });
+            return;
+        }
+
+        const user = await User.findById(resetToken.userId);
+        if (!user) {
+            res.status(404).json({ message: 'User not found.' });
+            return;
+        }
+
+        // Hash new password using bcryptjs
+        const salt = await bcrypt.genSalt(10);
+        user.passwordHash = await bcrypt.hash(password, salt);
+        user.isPasswordResetRequired = false;
+        await user.save();
+
+        // Mark current token as used
+        resetToken.used = true;
+        await resetToken.save();
+
+        // Invalidate all other active reset tokens for this user
+        await PasswordResetToken.updateMany(
+            { userId: user._id, _id: { $ne: resetToken._id } },
+            { used: true }
+        );
+
+        res.status(200).json({ message: 'Password has been updated successfully.' });
+    } catch (error: any) {
+        console.error('Reset Password Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+};
+

@@ -44,6 +44,51 @@ const loginLimiter = (0, express_rate_limit_1.default)({
         });
     },
 });
+// Rate limiters for forgot-password
+const forgotPasswordIpLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip || 'unknown-ip',
+    handler: (req, res) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many requests from this IP. Please try again after an hour.'
+        });
+    }
+});
+const forgotPasswordEmailLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => (req.body.email || '').toString().trim().toLowerCase(),
+    handler: (req, res) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many password reset requests for this email. Please try again after an hour.'
+        });
+    }
+});
 const router = express_1.default.Router();
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
@@ -93,6 +138,9 @@ router.post('/register', authController_1.registerUser);
 router.post('/login', loginCors, loginLimiter, authController_1.loginUser);
 router.post('/send-otp', authController_1.sendOtp);
 router.post('/verify-otp', authController_1.verifyOtp);
+router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, authController_1.forgotPassword);
+router.get('/verify-reset-token', authController_1.verifyResetToken);
+router.post('/reset-password', authController_1.resetPassword);
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────
 router.post('/setup-mfa', authController_1.setupMfa);
 router.post('/verify-mfa', authController_1.verifyMfa);

@@ -17,7 +17,6 @@ const VoiceHospitalConfig_1 = __importDefault(require("../models/VoiceHospitalCo
 const resolveVoiceHospital = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
     try {
-        // Log req.body during testing to identify fields sent by Vapi webhook
         console.log('[ResolveVoiceHospital] Request body:', JSON.stringify(req.body, null, 2));
         const exotelNumber = ((_d = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.call) === null || _c === void 0 ? void 0 : _c.phoneNumber) === null || _d === void 0 ? void 0 : _d.number) ||
             ((_g = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.phoneNumber) === null || _g === void 0 ? void 0 : _g.number) ||
@@ -27,6 +26,12 @@ const resolveVoiceHospital = (req, res, next) => __awaiter(void 0, void 0, void 
             ((_q = req.body) === null || _q === void 0 ? void 0 : _q.to) ||
             ((_r = req.body) === null || _r === void 0 ? void 0 : _r.calledNumber);
         if (!exotelNumber) {
+            const fallbackHospitalId = process.env.DEFAULT_VOICE_HOSPITAL_ID;
+            if (fallbackHospitalId) {
+                console.warn('[ResolveVoiceHospital] No phone number found — using DEFAULT_VOICE_HOSPITAL_ID fallback (test mode)');
+                req.hospitalId = fallbackHospitalId;
+                return next();
+            }
             console.warn('[ResolveVoiceHospital] No phone number extracted from request body');
             res.status(403).json({ error: "voice_booking_not_enabled_for_this_number" });
             return;

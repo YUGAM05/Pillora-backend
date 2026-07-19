@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePassword = exports.setupAdmin = exports.verifyOtp = exports.sendOtp = exports.emergencyLockdown = exports.logoutAdmin = exports.validateSession = exports.refreshToken = exports.setupMfa = exports.verifyMfa = exports.loginUser = exports.registerUser = void 0;
+exports.resetPassword = exports.verifyResetToken = exports.forgotPassword = exports.changePassword = exports.setupAdmin = exports.verifyOtp = exports.sendOtp = exports.emergencyLockdown = exports.logoutAdmin = exports.validateSession = exports.refreshToken = exports.setupMfa = exports.verifyMfa = exports.loginUser = exports.registerUser = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -58,6 +58,9 @@ const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 const activityLogger_1 = require("../utils/activityLogger");
 const LoginHistory_1 = __importDefault(require("../models/LoginHistory"));
 const telegram_1 = require("../utils/telegram");
+const crypto_1 = __importDefault(require("crypto"));
+const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
+const emailService_1 = require("../services/emailService");
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -716,3 +719,148 @@ const changePassword = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.changePassword = changePassword;
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FORGOT PASSWORD FLOW
+// ═══════════════════════════════════════════════════════════════════════════════
+// POST /api/auth/forgot-password
+const forgotPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { email, portal } = req.body;
+        if (!email || !portal || !['patient', 'hospital'].includes(portal)) {
+            res.status(400).json({ message: 'Email and valid portal are required.' });
+            return;
+        }
+        const successMessage = "If an account exists with this email address, we've sent a password reset link.";
+        const normalizedEmail = email.trim().toLowerCase();
+        // Check if user exists
+        const user = yield User_1.default.findOne({ email: normalizedEmail });
+        if (!user) {
+            // Always return success to prevent account enumeration
+            res.status(200).json({ message: successMessage });
+            return;
+        }
+        // Restrict based on role compatibility for security
+        let isRoleAllowed = false;
+        if (portal === 'hospital') {
+            isRoleAllowed = ['hospital', 'admin'].includes(user.role);
+        }
+        else if (portal === 'patient') {
+            isRoleAllowed = ['customer', 'seller', 'delivery'].includes(user.role);
+        }
+        if (!isRoleAllowed) {
+            res.status(200).json({ message: successMessage });
+            return;
+        }
+        // Generate secure random token
+        const token = crypto_1.default.randomBytes(32).toString('hex');
+        const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+        // Invalidate active reset tokens for the same user
+        yield PasswordResetToken_1.default.updateMany({ userId: user._id, portal }, { used: true });
+        // Save hashed token
+        yield PasswordResetToken_1.default.create({
+            userId: user._id,
+            email: normalizedEmail,
+            portal,
+            tokenHash,
+            expiresAt,
+            used: false
+        });
+        // Determine portal URL prefix
+        let baseUrl = '';
+        if (portal === 'patient') {
+            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pillora.in';
+        }
+        else {
+            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3002' : 'https://pillorahospital.in';
+        }
+        const resetLink = `${baseUrl}/reset-password?token=${token}`;
+        // Send email
+        yield (0, emailService_1.sendPasswordResetEmail)({
+            toEmail: normalizedEmail,
+            name: user.name,
+            resetLink
+        });
+        res.status(200).json({ message: successMessage });
+    }
+    catch (error) {
+        console.error('Forgot Password Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+});
+exports.forgotPassword = forgotPassword;
+// GET /api/auth/verify-reset-token
+const verifyResetToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { token } = req.query;
+        if (!token) {
+            res.status(400).json({ valid: false, message: 'Token is required.' });
+            return;
+        }
+        const tokenHash = crypto_1.default.createHash('sha256').update(token.toString()).digest('hex');
+        const resetToken = yield PasswordResetToken_1.default.findOne({
+            tokenHash,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+        if (!resetToken) {
+            res.status(200).json({ valid: false, message: 'Reset link is invalid or has expired.' });
+            return;
+        }
+        res.status(200).json({ valid: true, message: 'Token is valid.' });
+    }
+    catch (error) {
+        console.error('Verify Reset Token Error:', error);
+        res.status(500).json({ valid: false, message: 'Server Error', error: error.message || error });
+    }
+});
+exports.verifyResetToken = verifyResetToken;
+// POST /api/auth/reset-password
+const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { token, password } = req.body;
+        if (!token || !password) {
+            res.status(400).json({ message: 'Token and password are required.' });
+            return;
+        }
+        // Real password regex verification on backend
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/~`\-]).{8,}$/;
+        if (!passwordRegex.test(password)) {
+            res.status(400).json({
+                message: 'Password must be at least 8 characters long, containing at least one uppercase letter, one lowercase letter, one number, and one special character.'
+            });
+            return;
+        }
+        const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const resetToken = yield PasswordResetToken_1.default.findOne({
+            tokenHash,
+            used: false,
+            expiresAt: { $gt: new Date() }
+        });
+        if (!resetToken) {
+            res.status(400).json({ message: 'Reset link is invalid or has expired.' });
+            return;
+        }
+        const user = yield User_1.default.findById(resetToken.userId);
+        if (!user) {
+            res.status(404).json({ message: 'User not found.' });
+            return;
+        }
+        // Hash new password using bcryptjs
+        const salt = yield bcryptjs_1.default.genSalt(10);
+        user.passwordHash = yield bcryptjs_1.default.hash(password, salt);
+        user.isPasswordResetRequired = false;
+        yield user.save();
+        // Mark current token as used
+        resetToken.used = true;
+        yield resetToken.save();
+        // Invalidate all other active reset tokens for this user
+        yield PasswordResetToken_1.default.updateMany({ userId: user._id, _id: { $ne: resetToken._id } }, { used: true });
+        res.status(200).json({ message: 'Password has been updated successfully.' });
+    }
+    catch (error) {
+        console.error('Reset Password Error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message || error });
+    }
+});
+exports.resetPassword = resetPassword;

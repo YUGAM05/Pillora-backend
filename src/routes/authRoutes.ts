@@ -3,7 +3,7 @@ import {
     registerUser, loginUser, sendOtp, verifyOtp,
     setupMfa, verifyMfa, setupAdmin,
     refreshToken, validateSession, logoutAdmin, emergencyLockdown,
-    changePassword
+    changePassword, forgotPassword, verifyResetToken, resetPassword
 } from '../controllers/authController';
 import { protect } from '../middleware/authMiddleware';
 import passport from '../config/passport';
@@ -34,6 +34,51 @@ const loginLimiter = rateLimit({
             message: 'Too many login attempts from this IP, please try again after 15 minutes'
         });
     },
+});
+
+// Rate limiters for forgot-password
+const forgotPasswordIpLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip || 'unknown-ip',
+    handler: (req: express.Request, res: express.Response) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many requests from this IP. Please try again after an hour.'
+        });
+    }
+});
+
+const forgotPasswordEmailLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => (req.body.email || '').toString().trim().toLowerCase(),
+    handler: (req: express.Request, res: express.Response) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many password reset requests for this email. Please try again after an hour.'
+        });
+    }
 });
 
 const router = express.Router();
@@ -86,6 +131,9 @@ router.post('/register', registerUser);
 router.post('/login', loginCors, loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
+router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, forgotPassword);
+router.get('/verify-reset-token', verifyResetToken);
+router.post('/reset-password', resetPassword);
 
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────
 router.post('/setup-mfa', setupMfa);
