@@ -74,8 +74,7 @@ router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
         let doctors = yield Doctor_1.default.find(filteredQuery).select('name specialty').lean();
         // If a name or specialty filter was applied but matched nothing,
         // fall back to the full active doctor list so the caller/model
-        // can still resolve a name that may have been mistranscribed
-        // (e.g. spoken in Gujarati script vs. an English-stored name).
+        // can still resolve a name that may have been mistranscribed.
         if (doctors.length === 0 && (name || specialty)) {
             doctors = yield Doctor_1.default.find(baseQuery).select('name specialty').lean();
         }
@@ -84,8 +83,6 @@ router.post('/doctors', voiceAuth_middleware_1.voiceAuth, resolveVoiceHospital_m
             name: d.name,
             specialty: d.specialty
         }));
-        // DEBUG: confirm toolCallId is populated before sending response
-        console.log('[DEBUG] Sending tool response:', JSON.stringify({ toolCallId, resultPreview: responseDoctors }));
         res.status(200).json({
             results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors }) }]
         });
