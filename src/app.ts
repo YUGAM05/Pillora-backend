@@ -249,6 +249,11 @@ const couponRoutes = require('./routes/couponRoutes').default || require('./rout
 app.use('/api/coupons', couponRoutes);
 console.log('=== COUPON ROUTES LOADED ===');
 
+console.log('=== WEBHOOK ROUTES LOADING ===');
+const webhookRoutes = require('./routes/webhookRoutes').default || require('./routes/webhookRoutes');
+app.use('/api/webhook', webhookRoutes);
+console.log('=== WEBHOOK ROUTES LOADED ===');
+
 console.log('=== MEDICINE ROUTES LOADING ===');
 const medicineRoutes = require('./routes/medicineRoutes').default || require('./routes/medicineRoutes');
 app.use('/api/medicines', medicineRoutes);
