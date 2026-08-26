@@ -1014,6 +1014,7 @@ const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!user) {
             // Register new User
             const shortDigits = cleanPhone.slice(-4);
+            const fallbackEmail = `user_${cleanPhone}@phone.pillora.in`;
             try {
                 user = yield User_1.default.create({
                     name: `Pillora User ${shortDigits}`,
@@ -1026,15 +1027,31 @@ const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
             }
             catch (createErr) {
-                console.warn('[PhoneAuth] User.create failed, searching again:', createErr === null || createErr === void 0 ? void 0 : createErr.message);
+                console.warn('[PhoneAuth] User.create initial attempt failed:', createErr === null || createErr === void 0 ? void 0 : createErr.message);
                 user = yield User_1.default.findOne({
                     $or: [
                         { phoneNumber: { $in: phoneVariants } },
-                        { phone: { $in: phoneVariants } }
+                        { phone: { $in: phoneVariants } },
+                        { email: fallbackEmail }
                     ]
                 });
                 if (!user) {
-                    throw createErr;
+                    try {
+                        user = yield User_1.default.create({
+                            name: `Pillora User ${shortDigits}`,
+                            phoneNumber: cleanPhone,
+                            phone: cleanPhone,
+                            email: fallbackEmail,
+                            phoneVerified: true,
+                            role: 'customer',
+                            status: 'approved'
+                        });
+                        console.log(`[PhoneAuth] Registered new user with fallback email for phone ${cleanPhone}`);
+                    }
+                    catch (fallbackErr) {
+                        console.error('[PhoneAuth] User.create fallback failed:', fallbackErr === null || fallbackErr === void 0 ? void 0 : fallbackErr.message);
+                        throw fallbackErr;
+                    }
                 }
             }
         }

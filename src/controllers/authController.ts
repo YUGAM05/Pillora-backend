@@ -1077,6 +1077,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
         if (!user) {
             // Register new User
             const shortDigits = cleanPhone.slice(-4);
+            const fallbackEmail = `user_${cleanPhone}@phone.pillora.in`;
             try {
                 user = await User.create({
                     name: `Pillora User ${shortDigits}`,
@@ -1088,15 +1089,32 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
                 });
                 console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
             } catch (createErr: any) {
-                console.warn('[PhoneAuth] User.create failed, searching again:', createErr?.message);
+                console.warn('[PhoneAuth] User.create initial attempt failed:', createErr?.message);
+                
                 user = await User.findOne({
                     $or: [
                         { phoneNumber: { $in: phoneVariants } },
-                        { phone: { $in: phoneVariants } }
+                        { phone: { $in: phoneVariants } },
+                        { email: fallbackEmail }
                     ]
                 });
+
                 if (!user) {
-                    throw createErr;
+                    try {
+                        user = await User.create({
+                            name: `Pillora User ${shortDigits}`,
+                            phoneNumber: cleanPhone,
+                            phone: cleanPhone,
+                            email: fallbackEmail,
+                            phoneVerified: true,
+                            role: 'customer',
+                            status: 'approved'
+                        });
+                        console.log(`[PhoneAuth] Registered new user with fallback email for phone ${cleanPhone}`);
+                    } catch (fallbackErr: any) {
+                        console.error('[PhoneAuth] User.create fallback failed:', fallbackErr?.message);
+                        throw fallbackErr;
+                    }
                 }
             }
         } else {

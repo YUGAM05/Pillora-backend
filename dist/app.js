@@ -30,6 +30,7 @@ const dailyStats_1 = require("./cron/dailyStats");
 const appointmentReminders_1 = require("./cron/appointmentReminders");
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
+const User_1 = __importDefault(require("./models/User"));
 const app = (0, express_1.default)();
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
@@ -284,6 +285,7 @@ app.get('/', (req, res) => {
     });
 });
 const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     if (mongoose_1.default.connection.readyState === 1)
         return;
     // If connection is already in progress, wait for the open event to complete
@@ -315,6 +317,23 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
             connectTimeoutMS: 4000,
         });
         console.log('[DB] Connected to MongoDB:', mongoose_1.default.connection.name);
+        // Fix MongoDB index issues (e.g. non-sparse email_1 index causing E11000 on null emails)
+        try {
+            const usersColl = (_a = mongoose_1.default.connection.db) === null || _a === void 0 ? void 0 : _a.collection('users');
+            if (usersColl) {
+                const indexes = yield usersColl.indexes();
+                const emailIdx = indexes.find((i) => i.name === 'email_1');
+                if (emailIdx && !emailIdx.sparse) {
+                    console.log('[DB] Dropping non-sparse email_1 index on users collection...');
+                    yield usersColl.dropIndex('email_1');
+                    console.log('[DB] Dropped legacy email_1 index successfully.');
+                }
+            }
+            yield User_1.default.syncIndexes();
+        }
+        catch (idxErr) {
+            console.warn('[DB] Index sync notice:', idxErr.message);
+        }
     }
     catch (error) {
         console.error('[DB] Connection Error:', error.message);

@@ -16,6 +16,7 @@ import { initDailyStatsCron } from './cron/dailyStats';
 import { initAppointmentRemindersCron } from './cron/appointmentReminders';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import User from './models/User';
 
 const app = express();
 const httpServer = createServer(app);
@@ -346,6 +347,23 @@ export const connectDB = async () => {
             connectTimeoutMS: 4000,
         });
         console.log('[DB] Connected to MongoDB:', mongoose.connection.name);
+
+        // Fix MongoDB index issues (e.g. non-sparse email_1 index causing E11000 on null emails)
+        try {
+            const usersColl = mongoose.connection.db?.collection('users');
+            if (usersColl) {
+                const indexes = await usersColl.indexes();
+                const emailIdx = indexes.find((i: any) => i.name === 'email_1');
+                if (emailIdx && !emailIdx.sparse) {
+                    console.log('[DB] Dropping non-sparse email_1 index on users collection...');
+                    await usersColl.dropIndex('email_1');
+                    console.log('[DB] Dropped legacy email_1 index successfully.');
+                }
+            }
+            await User.syncIndexes();
+        } catch (idxErr: any) {
+            console.warn('[DB] Index sync notice:', idxErr.message);
+        }
     } catch (error: any) {
         console.error('[DB] Connection Error:', error.message);
         throw error;
