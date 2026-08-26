@@ -122,7 +122,7 @@ exports.initiatePayment = initiatePayment;
  * @access  Public (Webhook / Callback endpoint)
  */
 const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         let razorpayPaymentId = '';
         let razorpayOrderId = '';
@@ -221,25 +221,49 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         timeSlot: timeSlotStr,
                         bookingId: populatedApp._id.toString()
                     });
-                    const targetPatientPhone = populatedApp.patientPhone || ((_b = populatedApp.patient) === null || _b === void 0 ? void 0 : _b.phone);
+                    // Dispatch WhatsApp Appointment Confirmation notification
+                    const targetPatientPhone = populatedApp.patientPhone ||
+                        ((_b = populatedApp.patient) === null || _b === void 0 ? void 0 : _b.phoneNumber) ||
+                        ((_c = populatedApp.patient) === null || _c === void 0 ? void 0 : _c.phone);
                     if (targetPatientPhone) {
                         try {
-                            yield (0, whatsappService_1.sendWhatsAppTemplate)(targetPatientPhone, 'appointment_confirmation', 'en', [
+                            const patName = populatedApp.patientName || ((_d = populatedApp.patient) === null || _d === void 0 ? void 0 : _d.name) || 'Patient';
+                            const docName = populatedApp.doctorName || (((_e = populatedApp.doctor) === null || _e === void 0 ? void 0 : _e.name) ? `Dr. ${populatedApp.doctor.name}` : '') || 'Doctor';
+                            const hospName = ((_f = populatedApp.hospital) === null || _f === void 0 ? void 0 : _f.name) || populatedApp.hospitalName || 'Pillora Hospital';
+                            const apptDateRaw = populatedApp.slotTime || populatedApp.appointmentDate;
+                            const d = new Date(apptDateRaw);
+                            const formattedApptDate = !isNaN(d.getTime())
+                                ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                : String(populatedApp.appointmentDate || '28 Aug 2026');
+                            const formattedApptTime = !isNaN(d.getTime())
+                                ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
+                                : String(populatedApp.appointmentTime || '4:00 PM');
+                            console.log(`[WhatsApp Service] 🚀 Dispatching appointment_confirmation template to ${targetPatientPhone}...`);
+                            const waResult = yield (0, whatsappService_1.sendWhatsAppTemplate)(targetPatientPhone, 'appointment_confirmation', 'en', [
                                 {
                                     type: 'body',
                                     parameters: [
-                                        { type: 'text', text: populatedApp.patientName || ((_c = populatedApp.patient) === null || _c === void 0 ? void 0 : _c.name) || 'Patient' },
-                                        { type: 'text', text: ((_d = populatedApp.hospital) === null || _d === void 0 ? void 0 : _d.name) || 'Hospital' },
-                                        { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                        { type: 'text', text: populatedApp._id.toString() }
+                                        { type: 'text', text: patName },
+                                        { type: 'text', text: docName },
+                                        { type: 'text', text: hospName },
+                                        { type: 'text', text: formattedApptDate },
+                                        { type: 'text', text: formattedApptTime }
                                     ]
                                 }
                             ]);
-                            console.log(`[Appointment Confirmation] WhatsApp template sent to ${targetPatientPhone}`);
+                            if (!waResult.success) {
+                                console.error('[WhatsApp Service] ❌ Failed to deliver appointment_confirmation WhatsApp message:', waResult.error);
+                            }
+                            else {
+                                console.log(`[WhatsApp Service] ✅ appointment_confirmation WhatsApp template delivered successfully to ${targetPatientPhone}`);
+                            }
                         }
                         catch (waErr) {
-                            console.error('[Appointment Confirmation] WhatsApp dispatch error:', waErr.message || waErr);
+                            console.error('[WhatsApp Service] ❌ Appointment confirmation WhatsApp dispatch error:', waErr.message || waErr);
                         }
+                    }
+                    else {
+                        console.warn('[WhatsApp Service] ⚠️ Could not send WhatsApp appointment_confirmation: Patient phone number missing from appointment and user record.');
                     }
                     if (populatedApp.hospital.email) {
                         try {
@@ -262,7 +286,7 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     try {
                         const patName = populatedApp.patientName || populatedApp.patient.name || 'Patient';
                         const docName = populatedApp.doctorName || populatedApp.doctor.name || 'Doctor';
-                        const hospitalId = ((_e = populatedApp.hospital._id) === null || _e === void 0 ? void 0 : _e.toString()) || populatedApp.hospital.toString();
+                        const hospitalId = ((_g = populatedApp.hospital._id) === null || _g === void 0 ? void 0 : _g.toString()) || populatedApp.hospital.toString();
                         yield (0, pushNotificationService_1.sendAppointmentNotification)(hospitalId, {
                             appointmentId: populatedApp._id.toString(),
                             patientName: patName,

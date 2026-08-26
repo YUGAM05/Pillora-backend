@@ -891,26 +891,41 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
                 });
                 io.emit('appointmentsUpdated', { hospitalId: hospital._id });
             }
-            if (patient.phone) {
+            const targetPhone = patient.phone || patient.phoneNumber;
+            if (targetPhone) {
                 try {
-                    const hospitalNameStr = hospital.name || 'Pillora Hospital';
-                    const dateStr = (0, dateHelper_1.formatDateIST)(slotTime);
-                    const timeSlotStr = (0, dateHelper_1.formatTimeIST)(slotTime);
-                    yield (0, whatsappService_1.sendWhatsAppTemplate)(patient.phone, 'appointment_confirmation', 'en', [
+                    const patName = patient.name || 'Patient';
+                    const docName = (doctor === null || doctor === void 0 ? void 0 : doctor.name) ? `Dr. ${doctor.name}` : 'Doctor';
+                    const hospName = hospital.name || 'Pillora Hospital';
+                    const d = new Date(slotTime);
+                    const formattedApptDate = !isNaN(d.getTime())
+                        ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                        : '28 Aug 2026';
+                    const formattedApptTime = !isNaN(d.getTime())
+                        ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
+                        : '4:00 PM';
+                    console.log(`[WhatsApp Service] 🚀 Dispatching manual appointment_confirmation template to ${targetPhone}...`);
+                    const waResult = yield (0, whatsappService_1.sendWhatsAppTemplate)(targetPhone, 'appointment_confirmation', 'en', [
                         {
                             type: 'body',
                             parameters: [
-                                { type: 'text', text: patient.name || 'Patient' },
-                                { type: 'text', text: hospitalNameStr },
-                                { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                { type: 'text', text: appointment._id.toString() }
+                                { type: 'text', text: patName },
+                                { type: 'text', text: docName },
+                                { type: 'text', text: hospName },
+                                { type: 'text', text: formattedApptDate },
+                                { type: 'text', text: formattedApptTime }
                             ]
                         }
                     ]);
-                    console.log('Walking appointment confirmation WhatsApp template sent to', patient.phone);
+                    if (!waResult.success) {
+                        console.error('[WhatsApp Service] ❌ Failed to deliver manual appointment_confirmation WhatsApp message:', waResult.error);
+                    }
+                    else {
+                        console.log(`[WhatsApp Service] ✅ Manual appointment_confirmation WhatsApp template delivered successfully to ${targetPhone}`);
+                    }
                 }
                 catch (waErr) {
-                    console.error('Walking appointment WhatsApp failed (non-critical):', waErr.message || waErr);
+                    console.error('[WhatsApp Service] ❌ Walking appointment WhatsApp failed (non-critical):', waErr.message || waErr);
                 }
             }
             if (patient.email) {

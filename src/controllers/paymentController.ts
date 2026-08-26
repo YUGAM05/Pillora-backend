@@ -230,10 +230,29 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                         bookingId: populatedApp._id.toString()
                     });
 
-                    const targetPatientPhone = populatedApp.patientPhone || (populatedApp.patient as any)?.phone;
+                    // Dispatch WhatsApp Appointment Confirmation notification
+                    const targetPatientPhone = populatedApp.patientPhone || 
+                                               (populatedApp.patient as any)?.phoneNumber || 
+                                               (populatedApp.patient as any)?.phone;
+
                     if (targetPatientPhone) {
                         try {
-                            await sendWhatsAppTemplate(
+                            const patName = populatedApp.patientName || (populatedApp.patient as any)?.name || 'Patient';
+                            const docName = populatedApp.doctorName || ((populatedApp.doctor as any)?.name ? `Dr. ${(populatedApp.doctor as any).name}` : '') || 'Doctor';
+                            const hospName = (populatedApp.hospital as any)?.name || populatedApp.hospitalName || 'Pillora Hospital';
+
+                            const apptDateRaw = populatedApp.slotTime || populatedApp.appointmentDate;
+                            const d = new Date(apptDateRaw);
+                            const formattedApptDate = !isNaN(d.getTime())
+                                ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                                : String(populatedApp.appointmentDate || '28 Aug 2026');
+
+                            const formattedApptTime = !isNaN(d.getTime())
+                                ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
+                                : String(populatedApp.appointmentTime || '4:00 PM');
+
+                            console.log(`[WhatsApp Service] 🚀 Dispatching appointment_confirmation template to ${targetPatientPhone}...`);
+                            const waResult = await sendWhatsAppTemplate(
                                 targetPatientPhone,
                                 'appointment_confirmation',
                                 'en',
@@ -241,18 +260,26 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                                     {
                                         type: 'body',
                                         parameters: [
-                                            { type: 'text', text: populatedApp.patientName || (populatedApp.patient as any)?.name || 'Patient' },
-                                            { type: 'text', text: (populatedApp.hospital as any)?.name || 'Hospital' },
-                                            { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                            { type: 'text', text: populatedApp._id.toString() }
+                                            { type: 'text', text: patName },
+                                            { type: 'text', text: docName },
+                                            { type: 'text', text: hospName },
+                                            { type: 'text', text: formattedApptDate },
+                                            { type: 'text', text: formattedApptTime }
                                         ]
                                     }
                                 ]
                             );
-                            console.log(`[Appointment Confirmation] WhatsApp template sent to ${targetPatientPhone}`);
+
+                            if (!waResult.success) {
+                                console.error('[WhatsApp Service] ❌ Failed to deliver appointment_confirmation WhatsApp message:', waResult.error);
+                            } else {
+                                console.log(`[WhatsApp Service] ✅ appointment_confirmation WhatsApp template delivered successfully to ${targetPatientPhone}`);
+                            }
                         } catch (waErr: any) {
-                            console.error('[Appointment Confirmation] WhatsApp dispatch error:', waErr.message || waErr);
+                            console.error('[WhatsApp Service] ❌ Appointment confirmation WhatsApp dispatch error:', waErr.message || waErr);
                         }
+                    } else {
+                        console.warn('[WhatsApp Service] ⚠️ Could not send WhatsApp appointment_confirmation: Patient phone number missing from appointment and user record.');
                     }
 
                     if ((populatedApp.hospital as any).email) {
