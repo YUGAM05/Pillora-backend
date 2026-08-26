@@ -14,7 +14,7 @@ import { sendTelegramMessage } from '../utils/telegram';
 import crypto from 'crypto';
 import PasswordResetToken from '../models/PasswordResetToken';
 import { sendPasswordResetEmail } from '../services/emailService';
-import { sendWhatsAppTemplate, formatPhoneNumber } from '../services/whatsappService';
+import { sendWhatsAppTemplate, formatPhoneNumber, getPhoneVariants } from '../services/whatsappService';
 import OtpVerification from '../models/OtpVerification';
 
 
@@ -952,9 +952,11 @@ export const sendPhoneOtp = async (req: Request, res: Response): Promise<void> =
             return;
         }
 
+        const phoneVariants = getPhoneVariants(phoneNumber);
+
         // Rate Limit Check: max 3 requests per 15 minutes per phone number
         const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-        let record = await OtpVerification.findOne({ phoneNumber: cleanPhone });
+        let record = await OtpVerification.findOne({ phoneNumber: { $in: phoneVariants } });
 
         if (record) {
             const recentResends = (record.resendHistory || []).filter(date => new Date(date) >= fifteenMinsAgo);
@@ -972,6 +974,7 @@ export const sendPhoneOtp = async (req: Request, res: Response): Promise<void> =
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5-minute expiry
 
         if (record) {
+            record.phoneNumber = cleanPhone;
             record.otp = otpValue;
             record.expiresAt = expiresAt;
             record.attempts = 0;
@@ -1037,7 +1040,8 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
         }
 
         const cleanPhone = formatPhoneNumber(phoneNumber);
-        const record = await OtpVerification.findOne({ phoneNumber: cleanPhone });
+        const phoneVariants = getPhoneVariants(phoneNumber);
+        const record = await OtpVerification.findOne({ phoneNumber: { $in: phoneVariants } });
 
         if (!record || new Date() > record.expiresAt) {
             res.status(400).json({ success: false, message: 'Invalid or expired verification code. Please request a new OTP.' });
@@ -1054,7 +1058,7 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
         record.attempts += 1;
         await record.save();
 
-        if (record.otp !== otp.toString().trim()) {
+        if (record.otp.toString().trim() !== otp.toString().trim()) {
             res.status(400).json({ success: false, message: 'Invalid verification code. Please check and try again.' });
             return;
         }
@@ -1062,28 +1066,48 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
         // OTP verified successfully -> remove OTP record
         await OtpVerification.deleteOne({ _id: record._id });
 
-        // Find user by phoneNumber or phone
+        // Find user by phoneNumber or phone using all phone variants
         let user = await User.findOne({
-            $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }]
+            $or: [
+                { phoneNumber: { $in: phoneVariants } },
+                { phone: { $in: phoneVariants } }
+            ]
         });
 
         if (!user) {
             // Register new User
             const shortDigits = cleanPhone.slice(-4);
-            user = await User.create({
-                name: `Pillora User ${shortDigits}`,
-                phoneNumber: cleanPhone,
-                phone: cleanPhone,
-                phoneVerified: true,
-                role: 'customer',
-                status: 'approved'
-            });
-            console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
+            try {
+                user = await User.create({
+                    name: `Pillora User ${shortDigits}`,
+                    phoneNumber: cleanPhone,
+                    phone: cleanPhone,
+                    phoneVerified: true,
+                    role: 'customer',
+                    status: 'approved'
+                });
+                console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
+            } catch (createErr: any) {
+                console.warn('[PhoneAuth] User.create failed, searching again:', createErr?.message);
+                user = await User.findOne({
+                    $or: [
+                        { phoneNumber: { $in: phoneVariants } },
+                        { phone: { $in: phoneVariants } }
+                    ]
+                });
+                if (!user) {
+                    throw createErr;
+                }
+            }
         } else {
             if (!user.phoneVerified || !user.phoneNumber) {
                 user.phoneVerified = true;
                 if (!user.phoneNumber) user.phoneNumber = cleanPhone;
-                await user.save();
+                try {
+                    await user.save();
+                } catch (saveErr) {
+                    console.warn('[PhoneAuth] Failed to update user phoneVerified flag:', saveErr);
+                }
             }
         }
 
@@ -1112,8 +1136,8 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
             status: user.status
         });
     } catch (error: any) {
-        console.error('[PhoneAuth] verifyPhoneOtp error:', error.message || error);
-        res.status(500).json({ success: false, message: 'Verification failed. Please try again.' });
+        console.error('[PhoneAuth] verifyPhoneOtp error:', error.stack || error.message || error);
+        res.status(500).json({ success: false, message: error.message || 'Verification failed. Please try again.' });
     }
 };
 

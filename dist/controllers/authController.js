@@ -902,9 +902,10 @@ const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             res.status(400).json({ success: false, message: 'Invalid phone number format.' });
             return;
         }
+        const phoneVariants = (0, whatsappService_1.getPhoneVariants)(phoneNumber);
         // Rate Limit Check: max 3 requests per 15 minutes per phone number
         const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-        let record = yield OtpVerification_1.default.findOne({ phoneNumber: cleanPhone });
+        let record = yield OtpVerification_1.default.findOne({ phoneNumber: { $in: phoneVariants } });
         if (record) {
             const recentResends = (record.resendHistory || []).filter(date => new Date(date) >= fifteenMinsAgo);
             if (recentResends.length >= 3) {
@@ -919,6 +920,7 @@ const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const otpValue = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5-minute expiry
         if (record) {
+            record.phoneNumber = cleanPhone;
             record.otp = otpValue;
             record.expiresAt = expiresAt;
             record.attempts = 0;
@@ -982,7 +984,8 @@ const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return;
         }
         const cleanPhone = (0, whatsappService_1.formatPhoneNumber)(phoneNumber);
-        const record = yield OtpVerification_1.default.findOne({ phoneNumber: cleanPhone });
+        const phoneVariants = (0, whatsappService_1.getPhoneVariants)(phoneNumber);
+        const record = yield OtpVerification_1.default.findOne({ phoneNumber: { $in: phoneVariants } });
         if (!record || new Date() > record.expiresAt) {
             res.status(400).json({ success: false, message: 'Invalid or expired verification code. Please request a new OTP.' });
             return;
@@ -995,35 +998,57 @@ const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         record.attempts += 1;
         yield record.save();
-        if (record.otp !== otp.toString().trim()) {
+        if (record.otp.toString().trim() !== otp.toString().trim()) {
             res.status(400).json({ success: false, message: 'Invalid verification code. Please check and try again.' });
             return;
         }
         // OTP verified successfully -> remove OTP record
         yield OtpVerification_1.default.deleteOne({ _id: record._id });
-        // Find user by phoneNumber or phone
+        // Find user by phoneNumber or phone using all phone variants
         let user = yield User_1.default.findOne({
-            $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }]
+            $or: [
+                { phoneNumber: { $in: phoneVariants } },
+                { phone: { $in: phoneVariants } }
+            ]
         });
         if (!user) {
             // Register new User
             const shortDigits = cleanPhone.slice(-4);
-            user = yield User_1.default.create({
-                name: `Pillora User ${shortDigits}`,
-                phoneNumber: cleanPhone,
-                phone: cleanPhone,
-                phoneVerified: true,
-                role: 'customer',
-                status: 'approved'
-            });
-            console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
+            try {
+                user = yield User_1.default.create({
+                    name: `Pillora User ${shortDigits}`,
+                    phoneNumber: cleanPhone,
+                    phone: cleanPhone,
+                    phoneVerified: true,
+                    role: 'customer',
+                    status: 'approved'
+                });
+                console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
+            }
+            catch (createErr) {
+                console.warn('[PhoneAuth] User.create failed, searching again:', createErr === null || createErr === void 0 ? void 0 : createErr.message);
+                user = yield User_1.default.findOne({
+                    $or: [
+                        { phoneNumber: { $in: phoneVariants } },
+                        { phone: { $in: phoneVariants } }
+                    ]
+                });
+                if (!user) {
+                    throw createErr;
+                }
+            }
         }
         else {
             if (!user.phoneVerified || !user.phoneNumber) {
                 user.phoneVerified = true;
                 if (!user.phoneNumber)
                     user.phoneNumber = cleanPhone;
-                yield user.save();
+                try {
+                    yield user.save();
+                }
+                catch (saveErr) {
+                    console.warn('[PhoneAuth] Failed to update user phoneVerified flag:', saveErr);
+                }
             }
         }
         // Log login history
@@ -1051,8 +1076,8 @@ const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function*
         });
     }
     catch (error) {
-        console.error('[PhoneAuth] verifyPhoneOtp error:', error.message || error);
-        res.status(500).json({ success: false, message: 'Verification failed. Please try again.' });
+        console.error('[PhoneAuth] verifyPhoneOtp error:', error.stack || error.message || error);
+        res.status(500).json({ success: false, message: error.message || 'Verification failed. Please try again.' });
     }
 });
 exports.verifyPhoneOtp = verifyPhoneOtp;

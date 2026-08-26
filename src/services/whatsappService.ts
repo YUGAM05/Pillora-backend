@@ -4,11 +4,41 @@ import axios from 'axios';
  * Utility to format phone number to standard E.164 numeric string without '+' (e.g. 919876543210)
  */
 export const formatPhoneNumber = (userPhone: string): string => {
-    let clean = userPhone.replace(/[^0-9]/g, '');
+    let clean = (userPhone || '').toString().replace(/[^0-9]/g, '');
     if (clean.length === 10) {
         clean = '91' + clean;
     }
     return clean;
+};
+
+/**
+ * Utility to get all valid variations of a phone number (e.g. 919876543210, 9876543210, +919876543210)
+ */
+export const getPhoneVariants = (userPhone: string): string[] => {
+    if (!userPhone) return [];
+    const raw = userPhone.toString().trim();
+    const digitsOnly = raw.replace(/\D/g, '');
+    const cleanPhone = formatPhoneNumber(raw);
+    
+    let tenDigits = '';
+    if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+        tenDigits = cleanPhone.slice(2);
+    } else if (digitsOnly.length === 10) {
+        tenDigits = digitsOnly;
+    }
+
+    const variants = new Set<string>();
+    if (cleanPhone) variants.add(cleanPhone);
+    if (digitsOnly) variants.add(digitsOnly);
+    if (tenDigits) {
+        variants.add(tenDigits);
+        variants.add(`91${tenDigits}`);
+        variants.add(`+91${tenDigits}`);
+    }
+    if (raw) variants.add(raw);
+    if (raw && !raw.startsWith('+')) variants.add(`+${raw}`);
+
+    return Array.from(variants).filter(Boolean);
 };
 
 /**

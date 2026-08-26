@@ -12,19 +12,52 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendWhatsAppBill = exports.sendWhatsAppTemplate = exports.formatPhoneNumber = void 0;
+exports.sendWhatsAppBill = exports.sendWhatsAppTemplate = exports.getPhoneVariants = exports.formatPhoneNumber = void 0;
 const axios_1 = __importDefault(require("axios"));
 /**
  * Utility to format phone number to standard E.164 numeric string without '+' (e.g. 919876543210)
  */
 const formatPhoneNumber = (userPhone) => {
-    let clean = userPhone.replace(/[^0-9]/g, '');
+    let clean = (userPhone || '').toString().replace(/[^0-9]/g, '');
     if (clean.length === 10) {
         clean = '91' + clean;
     }
     return clean;
 };
 exports.formatPhoneNumber = formatPhoneNumber;
+/**
+ * Utility to get all valid variations of a phone number (e.g. 919876543210, 9876543210, +919876543210)
+ */
+const getPhoneVariants = (userPhone) => {
+    if (!userPhone)
+        return [];
+    const raw = userPhone.toString().trim();
+    const digitsOnly = raw.replace(/\D/g, '');
+    const cleanPhone = (0, exports.formatPhoneNumber)(raw);
+    let tenDigits = '';
+    if (cleanPhone.length === 12 && cleanPhone.startsWith('91')) {
+        tenDigits = cleanPhone.slice(2);
+    }
+    else if (digitsOnly.length === 10) {
+        tenDigits = digitsOnly;
+    }
+    const variants = new Set();
+    if (cleanPhone)
+        variants.add(cleanPhone);
+    if (digitsOnly)
+        variants.add(digitsOnly);
+    if (tenDigits) {
+        variants.add(tenDigits);
+        variants.add(`91${tenDigits}`);
+        variants.add(`+91${tenDigits}`);
+    }
+    if (raw)
+        variants.add(raw);
+    if (raw && !raw.startsWith('+'))
+        variants.add(`+${raw}`);
+    return Array.from(variants).filter(Boolean);
+};
+exports.getPhoneVariants = getPhoneVariants;
 /**
  * Send a WhatsApp template message via Meta Cloud API v20.0
  *
