@@ -61,6 +61,7 @@ const telegram_1 = require("../utils/telegram");
 const crypto_1 = __importDefault(require("crypto"));
 const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
 const emailService_1 = require("../services/emailService");
+const whatsappService_1 = require("../services/whatsappService");
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -581,6 +582,21 @@ const sendOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         user.otpExpiresAt = new Date(Date.now() + 10 * 60000);
         yield user.save();
         console.log(`[OTP GENERATED] For phone ${phone}: ${otpValue}`);
+        // Trigger WhatsApp OTP template dispatch alongside SMS
+        try {
+            yield (0, whatsappService_1.sendWhatsAppTemplate)(phone, 'login_otp', 'en', [
+                {
+                    type: 'body',
+                    parameters: [
+                        { type: 'text', text: otpValue }
+                    ]
+                }
+            ]);
+            console.log(`[OTP SENT] via WhatsApp template to ${phone}`);
+        }
+        catch (waErr) {
+            console.error('WhatsApp OTP Template Error:', waErr.message || waErr);
+        }
         const apiKey = process.env.FAST2SMS_API_KEY;
         if (apiKey) {
             try {

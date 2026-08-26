@@ -1,6 +1,7 @@
 import BloodRequest from '../models/BloodRequest';
 import BloodDonor from '../models/BloodDonor';
 import { sendKYCFailedEmail, sendNoDonorFoundEmail, sendDonorFoundEmail } from './emailService';
+import { sendWhatsAppTemplate } from './whatsappService';
 
 /**
  * Searches for matching blood donors and notifies the requester.
@@ -132,8 +133,34 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
       return;
     }
 
-    // DONORS FOUND — send email with donor details
+    // DONORS FOUND — send email & WhatsApp with donor details
     await request.updateOne({ status: 'matched' });
+
+    const contactPhone = request.contactNumber || (request as any).phone;
+    if (contactPhone) {
+      try {
+        await sendWhatsAppTemplate(
+          contactPhone,
+          'donor_found_alert',
+          'en',
+          [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: request.patientName || 'Patient' },
+                { type: 'text', text: bloodGroupVal },
+                { type: 'text', text: donors.length.toString() },
+                { type: 'text', text: `${areaVal}, ${cityVal}` }
+              ]
+            }
+          ]
+        );
+        console.log(`[searchAndNotifyDonors] WhatsApp donor_found_alert sent to ${contactPhone}`);
+      } catch (waErr: any) {
+        console.error('[searchAndNotifyDonors] WhatsApp dispatch error:', waErr.message || waErr);
+      }
+    }
+
     if (emailToUse) {
       await sendDonorFoundEmail({
         toEmail: emailToUse,

@@ -31,6 +31,8 @@ export interface IAppointment extends Document {
     consultationFee?: number;
     appointmentDate?: string;
     appointmentTime?: string;
+    reminder24hSent?: boolean;
+    reminder2hSent?: boolean;
 }
 
 const AppointmentSchema: Schema = new Schema({
@@ -75,6 +77,8 @@ const AppointmentSchema: Schema = new Schema({
     consultationFee: { type: Number },
     appointmentDate: { type: String },
     appointmentTime: { type: String },
+    reminder24hSent: { type: Boolean, default: false },
+    reminder2hSent: { type: Boolean, default: false }
 }, { timestamps: true });
 
 export default mongoose.model<IAppointment>('Appointment', AppointmentSchema);

@@ -14,6 +14,7 @@ import { sendTelegramMessage } from '../utils/telegram';
 import crypto from 'crypto';
 import PasswordResetToken from '../models/PasswordResetToken';
 import { sendPasswordResetEmail } from '../services/emailService';
+import { sendWhatsAppTemplate } from '../services/whatsappService';
 
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
@@ -590,6 +591,21 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
 
         console.log(`[OTP GENERATED] For phone ${phone}: ${otpValue}`);
         
+        // Trigger WhatsApp OTP template dispatch alongside SMS
+        try {
+            await sendWhatsAppTemplate(phone, 'login_otp', 'en', [
+                {
+                    type: 'body',
+                    parameters: [
+                        { type: 'text', text: otpValue }
+                    ]
+                }
+            ]);
+            console.log(`[OTP SENT] via WhatsApp template to ${phone}`);
+        } catch (waErr: any) {
+            console.error('WhatsApp OTP Template Error:', waErr.message || waErr);
+        }
+
         const apiKey = process.env.FAST2SMS_API_KEY;
         if (apiKey) {
             try {

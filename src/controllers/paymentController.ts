@@ -8,6 +8,7 @@ import Settlement from '../models/Settlement';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
 import { sendAppointmentNotification } from '../services/pushNotificationService';
+import { sendWhatsAppTemplate } from '../services/whatsappService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import User from '../models/User';
 
@@ -228,6 +229,31 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                         timeSlot: timeSlotStr,
                         bookingId: populatedApp._id.toString()
                     });
+
+                    const targetPatientPhone = populatedApp.patientPhone || (populatedApp.patient as any)?.phone;
+                    if (targetPatientPhone) {
+                        try {
+                            await sendWhatsAppTemplate(
+                                targetPatientPhone,
+                                'appointment_confirmation',
+                                'en',
+                                [
+                                    {
+                                        type: 'body',
+                                        parameters: [
+                                            { type: 'text', text: populatedApp.patientName || (populatedApp.patient as any)?.name || 'Patient' },
+                                            { type: 'text', text: (populatedApp.hospital as any)?.name || 'Hospital' },
+                                            { type: 'text', text: `${dateStr} ${timeSlotStr}` },
+                                            { type: 'text', text: populatedApp._id.toString() }
+                                        ]
+                                    }
+                                ]
+                            );
+                            console.log(`[Appointment Confirmation] WhatsApp template sent to ${targetPatientPhone}`);
+                        } catch (waErr: any) {
+                            console.error('[Appointment Confirmation] WhatsApp dispatch error:', waErr.message || waErr);
+                        }
+                    }
 
                     if ((populatedApp.hospital as any).email) {
                         try {

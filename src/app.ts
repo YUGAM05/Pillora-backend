@@ -13,6 +13,7 @@ import MongoStore from 'connect-mongo';
 mongoose.set('bufferCommands', false);
 import passport from './config/passport';
 import { initDailyStatsCron } from './cron/dailyStats';
+import { initAppointmentRemindersCron } from './cron/appointmentReminders';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 
@@ -386,7 +387,8 @@ if (process.env.NODE_ENV !== 'production' && !isServerless) {
     }
 }
 
-// Initialize Daily Stats Cron
+// Initialize Crons
 initDailyStatsCron();
+initAppointmentRemindersCron();
 
 export default app;

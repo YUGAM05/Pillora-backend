@@ -76,5 +76,7 @@ const AppointmentSchema = new mongoose_1.Schema({
     consultationFee: { type: Number },
     appointmentDate: { type: String },
     appointmentTime: { type: String },
+    reminder24hSent: { type: Boolean, default: false },
+    reminder2hSent: { type: Boolean, default: false }
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Appointment', AppointmentSchema);

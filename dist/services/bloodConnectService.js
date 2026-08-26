@@ -16,6 +16,7 @@ exports.processKYCResult = exports.searchAndNotifyDonors = void 0;
 const BloodRequest_1 = __importDefault(require("../models/BloodRequest"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const emailService_1 = require("./emailService");
+const whatsappService_1 = require("./whatsappService");
 /**
  * Searches for matching blood donors and notifies the requester.
  * First queries by bloodGroup + city + area. If no match is found, fallback to city + bloodGroup.
@@ -133,8 +134,28 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
             }
             return;
         }
-        // DONORS FOUND — send email with donor details
+        // DONORS FOUND — send email & WhatsApp with donor details
         yield request.updateOne({ status: 'matched' });
+        const contactPhone = request.contactNumber || request.phone;
+        if (contactPhone) {
+            try {
+                yield (0, whatsappService_1.sendWhatsAppTemplate)(contactPhone, 'donor_found_alert', 'en', [
+                    {
+                        type: 'body',
+                        parameters: [
+                            { type: 'text', text: request.patientName || 'Patient' },
+                            { type: 'text', text: bloodGroupVal },
+                            { type: 'text', text: donors.length.toString() },
+                            { type: 'text', text: `${areaVal}, ${cityVal}` }
+                        ]
+                    }
+                ]);
+                console.log(`[searchAndNotifyDonors] WhatsApp donor_found_alert sent to ${contactPhone}`);
+            }
+            catch (waErr) {
+                console.error('[searchAndNotifyDonors] WhatsApp dispatch error:', waErr.message || waErr);
+            }
+        }
         if (emailToUse) {
             yield (0, emailService_1.sendDonorFoundEmail)({
                 toEmail: emailToUse,

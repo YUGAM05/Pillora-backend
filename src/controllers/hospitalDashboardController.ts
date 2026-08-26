@@ -24,6 +24,7 @@ cloudinary.config({
 });
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
+import { sendWhatsAppTemplate } from '../services/whatsappService';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -990,6 +991,34 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                     maxAppointments: maxAppts
                 });
                 io.emit('appointmentsUpdated', { hospitalId: hospital._id });
+            }
+
+            if (patient.phone) {
+                try {
+                    const hospitalNameStr = hospital.name || 'Pillora Hospital';
+                    const dateStr = formatDateIST(slotTime);
+                    const timeSlotStr = formatTimeIST(slotTime);
+
+                    await sendWhatsAppTemplate(
+                        patient.phone,
+                        'appointment_confirmation',
+                        'en',
+                        [
+                            {
+                                type: 'body',
+                                parameters: [
+                                    { type: 'text', text: patient.name || 'Patient' },
+                                    { type: 'text', text: hospitalNameStr },
+                                    { type: 'text', text: `${dateStr} ${timeSlotStr}` },
+                                    { type: 'text', text: appointment._id.toString() }
+                                ]
+                            }
+                        ]
+                    );
+                    console.log('Walking appointment confirmation WhatsApp template sent to', patient.phone);
+                } catch (waErr: any) {
+                    console.error('Walking appointment WhatsApp failed (non-critical):', waErr.message || waErr);
+                }
             }
 
             if (patient.email) {

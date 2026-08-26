@@ -27,6 +27,7 @@ const connect_mongo_1 = __importDefault(require("connect-mongo"));
 mongoose_1.default.set('bufferCommands', false);
 const passport_1 = __importDefault(require("./config/passport"));
 const dailyStats_1 = require("./cron/dailyStats");
+const appointmentReminders_1 = require("./cron/appointmentReminders");
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
 const app = (0, express_1.default)();
@@ -353,6 +354,7 @@ else {
         }
     }
 }
-// Initialize Daily Stats Cron
+// Initialize Crons
 (0, dailyStats_1.initDailyStatsCron)();
+(0, appointmentReminders_1.initAppointmentRemindersCron)();
 exports.default = app;

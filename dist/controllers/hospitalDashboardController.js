@@ -35,6 +35,7 @@ cloudinary_1.v2.config({
 });
 const emailService_2 = require("../services/emailService");
 const dateHelper_1 = require("../utils/dateHelper");
+const whatsappService_1 = require("../services/whatsappService");
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -889,6 +890,28 @@ const createManualAppointment = (req, res) => __awaiter(void 0, void 0, void 0, 
                     maxAppointments: maxAppts
                 });
                 io.emit('appointmentsUpdated', { hospitalId: hospital._id });
+            }
+            if (patient.phone) {
+                try {
+                    const hospitalNameStr = hospital.name || 'Pillora Hospital';
+                    const dateStr = (0, dateHelper_1.formatDateIST)(slotTime);
+                    const timeSlotStr = (0, dateHelper_1.formatTimeIST)(slotTime);
+                    yield (0, whatsappService_1.sendWhatsAppTemplate)(patient.phone, 'appointment_confirmation', 'en', [
+                        {
+                            type: 'body',
+                            parameters: [
+                                { type: 'text', text: patient.name || 'Patient' },
+                                { type: 'text', text: hospitalNameStr },
+                                { type: 'text', text: `${dateStr} ${timeSlotStr}` },
+                                { type: 'text', text: appointment._id.toString() }
+                            ]
+                        }
+                    ]);
+                    console.log('Walking appointment confirmation WhatsApp template sent to', patient.phone);
+                }
+                catch (waErr) {
+                    console.error('Walking appointment WhatsApp failed (non-critical):', waErr.message || waErr);
+                }
             }
             if (patient.email) {
                 try {

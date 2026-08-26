@@ -20,6 +20,7 @@ const Appointment_1 = __importDefault(require("../models/Appointment"));
 const dateHelper_1 = require("../utils/dateHelper");
 const emailService_1 = require("../services/emailService");
 const pushNotificationService_1 = require("../services/pushNotificationService");
+const whatsappService_1 = require("../services/whatsappService");
 const User_1 = __importDefault(require("../models/User"));
 // Initialize Razorpay
 // We default to fallback test keys if env variables are not present.
@@ -121,7 +122,7 @@ exports.initiatePayment = initiatePayment;
  * @access  Public (Webhook / Callback endpoint)
  */
 const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c, _d, _e;
     try {
         let razorpayPaymentId = '';
         let razorpayOrderId = '';
@@ -220,6 +221,26 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         timeSlot: timeSlotStr,
                         bookingId: populatedApp._id.toString()
                     });
+                    const targetPatientPhone = populatedApp.patientPhone || ((_b = populatedApp.patient) === null || _b === void 0 ? void 0 : _b.phone);
+                    if (targetPatientPhone) {
+                        try {
+                            yield (0, whatsappService_1.sendWhatsAppTemplate)(targetPatientPhone, 'appointment_confirmation', 'en', [
+                                {
+                                    type: 'body',
+                                    parameters: [
+                                        { type: 'text', text: populatedApp.patientName || ((_c = populatedApp.patient) === null || _c === void 0 ? void 0 : _c.name) || 'Patient' },
+                                        { type: 'text', text: ((_d = populatedApp.hospital) === null || _d === void 0 ? void 0 : _d.name) || 'Hospital' },
+                                        { type: 'text', text: `${dateStr} ${timeSlotStr}` },
+                                        { type: 'text', text: populatedApp._id.toString() }
+                                    ]
+                                }
+                            ]);
+                            console.log(`[Appointment Confirmation] WhatsApp template sent to ${targetPatientPhone}`);
+                        }
+                        catch (waErr) {
+                            console.error('[Appointment Confirmation] WhatsApp dispatch error:', waErr.message || waErr);
+                        }
+                    }
                     if (populatedApp.hospital.email) {
                         try {
                             yield (0, emailService_1.sendHospitalNotificationEmail)({
@@ -241,7 +262,7 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     try {
                         const patName = populatedApp.patientName || populatedApp.patient.name || 'Patient';
                         const docName = populatedApp.doctorName || populatedApp.doctor.name || 'Doctor';
-                        const hospitalId = ((_b = populatedApp.hospital._id) === null || _b === void 0 ? void 0 : _b.toString()) || populatedApp.hospital.toString();
+                        const hospitalId = ((_e = populatedApp.hospital._id) === null || _e === void 0 ? void 0 : _e.toString()) || populatedApp.hospital.toString();
                         yield (0, pushNotificationService_1.sendAppointmentNotification)(hospitalId, {
                             appointmentId: populatedApp._id.toString(),
                             patientName: patName,
