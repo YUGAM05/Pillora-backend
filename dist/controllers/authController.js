@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetPassword = exports.verifyResetToken = exports.forgotPassword = exports.changePassword = exports.setupAdmin = exports.verifyOtp = exports.sendOtp = exports.emergencyLockdown = exports.logoutAdmin = exports.validateSession = exports.refreshToken = exports.setupMfa = exports.verifyMfa = exports.loginUser = exports.registerUser = void 0;
+exports.verifyPhoneOtp = exports.sendPhoneOtp = exports.resetPassword = exports.verifyResetToken = exports.forgotPassword = exports.changePassword = exports.setupAdmin = exports.verifyOtp = exports.sendOtp = exports.emergencyLockdown = exports.logoutAdmin = exports.validateSession = exports.refreshToken = exports.setupMfa = exports.verifyMfa = exports.loginUser = exports.registerUser = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongoose_1 = __importDefault(require("mongoose"));
@@ -62,6 +62,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
 const emailService_1 = require("../services/emailService");
 const whatsappService_1 = require("../services/whatsappService");
+const OtpVerification_1 = __importDefault(require("../models/OtpVerification"));
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id, role, sessionId) => {
     const payload = { id: id.toString(), role };
@@ -880,3 +881,166 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.resetPassword = resetPassword;
+// ═══════════════════════════════════════════════════════════════════════════════
+//  WHATSAPP PHONE OTP AUTHENTICATION
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * @desc    Send Phone OTP via WhatsApp Cloud API
+ * @route   POST /api/auth/phone/send-otp
+ * @access  Public
+ */
+const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { phoneNumber } = req.body;
+        if (!phoneNumber) {
+            res.status(400).json({ success: false, message: 'Phone number is required.' });
+            return;
+        }
+        const cleanPhone = (0, whatsappService_1.formatPhoneNumber)(phoneNumber);
+        if (!cleanPhone || cleanPhone.length < 10) {
+            res.status(400).json({ success: false, message: 'Invalid phone number format.' });
+            return;
+        }
+        // Rate Limit Check: max 3 requests per 15 minutes per phone number
+        const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+        let record = yield OtpVerification_1.default.findOne({ phoneNumber: cleanPhone });
+        if (record) {
+            const recentResends = (record.resendHistory || []).filter(date => new Date(date) >= fifteenMinsAgo);
+            if (recentResends.length >= 3) {
+                res.status(429).json({
+                    success: false,
+                    message: 'Too many OTP requests for this number. Please wait 15 minutes before trying again.'
+                });
+                return;
+            }
+        }
+        // Generate 6-digit random numeric OTP
+        const otpValue = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5-minute expiry
+        if (record) {
+            record.otp = otpValue;
+            record.expiresAt = expiresAt;
+            record.attempts = 0;
+            record.resendHistory = [...(record.resendHistory || []).filter(d => new Date(d) >= fifteenMinsAgo), new Date()];
+            yield record.save();
+        }
+        else {
+            record = yield OtpVerification_1.default.create({
+                phoneNumber: cleanPhone,
+                otp: otpValue,
+                expiresAt,
+                attempts: 0,
+                resendHistory: [new Date()]
+            });
+        }
+        // Call WhatsApp Template Service
+        const waResult = yield (0, whatsappService_1.sendWhatsAppTemplate)(cleanPhone, 'login_otp', 'en', [
+            {
+                type: 'body',
+                parameters: [
+                    { type: 'text', text: otpValue }
+                ]
+            }
+        ]);
+        if (!waResult.success) {
+            console.error('[PhoneAuth] Failed to send WhatsApp OTP:', waResult.error);
+        }
+        else {
+            console.log(`[PhoneAuth] WhatsApp OTP sent successfully to ${cleanPhone}`);
+        }
+        // Return success response without exposing OTP
+        res.status(200).json({ success: true, message: 'OTP sent via WhatsApp successfully.' });
+    }
+    catch (error) {
+        console.error('[PhoneAuth] sendPhoneOtp error:', error.message || error);
+        res.status(500).json({ success: false, message: 'Failed to send OTP. Please try again.' });
+    }
+});
+exports.sendPhoneOtp = sendPhoneOtp;
+/**
+ * @desc    Verify Phone OTP and Login / Register User
+ * @route   POST /api/auth/phone/verify-otp
+ * @access  Public
+ */
+const verifyPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { phoneNumber, otp } = req.body;
+        if (!phoneNumber || !otp) {
+            res.status(400).json({ success: false, message: 'Phone number and OTP are required.' });
+            return;
+        }
+        const cleanPhone = (0, whatsappService_1.formatPhoneNumber)(phoneNumber);
+        const record = yield OtpVerification_1.default.findOne({ phoneNumber: cleanPhone });
+        if (!record || new Date() > record.expiresAt) {
+            res.status(400).json({ success: false, message: 'Invalid or expired verification code. Please request a new OTP.' });
+            return;
+        }
+        // Max 5 verification attempts
+        if (record.attempts >= 5) {
+            yield OtpVerification_1.default.deleteOne({ _id: record._id });
+            res.status(400).json({ success: false, message: 'Maximum verification attempts exceeded. Please request a new OTP.' });
+            return;
+        }
+        record.attempts += 1;
+        yield record.save();
+        if (record.otp !== otp.toString().trim()) {
+            res.status(400).json({ success: false, message: 'Invalid verification code. Please check and try again.' });
+            return;
+        }
+        // OTP verified successfully -> remove OTP record
+        yield OtpVerification_1.default.deleteOne({ _id: record._id });
+        // Find user by phoneNumber or phone
+        let user = yield User_1.default.findOne({
+            $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }]
+        });
+        if (!user) {
+            // Register new User
+            const shortDigits = cleanPhone.slice(-4);
+            user = yield User_1.default.create({
+                name: `Pillora User ${shortDigits}`,
+                phoneNumber: cleanPhone,
+                phone: cleanPhone,
+                phoneVerified: true,
+                role: 'customer',
+                status: 'approved'
+            });
+            console.log(`[PhoneAuth] Registered new user for phone ${cleanPhone}`);
+        }
+        else {
+            if (!user.phoneVerified || !user.phoneNumber) {
+                user.phoneVerified = true;
+                if (!user.phoneNumber)
+                    user.phoneNumber = cleanPhone;
+                yield user.save();
+            }
+        }
+        // Log login history
+        try {
+            yield LoginHistory_1.default.create({
+                user: user._id,
+                email: user.email || user.phoneNumber || cleanPhone,
+                ipAddress: req.ip || 'unknown',
+                userAgent: req.headers['user-agent'] || 'unknown'
+            });
+        }
+        catch (lhErr) {
+            console.warn('[PhoneAuth] Failed to save login history:', lhErr);
+        }
+        const token = generateToken(user._id, user.role);
+        res.status(200).json({
+            success: true,
+            token,
+            _id: user._id,
+            name: user.name,
+            email: user.email || '',
+            phoneNumber: user.phoneNumber || user.phone,
+            role: user.role,
+            status: user.status
+        });
+    }
+    catch (error) {
+        console.error('[PhoneAuth] verifyPhoneOtp error:', error.message || error);
+        res.status(500).json({ success: false, message: 'Verification failed. Please try again.' });
+    }
+});
+exports.verifyPhoneOtp = verifyPhoneOtp;

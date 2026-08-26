@@ -36,7 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const UserSchema = new mongoose_1.Schema({
     name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
+    email: { type: String, unique: true, sparse: true },
+    phoneNumber: { type: String, unique: true, sparse: true, index: true },
+    phoneVerified: { type: Boolean, default: false },
     passwordHash: { type: String }, // Not required for Google OAuth users
     googleId: { type: String, unique: true, sparse: true }, // Google OAuth ID
     profilePicture: { type: String }, // Profile picture URL from Google

@@ -138,6 +138,8 @@ router.post('/register', authController_1.registerUser);
 router.post('/login', loginCors, loginLimiter, authController_1.loginUser);
 router.post('/send-otp', authController_1.sendOtp);
 router.post('/verify-otp', authController_1.verifyOtp);
+router.post('/phone/send-otp', authController_1.sendPhoneOtp);
+router.post('/phone/verify-otp', authController_1.verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, authController_1.forgotPassword);
 router.get('/verify-reset-token', authController_1.verifyResetToken);
 router.post('/reset-password', authController_1.resetPassword);

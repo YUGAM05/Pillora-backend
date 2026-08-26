@@ -1,6 +1,7 @@
 import express from 'express';
 import {
     registerUser, loginUser, sendOtp, verifyOtp,
+    sendPhoneOtp, verifyPhoneOtp,
     setupMfa, verifyMfa, setupAdmin,
     refreshToken, validateSession, logoutAdmin, emergencyLockdown,
     changePassword, forgotPassword, verifyResetToken, resetPassword
@@ -131,6 +132,8 @@ router.post('/register', registerUser);
 router.post('/login', loginCors, loginLimiter, loginUser);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
+router.post('/phone/send-otp', sendPhoneOtp);
+router.post('/phone/verify-otp', verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, forgotPassword);
 router.get('/verify-reset-token', verifyResetToken);
 router.post('/reset-password', resetPassword);
