@@ -890,6 +890,7 @@ exports.resetPassword = resetPassword;
  * @access  Public
  */
 const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const { phoneNumber } = req.body;
         if (!phoneNumber) {
@@ -933,10 +934,18 @@ const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 resendHistory: [new Date()]
             });
         }
-        // Call WhatsApp Template Service
+        // Call WhatsApp Template Service with both body and button parameters required by Meta login_otp template
         const waResult = yield (0, whatsappService_1.sendWhatsAppTemplate)(cleanPhone, 'login_otp', 'en', [
             {
                 type: 'body',
+                parameters: [
+                    { type: 'text', text: otpValue }
+                ]
+            },
+            {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
                 parameters: [
                     { type: 'text', text: otpValue }
                 ]
@@ -944,11 +953,14 @@ const sendPhoneOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         ]);
         if (!waResult.success) {
             console.error('[PhoneAuth] Failed to send WhatsApp OTP:', waResult.error);
+            const errorMsg = ((_b = (_a = waResult.error) === null || _a === void 0 ? void 0 : _a.error) === null || _b === void 0 ? void 0 : _b.message) || ((_c = waResult.error) === null || _c === void 0 ? void 0 : _c.message) || 'Failed to deliver WhatsApp message.';
+            res.status(502).json({
+                success: false,
+                message: `Failed to send OTP via WhatsApp: ${errorMsg}`
+            });
+            return;
         }
-        else {
-            console.log(`[PhoneAuth] WhatsApp OTP sent successfully to ${cleanPhone}`);
-        }
-        // Return success response without exposing OTP
+        console.log(`[PhoneAuth] WhatsApp OTP sent successfully to ${cleanPhone}`);
         res.status(200).json({ success: true, message: 'OTP sent via WhatsApp successfully.' });
     }
     catch (error) {

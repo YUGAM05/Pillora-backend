@@ -987,10 +987,18 @@ export const sendPhoneOtp = async (req: Request, res: Response): Promise<void> =
             });
         }
 
-        // Call WhatsApp Template Service
+        // Call WhatsApp Template Service with both body and button parameters required by Meta login_otp template
         const waResult = await sendWhatsAppTemplate(cleanPhone, 'login_otp', 'en', [
             {
                 type: 'body',
+                parameters: [
+                    { type: 'text', text: otpValue }
+                ]
+            },
+            {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
                 parameters: [
                     { type: 'text', text: otpValue }
                 ]
@@ -999,11 +1007,15 @@ export const sendPhoneOtp = async (req: Request, res: Response): Promise<void> =
 
         if (!waResult.success) {
             console.error('[PhoneAuth] Failed to send WhatsApp OTP:', waResult.error);
-        } else {
-            console.log(`[PhoneAuth] WhatsApp OTP sent successfully to ${cleanPhone}`);
+            const errorMsg = waResult.error?.error?.message || waResult.error?.message || 'Failed to deliver WhatsApp message.';
+            res.status(502).json({
+                success: false,
+                message: `Failed to send OTP via WhatsApp: ${errorMsg}`
+            });
+            return;
         }
 
-        // Return success response without exposing OTP
+        console.log(`[PhoneAuth] WhatsApp OTP sent successfully to ${cleanPhone}`);
         res.status(200).json({ success: true, message: 'OTP sent via WhatsApp successfully.' });
     } catch (error: any) {
         console.error('[PhoneAuth] sendPhoneOtp error:', error.message || error);
