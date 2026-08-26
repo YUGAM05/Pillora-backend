@@ -139,14 +139,18 @@ const searchAndNotifyDonors = (requestId) => __awaiter(void 0, void 0, void 0, f
         const contactPhone = request.contactNumber || request.phone;
         if (contactPhone) {
             try {
+                const matchedDonor = donors[0];
+                const requesterName = request.patientName || 'Requester';
+                const donorName = (matchedDonor === null || matchedDonor === void 0 ? void 0 : matchedDonor.name) || 'Volunteer Donor';
+                const donorPhone = (matchedDonor === null || matchedDonor === void 0 ? void 0 : matchedDonor.phone) || 'N/A';
                 yield (0, whatsappService_1.sendWhatsAppTemplate)(contactPhone, 'donor_found_alert', 'en', [
                     {
                         type: 'body',
                         parameters: [
-                            { type: 'text', text: request.patientName || 'Patient' },
+                            { type: 'text', text: requesterName },
                             { type: 'text', text: bloodGroupVal },
-                            { type: 'text', text: donors.length.toString() },
-                            { type: 'text', text: `${areaVal}, ${cityVal}` }
+                            { type: 'text', text: donorName },
+                            { type: 'text', text: donorPhone }
                         ]
                     }
                 ]);

@@ -139,6 +139,11 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
     const contactPhone = request.contactNumber || (request as any).phone;
     if (contactPhone) {
       try {
+        const matchedDonor = donors[0];
+        const requesterName = request.patientName || 'Requester';
+        const donorName = matchedDonor?.name || 'Volunteer Donor';
+        const donorPhone = matchedDonor?.phone || 'N/A';
+
         await sendWhatsAppTemplate(
           contactPhone,
           'donor_found_alert',
@@ -147,10 +152,10 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
             {
               type: 'body',
               parameters: [
-                { type: 'text', text: request.patientName || 'Patient' },
+                { type: 'text', text: requesterName },
                 { type: 'text', text: bloodGroupVal },
-                { type: 'text', text: donors.length.toString() },
-                { type: 'text', text: `${areaVal}, ${cityVal}` }
+                { type: 'text', text: donorName },
+                { type: 'text', text: donorPhone }
               ]
             }
           ]
