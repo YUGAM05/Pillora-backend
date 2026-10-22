@@ -38,6 +38,15 @@ import {
     getPaymentSummary,
     updatePaymentStatus
 } from '../controllers/hospitalDashboardController';
+import {
+    getFollowUpReminders,
+    createFollowUpReminder,
+    getFollowUpReminderById,
+    updateFollowUpReminder,
+    cancelFollowUpReminder,
+    retryFollowUpReminder,
+    convertFollowUpToBooking
+} from '../controllers/followUpController';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -79,6 +88,15 @@ router.get('/appointments/:id/prescription/file', getAppointmentPrescriptionFile
 router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);
 router.post('/appointments/:id/payment', protect, isHospital, attachHospital, recordPayment);
 router.patch('/appointments/:id/payment-status', protect, isHospital, attachHospital, updatePaymentStatus);
+
+// Follow-Up Reminder routes (Walk-in & Online Modes)
+router.get('/follow-ups', protect, isHospital, attachHospital, getFollowUpReminders);
+router.post('/follow-ups', protect, isHospital, attachHospital, createFollowUpReminder);
+router.get('/follow-ups/:id', protect, isHospital, attachHospital, getFollowUpReminderById);
+router.put('/follow-ups/:id', protect, isHospital, attachHospital, updateFollowUpReminder);
+router.put('/follow-ups/:id/cancel', protect, isHospital, attachHospital, cancelFollowUpReminder);
+router.post('/follow-ups/:id/retry', protect, isHospital, attachHospital, retryFollowUpReminder);
+router.post('/follow-ups/:id/convert-booking', protect, isHospital, attachHospital, convertFollowUpToBooking);
 
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);

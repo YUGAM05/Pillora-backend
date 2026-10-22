@@ -14,6 +14,7 @@ mongoose.set('bufferCommands', false);
 import passport from './config/passport';
 import { initDailyStatsCron } from './cron/dailyStats';
 import { initAppointmentRemindersCron } from './cron/appointmentReminders';
+import { initFollowUpRemindersCron } from './cron/followUpRemindersCron';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import User from './models/User';
@@ -408,5 +409,6 @@ if (process.env.NODE_ENV !== 'production' && !isServerless) {
 // Initialize Crons
 initDailyStatsCron();
 initAppointmentRemindersCron();
+initFollowUpRemindersCron();
 
 export default app;
