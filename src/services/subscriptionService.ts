@@ -244,10 +244,12 @@ export async function getSubscriptionSummary() {
 
     return {
         totalRegisteredHospitals: hospitals.length,
+        totalHospitals: hospitals.length,
         activeSubscriptions: activeCount,
         expiringWithin5Days: expiringSoonCount,
         expiredSubscriptions: expiredCount,
         pendingPayments: pendingCount,
+        paymentsReceivedThisMonth: monthlyTotalAmount,
         paymentsThisMonth: {
             count: monthlyPaymentCount,
             totalAmount: monthlyTotalAmount
