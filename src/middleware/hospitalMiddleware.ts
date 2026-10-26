@@ -38,3 +38,42 @@ export const attachHospital = async (req: AuthRequest, res: Response, next: Next
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+import { computeSubscriptionStatus } from '../services/subscriptionService';
+
+/**
+ * Strict backend enforcement middleware:
+ * Blocks creation, generation, addition, or bulk-generation of appointment slots
+ * if the hospital's 30-day subscription is Pending Payment or Expired.
+ */
+export const requireActiveSubscription = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        let hospital = (req as any).hospital;
+        if (!hospital && req.user?._id) {
+            hospital = await Hospital.findOne({ user: req.user._id });
+            (req as any).hospital = hospital;
+        }
+
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital profile not found' });
+            return;
+        }
+
+        const sub = computeSubscriptionStatus(hospital);
+
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
+            return;
+        }
+
+        (req as any).subscription = sub;
+        next();
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error verifying hospital subscription', error: error.message });
+    }
+};

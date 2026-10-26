@@ -34,7 +34,12 @@ import {
     bulkImportDonors,
     downloadBulkImportTemplate,
     createOrUpdateVoiceConfig,
-    getVoiceConfigs
+    getVoiceConfigs,
+    getAdminSubscriptionSummary,
+    getAdminSubscriptionsList,
+    adminRecordHospitalPayment,
+    getAdminHospitalPayments,
+    adminUpdateHospitalSubscription
 } from '../controllers/adminController';
 router.get('/users', protect, adminOnly, getUsers);
 router.put('/users/:id/status', protect, adminOnly, updateUserStatus);
@@ -53,6 +58,13 @@ router.put('/hospitals/:id/management', protect, adminOnly, toggleHospitalManage
 router.get('/hospitals/:id/doctors', protect, adminOnly, getAdminHospitalDoctors);
 router.post('/hospitals/:id/doctors', protect, adminOnly, adminAddDoctor);
 router.post('/slots/generate', protect, adminOnly, adminBulkGenerateSlots);
+
+// Hospital Subscription & 30-Day Payment Cycle Management
+router.get('/subscriptions/summary', protect, adminOnly, getAdminSubscriptionSummary);
+router.get('/subscriptions', protect, adminOnly, getAdminSubscriptionsList);
+router.post('/hospitals/:id/payments', protect, adminOnly, adminRecordHospitalPayment);
+router.get('/hospitals/:id/payments', protect, adminOnly, getAdminHospitalPayments);
+router.put('/hospitals/:id/subscription', protect, adminOnly, adminUpdateHospitalSubscription);
 
 // Product Management
 router.get('/inventory', protect, adminOnly, getAdminProducts);

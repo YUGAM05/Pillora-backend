@@ -4,6 +4,7 @@ import Slot from '../models/Slot';
 import Appointment from '../models/Appointment';
 import { AuthRequest } from '../middleware/authMiddleware';
 import mongoose from 'mongoose';
+import { computeSubscriptionStatus } from '../services/subscriptionService';
 
 // @desc    Get hospital profile for logged-in hospital user
 // @route   GET /api/hospital-panel/profile
@@ -31,6 +32,18 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
         const hospital = await Hospital.findOne({ user: req.user._id });
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+
+        // Verify active 30-day subscription
+        const sub = computeSubscriptionStatus(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
             return;
         }
 

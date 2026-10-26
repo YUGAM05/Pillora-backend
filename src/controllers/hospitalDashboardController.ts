@@ -25,6 +25,8 @@ cloudinary.config({
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 import { sendWhatsAppTemplate } from '../services/whatsappService';
+import HospitalSubscriptionPayment from '../models/HospitalSubscriptionPayment';
+import { computeSubscriptionStatus } from '../services/subscriptionService';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -134,6 +136,19 @@ export const updateDoctor = async (req: AuthRequest, res: Response): Promise<voi
 export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
+
+        // Verify active 30-day subscription
+        const sub = computeSubscriptionStatus(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
+            return;
+        }
+
         const { doctorId, date, startTime, endTime, duration } = req.body; // duration in minutes
 
         if (!doctorId || !date || !startTime || !endTime || !duration) {
@@ -540,6 +555,19 @@ export const getHospitalSlots = async (req: AuthRequest, res: Response): Promise
 export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
+
+        // Verify active 30-day subscription
+        const sub = computeSubscriptionStatus(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
+            return;
+        }
+
         const { doctorId, date, startTime, endTime, recurrence } = req.body;
 
         if (!doctorId || !date || !startTime || !endTime) {
@@ -2179,3 +2207,53 @@ export const getPaymentSummary = async (req: AuthRequest, res: Response): Promis
         res.status(500).json({ message: 'Error fetching payment summary', error: error.message });
     }
 };
+
+// @desc    Get Hospital Subscription Status, Expiry, Days Remaining & Payment History
+// @route   GET /api/hospital/dashboard/subscription
+export const getHospitalSubscription = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital profile not found' });
+            return;
+        }
+
+        const computed = computeSubscriptionStatus(hospital);
+
+        // Fetch complete payment history for this hospital
+        const payments = await HospitalSubscriptionPayment.find({ hospital: hospital._id })
+            .sort({ paymentDate: -1 })
+            .populate('recordedBy', 'name email');
+
+        res.json({
+            hospital: {
+                _id: hospital._id,
+                name: hospital.name,
+                city: hospital.city,
+                email: hospital.email,
+                joiningDate: hospital.joiningDate || hospital.createdAt,
+                paymentStatus: hospital.paymentStatus || 'Pending',
+                subscriptionStatus: computed.status,
+                subscriptionStartDate: computed.subscriptionStartDate,
+                subscriptionExpiryDate: computed.subscriptionExpiryDate,
+                daysRemaining: computed.daysRemaining,
+                isValid: computed.isValid,
+                canGenerateSlots: computed.canGenerateSlots,
+                lastPaymentDate: computed.lastPaymentDate,
+                nextPaymentDueDate: computed.subscriptionExpiryDate,
+                lastPaymentAmount: hospital.lastPaymentAmount || null,
+                lastPaymentMethod: hospital.lastPaymentMethod || null,
+                subscriptionDurationDays: hospital.subscriptionDurationDays || 30,
+            },
+            payments,
+            contactAdmin: {
+                email: 'team@pillora.in',
+                phone: '+91 99999 99999',
+                instructions: 'To renew or activate your 30-day slot generation subscription, please contact the Pillora Admin after making payment. Your 30-day slot generation privileges will be renewed immediately.'
+            }
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching subscription details', error: error.message });
+    }
+};
+

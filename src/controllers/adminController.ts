@@ -21,6 +21,8 @@ import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import VoiceHospitalConfig from '../models/VoiceHospitalConfig';
+import HospitalSubscriptionPayment from '../models/HospitalSubscriptionPayment';
+import { recordHospitalPayment, computeSubscriptionStatus, getSubscriptionSummary } from '../services/subscriptionService';
 
 // @desc    Get platform activities
 // @route   GET /api/admin/activities
@@ -420,7 +422,15 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             description,
             isOpen24Hours,
             isOnlinePaymentAvailable,
-            doctors
+            doctors,
+            // 30-Day Subscription & Payment Fields
+            joiningDate,
+            paymentStatus,
+            paymentReceivedDate,
+            paymentAmount,
+            paymentMethod,
+            transactionReference,
+            adminNotes
         } = req.body;
 
         if (!name || !city || !email || !address || !consultationFee) {
@@ -466,6 +476,9 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             counter++;
         }
 
+        const initialJoiningDate = joiningDate ? new Date(joiningDate) : new Date();
+        const initialPaymentStatus: 'Pending' | 'Paid' = paymentStatus === 'Paid' ? 'Paid' : 'Pending';
+
         const hospital = await Hospital.create({
             name,
             slug: currentSlug,
@@ -491,8 +504,26 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             doctors: Array.isArray(doctors) ? doctors : [],
             rating: 4.0,
-            tempPassword: tempPassword
+            tempPassword: tempPassword,
+            joiningDate: initialJoiningDate,
+            subscriptionDurationDays: 30,
+            paymentStatus: initialPaymentStatus,
+            subscriptionStatus: initialPaymentStatus === 'Paid' ? 'Active' : 'Pending',
+            adminNotes: adminNotes || ''
         });
+
+        // If registered with confirmed payment, initialize 30-day subscription cycle immediately
+        if (initialPaymentStatus === 'Paid') {
+            await recordHospitalPayment({
+                hospitalId: hospital._id.toString(),
+                paymentDate: paymentReceivedDate ? new Date(paymentReceivedDate) : initialJoiningDate,
+                amount: Number(paymentAmount) || 0,
+                paymentMethod: paymentMethod || 'UPI',
+                transactionReference: transactionReference || '',
+                adminNotes: adminNotes || '',
+                recordedBy: (req as any).user?._id?.toString()
+            });
+        }
 
         // 4. Trigger "Welcome Kit" email via external Node.js service
         try {
@@ -533,6 +564,190 @@ export const getAdminHospitals = async (req: Request, res: Response): Promise<vo
         res.json(hospitals);
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching hospitals', error: error.message });
+    }
+};
+
+// @desc    Get subscription summary cards for Admin Dashboard
+// @route   GET /api/admin/subscriptions/summary
+// @access  Private/Admin
+export const getAdminSubscriptionSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const summary = await getSubscriptionSummary();
+        res.json(summary);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching subscription summary', error: error.message });
+    }
+};
+
+// @desc    Get list of all hospitals with real-time computed subscription status, filter & search
+// @route   GET /api/admin/subscriptions
+// @access  Private/Admin
+export const getAdminSubscriptionsList = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { search, status, paymentStatus, sortBy } = req.query;
+
+        let query: any = {};
+        if (search) {
+            const searchRegex = new RegExp(search.toString().trim(), 'i');
+            query.$or = [
+                { name: searchRegex },
+                { city: searchRegex },
+                { email: searchRegex }
+            ];
+        }
+
+        const hospitals = await Hospital.find(query)
+            .populate('user', 'name email status')
+            .sort({ createdAt: -1 });
+
+        // Compute live real-time subscription status for each hospital
+        let results = hospitals.map(h => {
+            const comp = computeSubscriptionStatus(h);
+            return {
+                _id: h._id,
+                name: h.name,
+                city: h.city,
+                email: h.email,
+                joiningDate: h.joiningDate || h.createdAt,
+                subscriptionDurationDays: h.subscriptionDurationDays || 30,
+                paymentStatus: h.paymentStatus || 'Pending',
+                subscriptionStatus: comp.status,
+                daysRemaining: comp.daysRemaining,
+                isValid: comp.isValid,
+                canGenerateSlots: comp.canGenerateSlots,
+                subscriptionStartDate: comp.subscriptionStartDate,
+                subscriptionExpiryDate: comp.subscriptionExpiryDate,
+                lastPaymentDate: comp.lastPaymentDate,
+                lastPaymentAmount: h.lastPaymentAmount || null,
+                lastPaymentMethod: h.lastPaymentMethod || null,
+                lastPaymentReference: h.lastPaymentReference || null,
+                adminNotes: h.adminNotes || '',
+                user: h.user,
+                createdAt: h.createdAt
+            };
+        });
+
+        // Filter by subscriptionStatus if provided ('active', 'pending', 'expiring soon', 'expired')
+        if (status && status !== 'all') {
+            results = results.filter(r => r.subscriptionStatus.toLowerCase() === status.toString().toLowerCase());
+        }
+
+        // Filter by paymentStatus if provided ('paid', 'pending')
+        if (paymentStatus && paymentStatus !== 'all') {
+            results = results.filter(r => r.paymentStatus.toLowerCase() === paymentStatus.toString().toLowerCase());
+        }
+
+        // Sort results
+        if (sortBy === 'expiry_asc') {
+            results.sort((a, b) => {
+                if (!a.subscriptionExpiryDate) return 1;
+                if (!b.subscriptionExpiryDate) return -1;
+                return new Date(a.subscriptionExpiryDate).getTime() - new Date(b.subscriptionExpiryDate).getTime();
+            });
+        } else if (sortBy === 'expiry_desc') {
+            results.sort((a, b) => {
+                if (!a.subscriptionExpiryDate) return 1;
+                if (!b.subscriptionExpiryDate) return -1;
+                return new Date(b.subscriptionExpiryDate).getTime() - new Date(a.subscriptionExpiryDate).getTime();
+            });
+        } else if (sortBy === 'name_asc') {
+            results.sort((a, b) => a.name.localeCompare(b.name));
+        } else if (sortBy === 'joining_desc') {
+            results.sort((a, b) => new Date(b.joiningDate).getTime() - new Date(a.joiningDate).getTime());
+        }
+
+        res.json({
+            success: true,
+            hospitals: results,
+            total: results.length
+        });
+    } catch (error: any) {
+        console.error('Error fetching subscriptions:', error);
+        res.status(500).json({ message: 'Error fetching subscriptions', error: error.message });
+    }
+};
+
+// @desc    Admin records a payment for a hospital and extends/renews its 30-day subscription
+// @route   POST /api/admin/hospitals/:id/payments
+// @access  Private/Admin
+export const adminRecordHospitalPayment = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const { paymentDate, amount, paymentMethod, transactionReference, adminNotes } = req.body;
+
+        if (!amount || Number(amount) < 0) {
+            res.status(400).json({ message: 'Valid payment amount is required' });
+            return;
+        }
+
+        const result = await recordHospitalPayment({
+            hospitalId: id,
+            paymentDate: paymentDate || new Date(),
+            amount: Number(amount),
+            paymentMethod: paymentMethod || 'UPI',
+            transactionReference: transactionReference || '',
+            adminNotes: adminNotes || '',
+            recordedBy: (req as any).user?._id?.toString()
+        });
+
+        res.json({
+            message: 'Payment recorded and 30-day subscription activated successfully',
+            hospital: result.hospital,
+            paymentRecord: result.paymentRecord,
+            computed: result.computed
+        });
+    } catch (error: any) {
+        console.error('Record Payment Error:', error);
+        res.status(500).json({ message: 'Error recording payment', error: error.message });
+    }
+};
+
+// @desc    Get complete payment history for a specific hospital
+// @route   GET /api/admin/hospitals/:id/payments
+// @access  Private/Admin
+export const getAdminHospitalPayments = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const payments = await HospitalSubscriptionPayment.find({ hospital: id })
+            .sort({ paymentDate: -1 })
+            .populate('recordedBy', 'name email');
+        res.json(payments);
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error fetching payment history', error: error.message });
+    }
+};
+
+// @desc    Update hospital subscription details / admin notes
+// @route   PUT /api/admin/hospitals/:id/subscription
+// @access  Private/Admin
+export const adminUpdateHospitalSubscription = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { id } = req.params;
+        const { joiningDate, subscriptionExpiryDate, adminNotes, paymentStatus } = req.body;
+
+        const hospital = await Hospital.findById(id);
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+
+        if (joiningDate) hospital.joiningDate = new Date(joiningDate);
+        if (subscriptionExpiryDate) hospital.subscriptionExpiryDate = new Date(subscriptionExpiryDate);
+        if (adminNotes !== undefined) hospital.adminNotes = adminNotes;
+        if (paymentStatus) hospital.paymentStatus = paymentStatus;
+
+        const comp = computeSubscriptionStatus(hospital);
+        hospital.subscriptionStatus = comp.status;
+
+        await hospital.save();
+
+        res.json({
+            message: 'Hospital subscription updated successfully',
+            hospital,
+            computed: comp
+        });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error updating subscription', error: error.message });
     }
 };
 

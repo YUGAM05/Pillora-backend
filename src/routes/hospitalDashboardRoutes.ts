@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { protect } from '../middleware/authMiddleware';
-import { isHospital, selfManagedOnly, attachHospital } from '../middleware/hospitalMiddleware';
+import { isHospital, selfManagedOnly, attachHospital, requireActiveSubscription } from '../middleware/hospitalMiddleware';
 import {
     getHospitalStats,
     getHospitalDoctors,
@@ -36,7 +36,8 @@ import {
     autocompleteBookingIds,
     recordPayment,
     getPaymentSummary,
-    updatePaymentStatus
+    updatePaymentStatus,
+    getHospitalSubscription
 } from '../controllers/hospitalDashboardController';
 import {
     getFollowUpReminders,
@@ -89,6 +90,9 @@ router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentS
 router.post('/appointments/:id/payment', protect, isHospital, attachHospital, recordPayment);
 router.patch('/appointments/:id/payment-status', protect, isHospital, attachHospital, updatePaymentStatus);
 
+// Hospital Subscription & 30-Day Cycle Details
+router.get('/subscription', protect, isHospital, attachHospital, getHospitalSubscription);
+
 // Follow-Up Reminder routes (Walk-in & Online Modes)
 router.get('/follow-ups', protect, isHospital, attachHospital, getFollowUpReminders);
 router.post('/follow-ups', protect, isHospital, attachHospital, createFollowUpReminder);
@@ -102,8 +106,8 @@ router.post('/follow-ups/:id/convert-booking', protect, isHospital, attachHospit
 router.post('/doctors', protect, isHospital, selfManagedOnly, addDoctor);
 router.put('/doctors/:id', protect, isHospital, selfManagedOnly, updateDoctor);
 router.delete('/doctors/:id', protect, isHospital, selfManagedOnly, deleteDoctor);
-router.post('/slots/generate', protect, isHospital, selfManagedOnly, bulkGenerateSlots);
-router.post('/slots/add', protect, isHospital, selfManagedOnly, addSingleSlot);
+router.post('/slots/generate', protect, isHospital, selfManagedOnly, requireActiveSubscription, bulkGenerateSlots);
+router.post('/slots/add', protect, isHospital, selfManagedOnly, requireActiveSubscription, addSingleSlot);
 router.post('/slots/:id/cancel', protect, isHospital, selfManagedOnly, cancelSlot);
 router.delete('/slots/:id', protect, isHospital, selfManagedOnly, deleteSlot);
 

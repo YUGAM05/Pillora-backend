@@ -39,6 +39,20 @@ export interface IHospital extends Document {
     bedCapacity?: number;
     specialities?: string[];
     trialEndDate?: Date;
+    // 30-Day Subscription & Payment Cycle Fields
+    joiningDate?: Date;
+    subscriptionDurationDays?: number;
+    paymentStatus?: 'Pending' | 'Paid';
+    subscriptionStatus?: 'Pending' | 'Active' | 'Expiring Soon' | 'Expired';
+    lastPaymentDate?: Date;
+    subscriptionStartDate?: Date;
+    subscriptionExpiryDate?: Date;
+    lastPaymentAmount?: number;
+    lastPaymentMethod?: string;
+    lastPaymentReference?: string;
+    adminNotes?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
     bankDetails?: {
         accountHolderName?: string;
         bankName?: string;
@@ -93,6 +107,22 @@ const HospitalSchema: Schema = new Schema({
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
     trialEndDate: { type: Date },
+    // 30-Day Subscription & Payment Cycle Schema Fields
+    joiningDate: { type: Date, default: Date.now },
+    subscriptionDurationDays: { type: Number, default: 30 },
+    paymentStatus: { type: String, enum: ['Pending', 'Paid'], default: 'Pending' },
+    subscriptionStatus: { 
+        type: String, 
+        enum: ['Pending', 'Active', 'Expiring Soon', 'Expired'], 
+        default: 'Pending' 
+    },
+    lastPaymentDate: { type: Date },
+    subscriptionStartDate: { type: Date },
+    subscriptionExpiryDate: { type: Date },
+    lastPaymentAmount: { type: Number },
+    lastPaymentMethod: { type: String },
+    lastPaymentReference: { type: String },
+    adminNotes: { type: String },
     bankDetails: {
         accountHolderName: { type: String, default: '' },
         bankName: { type: String, default: '' },

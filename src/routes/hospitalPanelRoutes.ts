@@ -6,6 +6,7 @@ import {
     getDoctorSlots 
 } from '../controllers/hospitalPanelController';
 import { protect, hospitalOnly } from '../middleware/authMiddleware';
+import { requireActiveSubscription } from '../middleware/hospitalMiddleware';
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.use(protect);
 router.use(hospitalOnly);
 
 router.get('/profile', getHospitalProfile);
-router.post('/slots/generate', generateSlots);
+router.post('/slots/generate', requireActiveSubscription, generateSlots);
 router.get('/slots/:doctorId', getDoctorSlots);
 router.get('/appointments', getHospitalAppointments);
 
