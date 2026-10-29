@@ -25,7 +25,7 @@ const dateHelper_1 = require("../utils/dateHelper");
 const initAppointmentRemindersCron = () => {
     console.log('[Cron] Initializing Appointment Reminders Cron Job (Every 15 mins)');
     node_cron_1.default.schedule('*/15 * * * *', () => __awaiter(void 0, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         console.log('[Cron] Checking for upcoming appointment reminders (24h & 2h)...');
         try {
             const now = new Date();
@@ -36,24 +36,26 @@ const initAppointmentRemindersCron = () => {
                 status: 'confirmed',
                 slotTime: { $gte: start24h, $lte: end24h },
                 $or: [{ reminder24hSent: false }, { reminder24hSent: { $exists: false } }]
-            }).populate('patient').populate('hospital');
+            }).populate('patient').populate('hospital').populate('doctor');
             for (const appt of appts24h) {
                 const phone = appt.patientPhone || ((_a = appt.patient) === null || _a === void 0 ? void 0 : _a.phone);
                 const patientName = appt.patientName || ((_b = appt.patient) === null || _b === void 0 ? void 0 : _b.name) || 'Patient';
-                const hospitalName = appt.hospitalName || ((_c = appt.hospital) === null || _c === void 0 ? void 0 : _c.name) || 'Hospital';
+                const hospitalName = appt.hospitalName || ((_c = appt.hospital) === null || _c === void 0 ? void 0 : _c.name) || 'Pillora Hospital';
+                const doctorName = appt.doctorName || (((_d = appt.doctor) === null || _d === void 0 ? void 0 : _d.name) ? (appt.doctor.name.trim().toLowerCase().startsWith('dr') ? appt.doctor.name.trim() : `Dr. ${appt.doctor.name.trim()}`) : 'Doctor');
                 const dateStr = (0, dateHelper_1.formatDateIST)(appt.slotTime);
                 const timeSlotStr = (0, dateHelper_1.formatTimeIST)(appt.slotTime);
                 if (phone) {
-                    // Send WhatsApp Template Reminder
+                    // Send WhatsApp Template Reminder (expects 5 params: patientName, doctorName, hospitalName, dateStr, timeSlotStr)
                     try {
                         yield (0, whatsappService_1.sendWhatsAppTemplate)(phone, 'appointment_reminder', 'en', [
                             {
                                 type: 'body',
                                 parameters: [
                                     { type: 'text', text: patientName },
+                                    { type: 'text', text: doctorName },
                                     { type: 'text', text: hospitalName },
-                                    { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                    { type: 'text', text: appt._id.toString() }
+                                    { type: 'text', text: dateStr },
+                                    { type: 'text', text: timeSlotStr }
                                 ]
                             }
                         ]);
@@ -64,7 +66,7 @@ const initAppointmentRemindersCron = () => {
                     }
                     // Send SMS Reminder alongside
                     try {
-                        const message = `Reminder: Hi ${patientName}, your appointment at ${hospitalName} is scheduled for tomorrow at ${timeSlotStr}. Appt ID: ${appt._id}`;
+                        const message = `Reminder: Hi ${patientName}, your appointment with ${doctorName} at ${hospitalName} is scheduled for tomorrow at ${timeSlotStr}. Appt ID: ${appt._id}`;
                         yield (0, sms_service_1.sendSms)(phone, message);
                         console.log(`[Cron 24h Reminder] SMS sent to ${phone}`);
                     }
@@ -82,24 +84,26 @@ const initAppointmentRemindersCron = () => {
                 status: 'confirmed',
                 slotTime: { $gte: start2h, $lte: end2h },
                 $or: [{ reminder2hSent: false }, { reminder2hSent: { $exists: false } }]
-            }).populate('patient').populate('hospital');
+            }).populate('patient').populate('hospital').populate('doctor');
             for (const appt of appts2h) {
-                const phone = appt.patientPhone || ((_d = appt.patient) === null || _d === void 0 ? void 0 : _d.phone);
-                const patientName = appt.patientName || ((_e = appt.patient) === null || _e === void 0 ? void 0 : _e.name) || 'Patient';
-                const hospitalName = appt.hospitalName || ((_f = appt.hospital) === null || _f === void 0 ? void 0 : _f.name) || 'Hospital';
+                const phone = appt.patientPhone || ((_e = appt.patient) === null || _e === void 0 ? void 0 : _e.phone);
+                const patientName = appt.patientName || ((_f = appt.patient) === null || _f === void 0 ? void 0 : _f.name) || 'Patient';
+                const hospitalName = appt.hospitalName || ((_g = appt.hospital) === null || _g === void 0 ? void 0 : _g.name) || 'Pillora Hospital';
+                const doctorName = appt.doctorName || (((_h = appt.doctor) === null || _h === void 0 ? void 0 : _h.name) ? (appt.doctor.name.trim().toLowerCase().startsWith('dr') ? appt.doctor.name.trim() : `Dr. ${appt.doctor.name.trim()}`) : 'Doctor');
                 const dateStr = (0, dateHelper_1.formatDateIST)(appt.slotTime);
                 const timeSlotStr = (0, dateHelper_1.formatTimeIST)(appt.slotTime);
                 if (phone) {
-                    // Send WhatsApp Template Reminder
+                    // Send WhatsApp Template Reminder (expects 5 params: patientName, doctorName, hospitalName, dateStr, timeSlotStr)
                     try {
                         yield (0, whatsappService_1.sendWhatsAppTemplate)(phone, 'appointment_reminder', 'en', [
                             {
                                 type: 'body',
                                 parameters: [
                                     { type: 'text', text: patientName },
+                                    { type: 'text', text: doctorName },
                                     { type: 'text', text: hospitalName },
-                                    { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                    { type: 'text', text: appt._id.toString() }
+                                    { type: 'text', text: dateStr },
+                                    { type: 'text', text: timeSlotStr }
                                 ]
                             }
                         ]);
@@ -110,7 +114,7 @@ const initAppointmentRemindersCron = () => {
                     }
                     // Send SMS Reminder alongside
                     try {
-                        const message = `Reminder: Hi ${patientName}, your appointment at ${hospitalName} is in 2 hours (${timeSlotStr}). Appt ID: ${appt._id}`;
+                        const message = `Reminder: Hi ${patientName}, your appointment with ${doctorName} at ${hospitalName} is in 2 hours (${timeSlotStr}). Appt ID: ${appt._id}`;
                         yield (0, sms_service_1.sendSms)(phone, message);
                         console.log(`[Cron 2h Reminder] SMS sent to ${phone}`);
                     }

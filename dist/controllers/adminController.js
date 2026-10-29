@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getVoiceConfigs = exports.createOrUpdateVoiceConfig = exports.downloadBulkImportTemplate = exports.bulkImportDonors = exports.getRevenueAnalytics = exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
+exports.getVoiceConfigs = exports.createOrUpdateVoiceConfig = exports.downloadBulkImportTemplate = exports.bulkImportDonors = exports.getRevenueAnalytics = exports.getLoginAnalytics = exports.adminBulkGenerateSlots = exports.adminAddDoctor = exports.getAdminHospitalDoctors = exports.toggleHospitalManagement = exports.adminUpdateHospitalSubscription = exports.getAdminHospitalPayments = exports.adminRecordHospitalPayment = exports.getAdminSubscriptionsList = exports.getAdminSubscriptionSummary = exports.getAdminHospitals = exports.registerHospital = exports.verifyUserAadhaar = exports.getAdminTrends = exports.getAllOrders = exports.updateProduct = exports.getUserOrders = exports.toggleDealStatus = exports.deleteProduct = exports.updateProductStatus = exports.getAdminProducts = exports.updateUserStatus = exports.getUsers = exports.getSystemStats = exports.getPlatformActivities = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const BloodDonor_1 = __importDefault(require("../models/BloodDonor"));
 const Inventory_1 = __importDefault(require("../models/Inventory"));
@@ -67,6 +67,8 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
 const VoiceHospitalConfig_1 = __importDefault(require("../models/VoiceHospitalConfig"));
+const HospitalSubscriptionPayment_1 = __importDefault(require("../models/HospitalSubscriptionPayment"));
+const subscriptionService_1 = require("../services/subscriptionService");
 // @desc    Get platform activities
 // @route   GET /api/admin/activities
 // @access  Private/Admin
@@ -424,8 +426,11 @@ exports.verifyUserAadhaar = verifyUserAadhaar;
 // @route   POST /api/admin/hospitals/register
 // @access  Private/Admin
 const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     try {
-        const { name, city, email, address, consultationFee, management_type, plan, image, images, ambulanceContact, phoneNumbers, description, isOpen24Hours, isOnlinePaymentAvailable, doctors } = req.body;
+        const { name, city, email, address, consultationFee, management_type, plan, image, images, ambulanceContact, phoneNumbers, description, isOpen24Hours, isOnlinePaymentAvailable, doctors, 
+        // 30-Day Subscription & Payment Fields
+        joiningDate, paymentStatus, paymentReceivedDate, paymentAmount, paymentMethod, transactionReference, adminNotes } = req.body;
         if (!name || !city || !email || !address || !consultationFee) {
             console.error('Registration failed: Missing required fields', { name, city, email, address, consultationFee });
             res.status(400).json({ message: 'Missing required fields: Name, City, Email, Address, and Fee are mandatory.' });
@@ -463,6 +468,8 @@ const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, functio
             currentSlug = `${baseSlug}-${counter}`;
             counter++;
         }
+        const initialJoiningDate = joiningDate ? new Date(joiningDate) : new Date();
+        const initialPaymentStatus = paymentStatus === 'Paid' ? 'Paid' : 'Pending';
         const hospital = yield Hospital_1.default.create({
             name,
             slug: currentSlug,
@@ -488,8 +495,25 @@ const registerHospital = (req, res) => __awaiter(void 0, void 0, void 0, functio
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             doctors: Array.isArray(doctors) ? doctors : [],
             rating: 4.0,
-            tempPassword: tempPassword
+            tempPassword: tempPassword,
+            joiningDate: initialJoiningDate,
+            subscriptionDurationDays: 30,
+            paymentStatus: initialPaymentStatus,
+            subscriptionStatus: initialPaymentStatus === 'Paid' ? 'Active' : 'Pending',
+            adminNotes: adminNotes || ''
         });
+        // If registered with confirmed payment, initialize 30-day subscription cycle immediately
+        if (initialPaymentStatus === 'Paid') {
+            yield (0, subscriptionService_1.recordHospitalPayment)({
+                hospitalId: hospital._id.toString(),
+                paymentDate: paymentReceivedDate ? new Date(paymentReceivedDate) : initialJoiningDate,
+                amount: Number(paymentAmount) || 0,
+                paymentMethod: paymentMethod || 'UPI',
+                transactionReference: transactionReference || '',
+                adminNotes: adminNotes || '',
+                recordedBy: (_b = (_a = req.user) === null || _a === void 0 ? void 0 : _a._id) === null || _b === void 0 ? void 0 : _b.toString()
+            });
+        }
         // 4. Trigger "Welcome Kit" email via external Node.js service
         try {
             const mailServiceUrl = process.env.MAIL_SERVICE_URL || 'http://localhost:5001/api/send-welcome';
@@ -534,6 +558,192 @@ const getAdminHospitals = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getAdminHospitals = getAdminHospitals;
+// @desc    Get subscription summary cards for Admin Dashboard
+// @route   GET /api/admin/subscriptions/summary
+// @access  Private/Admin
+const getAdminSubscriptionSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const summary = yield (0, subscriptionService_1.getSubscriptionSummary)();
+        res.json(summary);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching subscription summary', error: error.message });
+    }
+});
+exports.getAdminSubscriptionSummary = getAdminSubscriptionSummary;
+// @desc    Get list of all hospitals with real-time computed subscription status, filter & search
+// @route   GET /api/admin/subscriptions
+// @access  Private/Admin
+const getAdminSubscriptionsList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { search, status, paymentStatus, sortBy } = req.query;
+        let query = {};
+        if (search) {
+            const searchRegex = new RegExp(search.toString().trim(), 'i');
+            query.$or = [
+                { name: searchRegex },
+                { city: searchRegex },
+                { email: searchRegex }
+            ];
+        }
+        const hospitals = yield Hospital_1.default.find(query)
+            .populate('user', 'name email status')
+            .sort({ createdAt: -1 });
+        // Compute live real-time subscription status for each hospital
+        let results = hospitals.map(h => {
+            const comp = (0, subscriptionService_1.computeSubscriptionStatus)(h);
+            return {
+                _id: h._id,
+                name: h.name,
+                city: h.city,
+                email: h.email,
+                joiningDate: h.joiningDate || h.createdAt,
+                subscriptionDurationDays: h.subscriptionDurationDays || 30,
+                paymentStatus: h.paymentStatus || 'Pending',
+                subscriptionStatus: comp.status,
+                daysRemaining: comp.daysRemaining,
+                isValid: comp.isValid,
+                canGenerateSlots: comp.canGenerateSlots,
+                subscriptionStartDate: comp.subscriptionStartDate,
+                subscriptionExpiryDate: comp.subscriptionExpiryDate,
+                lastPaymentDate: comp.lastPaymentDate,
+                lastPaymentAmount: h.lastPaymentAmount || null,
+                lastPaymentMethod: h.lastPaymentMethod || null,
+                lastPaymentReference: h.lastPaymentReference || null,
+                adminNotes: h.adminNotes || '',
+                user: h.user,
+                createdAt: h.createdAt
+            };
+        });
+        // Filter by subscriptionStatus if provided ('active', 'pending', 'expiring soon', 'expired')
+        if (status && status !== 'all') {
+            results = results.filter(r => r.subscriptionStatus.toLowerCase() === status.toString().toLowerCase());
+        }
+        // Filter by paymentStatus if provided ('paid', 'pending')
+        if (paymentStatus && paymentStatus !== 'all') {
+            results = results.filter(r => r.paymentStatus.toLowerCase() === paymentStatus.toString().toLowerCase());
+        }
+        // Sort results
+        if (sortBy === 'expiry_asc') {
+            results.sort((a, b) => {
+                if (!a.subscriptionExpiryDate)
+                    return 1;
+                if (!b.subscriptionExpiryDate)
+                    return -1;
+                return new Date(a.subscriptionExpiryDate).getTime() - new Date(b.subscriptionExpiryDate).getTime();
+            });
+        }
+        else if (sortBy === 'expiry_desc') {
+            results.sort((a, b) => {
+                if (!a.subscriptionExpiryDate)
+                    return 1;
+                if (!b.subscriptionExpiryDate)
+                    return -1;
+                return new Date(b.subscriptionExpiryDate).getTime() - new Date(a.subscriptionExpiryDate).getTime();
+            });
+        }
+        else if (sortBy === 'name_asc') {
+            results.sort((a, b) => a.name.localeCompare(b.name));
+        }
+        else if (sortBy === 'joining_desc') {
+            results.sort((a, b) => new Date(b.joiningDate).getTime() - new Date(a.joiningDate).getTime());
+        }
+        res.json({
+            success: true,
+            hospitals: results,
+            total: results.length
+        });
+    }
+    catch (error) {
+        console.error('Error fetching subscriptions:', error);
+        res.status(500).json({ message: 'Error fetching subscriptions', error: error.message });
+    }
+});
+exports.getAdminSubscriptionsList = getAdminSubscriptionsList;
+// @desc    Admin records a payment for a hospital and extends/renews its 30-day subscription
+// @route   POST /api/admin/hospitals/:id/payments
+// @access  Private/Admin
+const adminRecordHospitalPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { id } = req.params;
+        const { paymentDate, amount, paymentMethod, transactionReference, adminNotes } = req.body;
+        if (!amount || Number(amount) < 0) {
+            res.status(400).json({ message: 'Valid payment amount is required' });
+            return;
+        }
+        const result = yield (0, subscriptionService_1.recordHospitalPayment)({
+            hospitalId: id,
+            paymentDate: paymentDate || new Date(),
+            amount: Number(amount),
+            paymentMethod: paymentMethod || 'UPI',
+            transactionReference: transactionReference || '',
+            adminNotes: adminNotes || '',
+            recordedBy: (_b = (_a = req.user) === null || _a === void 0 ? void 0 : _a._id) === null || _b === void 0 ? void 0 : _b.toString()
+        });
+        res.json({
+            message: 'Payment recorded and 30-day subscription activated successfully',
+            hospital: result.hospital,
+            paymentRecord: result.paymentRecord,
+            computed: result.computed
+        });
+    }
+    catch (error) {
+        console.error('Record Payment Error:', error);
+        res.status(500).json({ message: 'Error recording payment', error: error.message });
+    }
+});
+exports.adminRecordHospitalPayment = adminRecordHospitalPayment;
+// @desc    Get complete payment history for a specific hospital
+// @route   GET /api/admin/hospitals/:id/payments
+// @access  Private/Admin
+const getAdminHospitalPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const payments = yield HospitalSubscriptionPayment_1.default.find({ hospital: id })
+            .sort({ paymentDate: -1 })
+            .populate('recordedBy', 'name email');
+        res.json(payments);
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching payment history', error: error.message });
+    }
+});
+exports.getAdminHospitalPayments = getAdminHospitalPayments;
+// @desc    Update hospital subscription details / admin notes
+// @route   PUT /api/admin/hospitals/:id/subscription
+// @access  Private/Admin
+const adminUpdateHospitalSubscription = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.params;
+        const { joiningDate, subscriptionExpiryDate, adminNotes, paymentStatus } = req.body;
+        const hospital = yield Hospital_1.default.findById(id);
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+        if (joiningDate)
+            hospital.joiningDate = new Date(joiningDate);
+        if (subscriptionExpiryDate)
+            hospital.subscriptionExpiryDate = new Date(subscriptionExpiryDate);
+        if (adminNotes !== undefined)
+            hospital.adminNotes = adminNotes;
+        if (paymentStatus)
+            hospital.paymentStatus = paymentStatus;
+        const comp = (0, subscriptionService_1.computeSubscriptionStatus)(hospital);
+        hospital.subscriptionStatus = comp.status;
+        yield hospital.save();
+        res.json({
+            message: 'Hospital subscription updated successfully',
+            hospital,
+            computed: comp
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error updating subscription', error: error.message });
+    }
+});
+exports.adminUpdateHospitalSubscription = adminUpdateHospitalSubscription;
 // @desc    Toggle Hospital Management Mode
 // @route   PUT /api/admin/hospitals/:id/management
 // @access  Private/Admin

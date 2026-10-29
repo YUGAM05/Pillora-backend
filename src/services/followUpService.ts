@@ -29,7 +29,22 @@ export const calculateReminderDate = (
     customDateTime?: Date | string
 ): Date => {
     if (timing === 'custom' && customDateTime) {
-        return new Date(customDateTime);
+        let customDate: Date;
+        if (typeof customDateTime === 'string') {
+            const trimmed = customDateTime.trim();
+            // If already an ISO string with Z or offset (+05:30), parse directly
+            if (trimmed.endsWith('Z') || trimmed.includes('+') || (trimmed.length > 10 && trimmed.slice(10).includes('-'))) {
+                customDate = new Date(trimmed);
+            } else {
+                // If local string like YYYY-MM-DDTHH:mm from input, explicitly treat as Indian Standard Time (+05:30)
+                const dateStr = trimmed.length === 16 ? `${trimmed}:00+05:30` : `${trimmed}+05:30`;
+                customDate = new Date(dateStr);
+            }
+        } else {
+            customDate = new Date(customDateTime);
+        }
+
+        return isNaN(customDate.getTime()) ? new Date() : customDate;
     }
 
     const followUp = new Date(followUpDate);
@@ -161,10 +176,14 @@ export const dispatchFollowUpReminder = async (
         if (reminder.channel === 'whatsapp') {
             try {
                 const targetPhone = formatPhoneNumber(reminder.patientPhone);
-                // Attempt WhatsApp Template first if template exists, or fallback to simulated/SMS
                 const formattedDate = formatDateIST(reminder.followUpDate);
-                const timeSlotStr = reminder.followUpTime || 'Morning';
+                const timeSlotStr = reminder.followUpTime || '10:00 AM';
+                const docName = reminder.doctorName
+                    ? (reminder.doctorName.trim().toLowerCase().startsWith('dr') ? reminder.doctorName.trim() : `Dr. ${reminder.doctorName.trim()}`)
+                    : 'Consultant Doctor';
 
+                // Meta approved 'appointment_reminder' template expects 5 body parameters:
+                // {{1}} Patient Name, {{2}} Doctor Name, {{3}} Hospital Name, {{4}} Date, {{5}} Time
                 const waResult = await sendWhatsAppTemplate(
                     targetPhone,
                     'appointment_reminder',
@@ -173,10 +192,11 @@ export const dispatchFollowUpReminder = async (
                         {
                             type: 'body',
                             parameters: [
-                                { type: 'text', text: reminder.patientName },
-                                { type: 'text', text: reminder.hospitalName },
-                                { type: 'text', text: `${formattedDate} ${timeSlotStr}` },
-                                { type: 'text', text: reminder._id.toString() }
+                                { type: 'text', text: reminder.patientName || 'Patient' },
+                                { type: 'text', text: docName },
+                                { type: 'text', text: reminder.hospitalName || 'Pillora Hospital' },
+                                { type: 'text', text: formattedDate },
+                                { type: 'text', text: timeSlotStr }
                             ]
                         }
                     ]
@@ -186,10 +206,13 @@ export const dispatchFollowUpReminder = async (
                     deliverySuccess = true;
                 } else {
                     // Fallback to sending SMS if WhatsApp template failed
-                    console.log(`[FollowUpService] WhatsApp template failed, attempting SMS fallback for ${targetPhone}...`);
+                    const waErrString = typeof waResult.error === 'object' ? JSON.stringify(waResult.error) : String(waResult.error || 'WhatsApp error');
+                    console.log(`[FollowUpService] WhatsApp template failed (${waErrString}), attempting SMS fallback for ${targetPhone}...`);
                     const smsRes = await sendSms(reminder.patientPhone, textMessage);
                     deliverySuccess = smsRes.success;
-                    if (!smsRes.success) deliveryError = waResult.error || smsRes.error || 'WhatsApp & SMS delivery failed';
+                    if (!smsRes.success) {
+                        deliveryError = `WhatsApp: ${waErrString} | SMS: ${smsRes.error || 'SMS failed'}`;
+                    }
                 }
             } catch (err: any) {
                 deliveryError = err.message || 'WhatsApp sending failed';

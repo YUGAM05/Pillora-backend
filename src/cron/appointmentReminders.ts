@@ -24,17 +24,18 @@ export const initAppointmentRemindersCron = () => {
                 status: 'confirmed',
                 slotTime: { $gte: start24h, $lte: end24h },
                 $or: [{ reminder24hSent: false }, { reminder24hSent: { $exists: false } }]
-            }).populate('patient').populate('hospital');
+            }).populate('patient').populate('hospital').populate('doctor');
 
             for (const appt of appts24h) {
                 const phone = appt.patientPhone || (appt.patient as any)?.phone;
                 const patientName = appt.patientName || (appt.patient as any)?.name || 'Patient';
-                const hospitalName = appt.hospitalName || (appt.hospital as any)?.name || 'Hospital';
+                const hospitalName = appt.hospitalName || (appt.hospital as any)?.name || 'Pillora Hospital';
+                const doctorName = appt.doctorName || ((appt.doctor as any)?.name ? ((appt.doctor as any).name.trim().toLowerCase().startsWith('dr') ? (appt.doctor as any).name.trim() : `Dr. ${(appt.doctor as any).name.trim()}`) : 'Doctor');
                 const dateStr = formatDateIST(appt.slotTime);
                 const timeSlotStr = formatTimeIST(appt.slotTime);
 
                 if (phone) {
-                    // Send WhatsApp Template Reminder
+                    // Send WhatsApp Template Reminder (expects 5 params: patientName, doctorName, hospitalName, dateStr, timeSlotStr)
                     try {
                         await sendWhatsAppTemplate(
                             phone,
@@ -45,9 +46,10 @@ export const initAppointmentRemindersCron = () => {
                                     type: 'body',
                                     parameters: [
                                         { type: 'text', text: patientName },
+                                        { type: 'text', text: doctorName },
                                         { type: 'text', text: hospitalName },
-                                        { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                        { type: 'text', text: appt._id.toString() }
+                                        { type: 'text', text: dateStr },
+                                        { type: 'text', text: timeSlotStr }
                                     ]
                                 }
                             ]
@@ -59,7 +61,7 @@ export const initAppointmentRemindersCron = () => {
 
                     // Send SMS Reminder alongside
                     try {
-                        const message = `Reminder: Hi ${patientName}, your appointment at ${hospitalName} is scheduled for tomorrow at ${timeSlotStr}. Appt ID: ${appt._id}`;
+                        const message = `Reminder: Hi ${patientName}, your appointment with ${doctorName} at ${hospitalName} is scheduled for tomorrow at ${timeSlotStr}. Appt ID: ${appt._id}`;
                         await sendSms(phone, message);
                         console.log(`[Cron 24h Reminder] SMS sent to ${phone}`);
                     } catch (smsErr: any) {
@@ -79,17 +81,18 @@ export const initAppointmentRemindersCron = () => {
                 status: 'confirmed',
                 slotTime: { $gte: start2h, $lte: end2h },
                 $or: [{ reminder2hSent: false }, { reminder2hSent: { $exists: false } }]
-            }).populate('patient').populate('hospital');
+            }).populate('patient').populate('hospital').populate('doctor');
 
             for (const appt of appts2h) {
                 const phone = appt.patientPhone || (appt.patient as any)?.phone;
                 const patientName = appt.patientName || (appt.patient as any)?.name || 'Patient';
-                const hospitalName = appt.hospitalName || (appt.hospital as any)?.name || 'Hospital';
+                const hospitalName = appt.hospitalName || (appt.hospital as any)?.name || 'Pillora Hospital';
+                const doctorName = appt.doctorName || ((appt.doctor as any)?.name ? ((appt.doctor as any).name.trim().toLowerCase().startsWith('dr') ? (appt.doctor as any).name.trim() : `Dr. ${(appt.doctor as any).name.trim()}`) : 'Doctor');
                 const dateStr = formatDateIST(appt.slotTime);
                 const timeSlotStr = formatTimeIST(appt.slotTime);
 
                 if (phone) {
-                    // Send WhatsApp Template Reminder
+                    // Send WhatsApp Template Reminder (expects 5 params: patientName, doctorName, hospitalName, dateStr, timeSlotStr)
                     try {
                         await sendWhatsAppTemplate(
                             phone,
@@ -100,9 +103,10 @@ export const initAppointmentRemindersCron = () => {
                                     type: 'body',
                                     parameters: [
                                         { type: 'text', text: patientName },
+                                        { type: 'text', text: doctorName },
                                         { type: 'text', text: hospitalName },
-                                        { type: 'text', text: `${dateStr} ${timeSlotStr}` },
-                                        { type: 'text', text: appt._id.toString() }
+                                        { type: 'text', text: dateStr },
+                                        { type: 'text', text: timeSlotStr }
                                     ]
                                 }
                             ]
@@ -114,7 +118,7 @@ export const initAppointmentRemindersCron = () => {
 
                     // Send SMS Reminder alongside
                     try {
-                        const message = `Reminder: Hi ${patientName}, your appointment at ${hospitalName} is in 2 hours (${timeSlotStr}). Appt ID: ${appt._id}`;
+                        const message = `Reminder: Hi ${patientName}, your appointment with ${doctorName} at ${hospitalName} is in 2 hours (${timeSlotStr}). Appt ID: ${appt._id}`;
                         await sendSms(phone, message);
                         console.log(`[Cron 2h Reminder] SMS sent to ${phone}`);
                     } catch (smsErr: any) {

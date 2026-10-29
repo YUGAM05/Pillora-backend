@@ -77,6 +77,22 @@ const HospitalSchema = new mongoose_1.Schema({
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],
     trialEndDate: { type: Date },
+    // 30-Day Subscription & Payment Cycle Schema Fields
+    joiningDate: { type: Date, default: Date.now },
+    subscriptionDurationDays: { type: Number, default: 30 },
+    paymentStatus: { type: String, enum: ['Pending', 'Paid'], default: 'Pending' },
+    subscriptionStatus: {
+        type: String,
+        enum: ['Pending', 'Active', 'Expiring Soon', 'Expired'],
+        default: 'Pending'
+    },
+    lastPaymentDate: { type: Date },
+    subscriptionStartDate: { type: Date },
+    subscriptionExpiryDate: { type: Date },
+    lastPaymentAmount: { type: Number },
+    lastPaymentMethod: { type: String },
+    lastPaymentReference: { type: String },
+    adminNotes: { type: String },
     bankDetails: {
         accountHolderName: { type: String, default: '' },
         bankName: { type: String, default: '' },

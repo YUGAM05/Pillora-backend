@@ -32,6 +32,12 @@ router.put('/hospitals/:id/management', authMiddleware_1.protect, authMiddleware
 router.get('/hospitals/:id/doctors', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitalDoctors);
 router.post('/hospitals/:id/doctors', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminAddDoctor);
 router.post('/slots/generate', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminBulkGenerateSlots);
+// Hospital Subscription & 30-Day Payment Cycle Management
+router.get('/subscriptions/summary', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminSubscriptionSummary);
+router.get('/subscriptions', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminSubscriptionsList);
+router.post('/hospitals/:id/payments', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminRecordHospitalPayment);
+router.get('/hospitals/:id/payments', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminHospitalPayments);
+router.put('/hospitals/:id/subscription', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.adminUpdateHospitalSubscription);
 // Product Management
 router.get('/inventory', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getAdminProducts);
 router.put('/inventory/:id/status', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.updateProductStatus);

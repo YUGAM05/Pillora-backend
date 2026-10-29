@@ -16,6 +16,7 @@ exports.getDoctorSlots = exports.getHospitalAppointments = exports.generateSlots
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Slot_1 = __importDefault(require("../models/Slot"));
 const Appointment_1 = __importDefault(require("../models/Appointment"));
+const subscriptionService_1 = require("../services/subscriptionService");
 // @desc    Get hospital profile for logged-in hospital user
 // @route   GET /api/hospital-panel/profile
 // @access  Private/Hospital
@@ -42,6 +43,17 @@ const generateSlots = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const hospital = yield Hospital_1.default.findOne({ user: req.user._id });
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
+            return;
+        }
+        // Verify active 30-day subscription
+        const sub = (0, subscriptionService_1.computeSubscriptionStatus)(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
             return;
         }
         // Validate doctor belongs to this hospital

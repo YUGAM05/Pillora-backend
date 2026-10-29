@@ -8,6 +8,7 @@ const multer_1 = __importDefault(require("multer"));
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const hospitalMiddleware_1 = require("../middleware/hospitalMiddleware");
 const hospitalDashboardController_1 = require("../controllers/hospitalDashboardController");
+const followUpController_1 = require("../controllers/followUpController");
 const router = express_1.default.Router();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 // ─── Public Routes (No authentication required to view slots) ───────────────────
@@ -42,12 +43,22 @@ router.get('/appointments/:id/prescription/file', hospitalDashboardController_1.
 router.get('/payments/summary', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPaymentSummary);
 router.post('/appointments/:id/payment', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.recordPayment);
 router.patch('/appointments/:id/payment-status', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updatePaymentStatus);
+// Hospital Subscription & 30-Day Cycle Details
+router.get('/subscription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSubscription);
+// Follow-Up Reminder routes (Walk-in & Online Modes)
+router.get('/follow-ups', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.getFollowUpReminders);
+router.post('/follow-ups', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.createFollowUpReminder);
+router.get('/follow-ups/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.getFollowUpReminderById);
+router.put('/follow-ups/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.updateFollowUpReminder);
+router.put('/follow-ups/:id/cancel', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.cancelFollowUpReminder);
+router.post('/follow-ups/:id/retry', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.retryFollowUpReminder);
+router.post('/follow-ups/:id/convert-booking', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, followUpController_1.convertFollowUpToBooking);
 // Management restricted routes (only if SELF managed)
 router.post('/doctors', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addDoctor);
 router.put('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.updateDoctor);
 router.delete('/doctors/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.deleteDoctor);
-router.post('/slots/generate', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.bulkGenerateSlots);
-router.post('/slots/add', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.addSingleSlot);
+router.post('/slots/generate', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalMiddleware_1.requireActiveSubscription, hospitalDashboardController_1.bulkGenerateSlots);
+router.post('/slots/add', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalMiddleware_1.requireActiveSubscription, hospitalDashboardController_1.addSingleSlot);
 router.post('/slots/:id/cancel', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.cancelSlot);
 router.delete('/slots/:id', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.selfManagedOnly, hospitalDashboardController_1.deleteSlot);
 exports.default = router;

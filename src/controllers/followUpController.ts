@@ -228,6 +228,13 @@ export const createFollowUpReminder = async (req: AuthRequest, res: Response): P
             io.emit('followUpReminderCreated', { hospitalId: hospital._id, reminder });
         }
 
+        // If the reminder is scheduled for right now or is immediately due, dispatch without waiting for cron
+        if (calculatedReminderDate.getTime() <= Date.now() + 60 * 1000) {
+            dispatchFollowUpReminder(reminder._id.toString()).catch(err => {
+                console.error(`[createFollowUpReminder] Immediate dispatch error for ${reminder._id}:`, err.message || err);
+            });
+        }
+
         res.status(201).json({
             success: true,
             message: 'Follow-up reminder scheduled successfully',
@@ -325,12 +332,16 @@ export const updateFollowUpReminder = async (req: AuthRequest, res: Response): P
             }
         }
 
-        if (reminderTiming) {
+        if (reminderTiming && reminderTiming !== reminder.reminderTiming) {
             reminder.reminderTiming = reminderTiming;
             dateChanged = true;
         }
 
-        // Recalculate reminderDate if follow-up date or timing changed
+        if (customReminderDate) {
+            dateChanged = true;
+        }
+
+        // Recalculate reminderDate if follow-up date, timing, or custom time changed
         if (dateChanged) {
             reminder.reminderDate = calculateReminderDate(
                 reminder.followUpDate,
@@ -345,6 +356,13 @@ export const updateFollowUpReminder = async (req: AuthRequest, res: Response): P
         }
 
         await reminder.save();
+
+        // If scheduled and already due, dispatch immediately
+        if (reminder.status === 'scheduled' && reminder.reminderDate.getTime() <= Date.now() + 60 * 1000) {
+            dispatchFollowUpReminder(reminder._id.toString()).catch(err => {
+                console.error(`[updateFollowUpReminder] Immediate dispatch error for ${reminder._id}:`, err.message || err);
+            });
+        }
 
         res.json({
             success: true,

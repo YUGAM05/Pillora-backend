@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPaymentSummary = exports.recordPayment = exports.autocompleteBookingIds = exports.autocompletePatients = exports.updatePaymentStatus = exports.getAppointmentPrescriptionFile = exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
+exports.getHospitalSubscription = exports.getPaymentSummary = exports.recordPayment = exports.autocompleteBookingIds = exports.autocompletePatients = exports.updatePaymentStatus = exports.getAppointmentPrescriptionFile = exports.getAppointmentPrescription = exports.uploadAppointmentPrescription = exports.searchPatients = exports.generateAndSendInvoice = exports.updateAppointmentPrescription = exports.addPatientNote = exports.getPatientNotes = exports.assignDoctorToAppointment = exports.getCancellationRate = exports.getBookingHoursAnalytics = exports.deleteDoctor = exports.createManualAppointment = exports.releaseSlotHold = exports.holdSlot = exports.deleteSlot = exports.cancelSlot = exports.addSingleSlot = exports.getHospitalSlots = exports.getMyBookings = exports.createAppointment = exports.getDoctorSlots = exports.updateAppointmentStatus = exports.getHospitalAppointments = exports.bulkGenerateSlots = exports.updateDoctor = exports.addDoctor = exports.getHospitalDoctors = exports.getHospitalStats = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Hospital_1 = __importDefault(require("../models/Hospital"));
 const Doctor_1 = __importDefault(require("../models/Doctor"));
@@ -36,6 +36,8 @@ cloudinary_1.v2.config({
 const emailService_2 = require("../services/emailService");
 const dateHelper_1 = require("../utils/dateHelper");
 const whatsappService_1 = require("../services/whatsappService");
+const HospitalSubscriptionPayment_1 = __importDefault(require("../models/HospitalSubscriptionPayment"));
+const subscriptionService_1 = require("../services/subscriptionService");
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -140,6 +142,17 @@ exports.updateDoctor = updateDoctor;
 const bulkGenerateSlots = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const hospital = req.hospital;
+        // Verify active 30-day subscription
+        const sub = (0, subscriptionService_1.computeSubscriptionStatus)(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
+            return;
+        }
         const { doctorId, date, startTime, endTime, duration } = req.body; // duration in minutes
         if (!doctorId || !date || !startTime || !endTime || !duration) {
             res.status(400).json({ message: 'Missing required fields' });
@@ -487,6 +500,17 @@ exports.getHospitalSlots = getHospitalSlots;
 const addSingleSlot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const hospital = req.hospital;
+        // Verify active 30-day subscription
+        const sub = (0, subscriptionService_1.computeSubscriptionStatus)(hospital);
+        if (!sub.isValid || !sub.canGenerateSlots) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                status: sub.status,
+                daysRemaining: sub.daysRemaining,
+                message: 'Your Pillora subscription has expired or your payment is pending. Please contact the Pillora Admin to renew your subscription before generating new appointment slots.'
+            });
+            return;
+        }
         const { doctorId, date, startTime, endTime, recurrence } = req.body;
         if (!doctorId || !date || !startTime || !endTime) {
             res.status(400).json({ message: 'Missing required fields' });
@@ -1936,3 +1960,50 @@ const getPaymentSummary = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getPaymentSummary = getPaymentSummary;
+// @desc    Get Hospital Subscription Status, Expiry, Days Remaining & Payment History
+// @route   GET /api/hospital/dashboard/subscription
+const getHospitalSubscription = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const hospital = req.hospital;
+        if (!hospital) {
+            res.status(404).json({ message: 'Hospital profile not found' });
+            return;
+        }
+        const computed = (0, subscriptionService_1.computeSubscriptionStatus)(hospital);
+        // Fetch complete payment history for this hospital
+        const payments = yield HospitalSubscriptionPayment_1.default.find({ hospital: hospital._id })
+            .sort({ paymentDate: -1 })
+            .populate('recordedBy', 'name email');
+        res.json({
+            hospital: {
+                _id: hospital._id,
+                name: hospital.name,
+                city: hospital.city,
+                email: hospital.email,
+                joiningDate: hospital.joiningDate || hospital.createdAt,
+                paymentStatus: hospital.paymentStatus || 'Pending',
+                subscriptionStatus: computed.status,
+                subscriptionStartDate: computed.subscriptionStartDate,
+                subscriptionExpiryDate: computed.subscriptionExpiryDate,
+                daysRemaining: computed.daysRemaining,
+                isValid: computed.isValid,
+                canGenerateSlots: computed.canGenerateSlots,
+                lastPaymentDate: computed.lastPaymentDate,
+                nextPaymentDueDate: computed.subscriptionExpiryDate,
+                lastPaymentAmount: hospital.lastPaymentAmount || null,
+                lastPaymentMethod: hospital.lastPaymentMethod || null,
+                subscriptionDurationDays: hospital.subscriptionDurationDays || 30,
+            },
+            payments,
+            contactAdmin: {
+                email: 'team@pillora.in',
+                phone: '+91 99999 99999',
+                instructions: 'To renew or activate your 30-day slot generation subscription, please contact the Pillora Admin after making payment. Your 30-day slot generation privileges will be renewed immediately.'
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ message: 'Error fetching subscription details', error: error.message });
+    }
+});
+exports.getHospitalSubscription = getHospitalSubscription;
