@@ -1,5 +1,14 @@
 import express from 'express';
 import { getSystemStats, getAdminTrends, getPlatformActivities, getLoginAnalytics, getRevenueAnalytics } from '../controllers/adminController';
+import {
+    getAdminFinancialOverview,
+    getAdminHospitalFinancialReport,
+    getAdminTransactionsLedger,
+    getAdminSettlementManagement,
+    recordAdminSettlementPayout,
+    getAdminRefunds,
+    processAdminRefund
+} from '../controllers/financialController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import multer from 'multer';
 
@@ -76,5 +85,14 @@ router.delete('/inventory/:id', protect, adminOnly, deleteProduct);
 // Voice Configuration Management
 router.post('/voice-config', protect, adminOnly, createOrUpdateVoiceConfig);
 router.get('/voice-config', protect, adminOnly, getVoiceConfigs);
+
+// Central Financial Management
+router.get('/financial/overview', protect, adminOnly, getAdminFinancialOverview);
+router.get('/financial/hospital/:hospitalId', protect, adminOnly, getAdminHospitalFinancialReport);
+router.get('/financial/transactions', protect, adminOnly, getAdminTransactionsLedger);
+router.get('/financial/settlements', protect, adminOnly, getAdminSettlementManagement);
+router.post('/financial/settlements/payout', protect, adminOnly, recordAdminSettlementPayout);
+router.get('/financial/refunds', protect, adminOnly, getAdminRefunds);
+router.post('/financial/refunds/process', protect, adminOnly, processAdminRefund);
 
 export default router;

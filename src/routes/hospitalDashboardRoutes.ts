@@ -48,6 +48,11 @@ import {
     retryFollowUpReminder,
     convertFollowUpToBooking
 } from '../controllers/followUpController';
+import {
+    getHospitalFinancialOverview,
+    getHospitalPaymentRecords,
+    collectClinicBalance
+} from '../controllers/financialController';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -89,6 +94,11 @@ router.get('/appointments/:id/prescription/file', getAppointmentPrescriptionFile
 router.get('/payments/summary', protect, isHospital, attachHospital, getPaymentSummary);
 router.post('/appointments/:id/payment', protect, isHospital, attachHospital, recordPayment);
 router.patch('/appointments/:id/payment-status', protect, isHospital, attachHospital, updatePaymentStatus);
+
+// Central Financial Management & Collections (Payments & Collections Menu)
+router.get('/financial/overview', protect, isHospital, attachHospital, getHospitalFinancialOverview);
+router.get('/financial/appointments', protect, isHospital, attachHospital, getHospitalPaymentRecords);
+router.post('/appointments/:id/collect-balance', protect, isHospital, attachHospital, collectClinicBalance);
 
 // Hospital Subscription & 30-Day Cycle Details
 router.get('/subscription', protect, isHospital, attachHospital, getHospitalSubscription);

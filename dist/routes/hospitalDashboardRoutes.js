@@ -9,6 +9,7 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const hospitalMiddleware_1 = require("../middleware/hospitalMiddleware");
 const hospitalDashboardController_1 = require("../controllers/hospitalDashboardController");
 const followUpController_1 = require("../controllers/followUpController");
+const financialController_1 = require("../controllers/financialController");
 const router = express_1.default.Router();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 // ─── Public Routes (No authentication required to view slots) ───────────────────
@@ -43,6 +44,10 @@ router.get('/appointments/:id/prescription/file', hospitalDashboardController_1.
 router.get('/payments/summary', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getPaymentSummary);
 router.post('/appointments/:id/payment', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.recordPayment);
 router.patch('/appointments/:id/payment-status', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.updatePaymentStatus);
+// Central Financial Management & Collections (Payments & Collections Menu)
+router.get('/financial/overview', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.getHospitalFinancialOverview);
+router.get('/financial/appointments', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.getHospitalPaymentRecords);
+router.post('/appointments/:id/collect-balance', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.collectClinicBalance);
 // Hospital Subscription & 30-Day Cycle Details
 router.get('/subscription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSubscription);
 // Follow-Up Reminder routes (Walk-in & Online Modes)

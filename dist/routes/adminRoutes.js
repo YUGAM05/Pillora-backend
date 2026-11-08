@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const adminController_1 = require("../controllers/adminController");
+const financialController_1 = require("../controllers/financialController");
 const authMiddleware_1 = require("../middleware/authMiddleware");
 const multer_1 = __importDefault(require("multer"));
 const router = express_1.default.Router();
@@ -47,4 +48,12 @@ router.delete('/inventory/:id', authMiddleware_1.protect, authMiddleware_1.admin
 // Voice Configuration Management
 router.post('/voice-config', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.createOrUpdateVoiceConfig);
 router.get('/voice-config', authMiddleware_1.protect, authMiddleware_1.adminOnly, adminController_2.getVoiceConfigs);
+// Central Financial Management
+router.get('/financial/overview', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminFinancialOverview);
+router.get('/financial/hospital/:hospitalId', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminHospitalFinancialReport);
+router.get('/financial/transactions', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminTransactionsLedger);
+router.get('/financial/settlements', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminSettlementManagement);
+router.post('/financial/settlements/payout', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.recordAdminSettlementPayout);
+router.get('/financial/refunds', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminRefunds);
+router.post('/financial/refunds/process', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.processAdminRefund);
 exports.default = router;

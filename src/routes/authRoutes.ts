@@ -82,6 +82,27 @@ const forgotPasswordEmailLimiter = rateLimit({
     }
 });
 
+const resetPasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req: express.Request, res: express.Response) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        } else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many reset attempts. Please try again after 15 minutes.'
+        });
+    }
+});
+
 const router = express.Router();
 
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
@@ -136,7 +157,7 @@ router.post('/phone/send-otp', sendPhoneOtp);
 router.post('/phone/verify-otp', verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, forgotPassword);
 router.get('/verify-reset-token', verifyResetToken);
-router.post('/reset-password', resetPassword);
+router.post('/reset-password', resetPasswordLimiter, resetPassword);
 
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────
 router.post('/setup-mfa', setupMfa);

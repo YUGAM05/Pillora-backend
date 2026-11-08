@@ -97,8 +97,14 @@ const initiatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function
             consultationFee: feeNum,
             advanceFee,
             amount: advanceFee, // satisfies Mongoose schema validation requirement
+            amountInPaise: Math.round(advanceFee * 100),
+            paymentType: 'advance',
+            paymentSource: 'pillora_online',
+            paymentMethod: 'razorpay',
+            mode: 'online',
             razorpayOrderId: order.id,
             status: 'pending',
+            settlementStatus: 'Pending',
             createdAt: new Date()
         });
         yield payment.save();
@@ -186,16 +192,38 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(200).json({ success: true, message: 'Payment already verified and completed', payment });
             return;
         }
-        // Success: Update payment record and set its settlement status to Waiting for Razorpay Settlement
+        const appointment = yield Appointment_1.default.findById(payment.appointmentId);
+        const feeNum = payment.consultationFee || (appointment === null || appointment === void 0 ? void 0 : appointment.consultationFee) || 500;
+        const advanceFee = payment.advanceFee || Math.round(feeNum * 0.20);
+        const advancePaise = Math.round(advanceFee * 100);
+        const feePaise = Math.round(advancePaise * 0.02);
+        const taxPaise = Math.round(feePaise * 0.18);
+        const netPaise = advancePaise - feePaise - taxPaise;
+        // Success: Update payment record as immutable online advance
         payment.status = 'completed';
         payment.razorpayPaymentId = razorpayPaymentId;
-        payment.settlementStatus = 'Waiting for Razorpay Settlement';
+        payment.amount = advanceFee;
+        payment.amountInPaise = advancePaise;
+        payment.consultationFee = feeNum;
+        payment.advanceFee = advanceFee;
+        payment.paymentType = 'advance';
+        payment.paymentSource = 'pillora_online';
+        payment.paymentMethod = 'razorpay';
+        payment.mode = 'online';
+        payment.gatewayCharges = feePaise / 100;
+        payment.gatewayTaxes = taxPaise / 100;
+        payment.netPayable = netPaise / 100;
+        payment.settlementStatus = 'Pending';
         yield payment.save();
-        // Update appointment status to confirmed and paymentStatus to paid
-        const appointment = yield Appointment_1.default.findById(payment.appointmentId);
+        // Update appointment status to confirmed and paymentStatus to partial (20% paid, 80% balance due at clinic)
         if (appointment) {
             appointment.status = 'confirmed';
-            appointment.paymentStatus = 'paid';
+            appointment.consultationFee = feeNum;
+            appointment.advanceRequired = advanceFee;
+            appointment.advancePaid = advanceFee;
+            appointment.balancePaid = 0;
+            appointment.balanceDue = Math.max(0, feeNum - advanceFee);
+            appointment.paymentStatus = 'partial';
             appointment.paymentSource = 'gateway';
             appointment.paymentUpdatedAt = new Date();
             yield appointment.save();
@@ -383,8 +411,14 @@ const createPaymentOrder = (req, res) => __awaiter(void 0, void 0, void 0, funct
             consultationFee: feeNum,
             advanceFee,
             amount: advanceFee, // satisfies Mongoose schema validation requirement
+            amountInPaise: Math.round(advanceFee * 100),
+            paymentType: 'advance',
+            paymentSource: 'pillora_online',
+            paymentMethod: 'razorpay',
+            mode: 'online',
             razorpayOrderId: order.id,
             status: 'pending',
+            settlementStatus: 'Pending',
             createdAt: new Date()
         });
         yield payment.save();

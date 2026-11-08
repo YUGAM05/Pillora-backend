@@ -27,6 +27,7 @@ import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 import { sendWhatsAppTemplate } from '../services/whatsappService';
 import HospitalSubscriptionPayment from '../models/HospitalSubscriptionPayment';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
+import { getHospitalFinancialOverview } from './financialController';
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -957,6 +958,10 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
 
             const tokenNumber = activeAppointmentsCount + 1;
 
+            const docFee = doctor?.fee || 500;
+            const isPaid = paymentStatus === 'paid';
+            const method = req.body.paymentMethod || 'cash';
+
             const appointment = new Appointment({
                 patient: patientId,
                 doctor: doctorId,
@@ -964,23 +969,36 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 slot: slotId,
                 slotTime: new Date(slotTime),
                 status: 'confirmed',
-                paymentStatus: paymentStatus === 'paid' ? 'paid' : 'unpaid',
+                consultationFee: docFee,
+                advanceRequired: 0,
+                advancePaid: 0,
+                balancePaid: isPaid ? docFee : 0,
+                balanceDue: isPaid ? 0 : docFee,
+                paymentStatus: isPaid ? 'paid' : 'unpaid',
+                paymentSource: 'manual',
                 notes: notes || '',
                 tokenNumber
             });
 
             await appointment.save({ session });
 
-            if (paymentStatus === 'paid') {
-                const docFee = doctor?.fee || 500;
+            if (isPaid) {
                 const payment = new Payment({
                     appointmentId: appointment._id,
                     hospitalId: hospital._id,
+                    userId: patientId,
                     patientName,
                     amount: docFee,
-                    mode: 'offline',
-                    status: 'paid',
-                    recordedBy: req.user!._id
+                    amountInPaise: docFee * 100,
+                    consultationFee: docFee,
+                    paymentType: 'full',
+                    paymentSource: 'clinic_collection',
+                    paymentMethod: method,
+                    mode: method === 'cash' ? 'offline' : 'online',
+                    status: 'completed',
+                    settlementStatus: 'not_applicable',
+                    recordedBy: req.user!._id,
+                    notes: `Walk-in payment recorded via ${method.toUpperCase()}`
                 });
                 await payment.save({ session });
             }
@@ -2035,24 +2053,22 @@ export const autocompleteBookingIds = async (req: AuthRequest, res: Response): P
     }
 };
 
-// @desc    Record a manual payment for a booking
+// @desc    Record a clinic collection for a booking (Scenario B & C)
 // @route   POST /api/hospital/dashboard/appointments/:id/payment
 // @access  Private/Hospital
 export const recordPayment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
         const { id } = req.params;
-        const { amount, mode } = req.body;
+        const { amount, mode, paymentMethod, notes } = req.body;
 
         if (amount === undefined || amount < 0) {
             res.status(400).json({ message: 'Valid amount is required' });
             return;
         }
 
-        if (!['online', 'offline'].includes(mode)) {
-            res.status(400).json({ message: 'Valid payment mode is required (online or offline)' });
-            return;
-        }
+        const effectiveMethod = paymentMethod || (mode === 'offline' ? 'cash' : 'upi');
+        const effectiveMode = effectiveMethod === 'cash' ? 'offline' : 'online';
 
         const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
         if (!appointment) {
@@ -2061,151 +2077,72 @@ export const recordPayment = async (req: AuthRequest, res: Response): Promise<vo
         }
 
         const patientName = appointment.patientName || (appointment.patient as any)?.name || 'Unknown Patient';
+        const fee = appointment.consultationFee || 500;
+        const advance = appointment.advancePaid || 0;
+        const prevBalance = appointment.balancePaid || 0;
 
-        let payment = await Payment.findOne({ appointmentId: appointment._id });
+        // Check if there's already an online advance payment
+        const hasOnlineAdvance = (advance > 0) || await Payment.exists({
+            appointmentId: appointment._id,
+            paymentSource: 'pillora_online',
+            status: { $in: ['completed', 'paid'] }
+        });
 
-        if (payment) {
-            // Update existing payment
-            payment.amount = amount;
-            payment.mode = mode;
-            payment.recordedBy = req.user!._id;
-            await payment.save();
-        } else {
-            // Create new payment
-            payment = new Payment({
-                appointmentId: appointment._id,
-                hospitalId: hospital._id,
-                patientName,
-                amount,
-                mode,
-                status: 'paid',
-                recordedBy: req.user!._id
-            });
-            await payment.save();
-        }
+        const paymentType = hasOnlineAdvance ? 'balance' : 'full';
 
-        // Update appointment status
-        appointment.paymentStatus = 'paid';
+        // Create new immutable Payment record
+        const payment = new Payment({
+            appointmentId: appointment._id,
+            hospitalId: hospital._id,
+            userId: appointment.patient,
+            patientName,
+            amount,
+            amountInPaise: Math.round(amount * 100),
+            consultationFee: fee,
+            paymentType,
+            paymentSource: 'clinic_collection',
+            paymentMethod: effectiveMethod,
+            mode: effectiveMode,
+            status: 'completed',
+            settlementStatus: 'not_applicable',
+            recordedBy: req.user!._id,
+            notes: notes || `Clinic collection via ${effectiveMethod.toUpperCase()}`
+        });
+        await payment.save();
+
+        // Update appointment status and balances
+        const newBalancePaid = prevBalance + amount;
+        const newBalanceDue = Math.max(0, fee - advance - newBalancePaid);
+
+        appointment.balancePaid = newBalancePaid;
+        appointment.balanceDue = newBalanceDue;
+        appointment.paymentStatus = (newBalanceDue <= 0) ? 'paid' : 'partial';
+        appointment.paymentUpdatedAt = new Date();
+        appointment.paymentUpdatedBy = req.user!._id;
         await appointment.save();
 
-        res.json({ message: 'Payment recorded successfully', payment, appointment });
+        res.json({ 
+            message: 'Payment recorded successfully', 
+            payment, 
+            appointment: {
+                _id: appointment._id,
+                consultationFee: fee,
+                advancePaid: advance,
+                balancePaid: newBalancePaid,
+                balanceDue: newBalanceDue,
+                paymentStatus: appointment.paymentStatus
+            }
+        });
     } catch (error: any) {
         res.status(500).json({ message: 'Error recording payment', error: error.message });
     }
 };
 
-// @desc    Get payment summary and analytics
+// @desc    Get payment summary and analytics (delegates to central getHospitalFinancialOverview)
 // @route   GET /api/hospital/dashboard/payments/summary
 // @access  Private/Hospital
 export const getPaymentSummary = async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const hospital = (req as any).hospital;
-        const { from, to } = req.query;
-
-        // Build date filter
-        let dateFilter: any = {};
-        if (from || to) {
-            dateFilter.createdAt = {};
-            if (from) dateFilter.createdAt.$gte = new Date(from as string);
-            if (to) {
-                const toDate = new Date(to as string);
-                toDate.setHours(23, 59, 59, 999);
-                dateFilter.createdAt.$lte = toDate;
-            }
-        }
-
-        // Base match for this hospital
-        const matchStage = { hospitalId: hospital._id, status: 'paid', ...dateFilter };
-
-        // 1. Total summary stats
-        const payments = await Payment.find(matchStage);
-        
-        const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-        const onlinePayments = payments.filter(p => p.mode === 'online');
-        const offlinePayments = payments.filter(p => p.mode === 'offline');
-        
-        const totalOnlineRevenue = onlinePayments.reduce((sum, p) => sum + p.amount, 0);
-        const totalOfflineRevenue = offlinePayments.reduce((sum, p) => sum + p.amount, 0);
-
-        // Fetch unpaid appointments count for the same date range (using bookingDate or createdAt)
-        let apptDateFilter: any = {};
-        if (from || to) {
-            apptDateFilter.createdAt = {};
-            if (from) apptDateFilter.createdAt.$gte = new Date(from as string);
-            if (to) {
-                const toDate = new Date(to as string);
-                toDate.setHours(23, 59, 59, 999);
-                apptDateFilter.createdAt.$lte = toDate;
-            }
-        }
-
-        const pendingCount = await Appointment.countDocuments({ 
-            hospital: hospital._id, 
-            paymentStatus: { $ne: 'paid' },
-            ...apptDateFilter
-        });
-        
-        const paidCount = await Appointment.countDocuments({
-            hospital: hospital._id,
-            paymentStatus: 'paid',
-            ...apptDateFilter
-        });
-
-        // 2. Aggregate Revenue over time (Daily)
-        const timeSeriesData = await Payment.aggregate([
-            { $match: matchStage },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                        mode: "$mode"
-                    },
-                    total: { $sum: "$amount" }
-                }
-            },
-            {
-                $group: {
-                    _id: "$_id.date",
-                    modes: {
-                        $push: {
-                            mode: "$_id.mode",
-                            amount: "$total"
-                        }
-                    }
-                }
-            },
-            { $sort: { _id: 1 } }
-        ]);
-
-        // Format timeseries for frontend Recharts
-        const chartData = timeSeriesData.map(item => {
-            const online = item.modes.find((m: any) => m.mode === 'online')?.amount || 0;
-            const offline = item.modes.find((m: any) => m.mode === 'offline')?.amount || 0;
-            return {
-                date: item._id,
-                online,
-                offline,
-                total: online + offline
-            };
-        });
-
-        res.json({
-            summary: {
-                totalRevenue,
-                online: { count: onlinePayments.length, total: totalOnlineRevenue },
-                offline: { count: offlinePayments.length, total: totalOfflineRevenue },
-                pending: { count: pendingCount }
-            },
-            paidVsPending: {
-                paid: paidCount,
-                pending: pendingCount
-            },
-            chartData
-        });
-
-    } catch (error: any) {
-        res.status(500).json({ message: 'Error fetching payment summary', error: error.message });
-    }
+    return getHospitalFinancialOverview(req, res);
 };
 
 // @desc    Get Hospital Subscription Status, Expiry, Days Remaining & Payment History

@@ -89,6 +89,27 @@ const forgotPasswordEmailLimiter = (0, express_rate_limit_1.default)({
         });
     }
 });
+const resetPasswordLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+        }
+        else {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+        }
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.status(429).json({
+            message: 'Too many reset attempts. Please try again after 15 minutes.'
+        });
+    }
+});
 const router = express_1.default.Router();
 // ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
 // Belt-and-suspenders: handles any preflight that reaches the router layer.
@@ -142,7 +163,7 @@ router.post('/phone/send-otp', authController_1.sendPhoneOtp);
 router.post('/phone/verify-otp', authController_1.verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, authController_1.forgotPassword);
 router.get('/verify-reset-token', authController_1.verifyResetToken);
-router.post('/reset-password', authController_1.resetPassword);
+router.post('/reset-password', resetPasswordLimiter, authController_1.resetPassword);
 // ── MFA routes (semi-public — user ID required but no full auth) ─────────────
 router.post('/setup-mfa', authController_1.setupMfa);
 router.post('/verify-mfa', authController_1.verifyMfa);

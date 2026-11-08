@@ -743,25 +743,27 @@ exports.changePassword = changePassword;
 const forgotPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { email, portal } = req.body;
-        if (!email || !portal || !['patient', 'hospital'].includes(portal)) {
-            res.status(400).json({ message: 'Email and valid portal are required.' });
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRegex.test(email.toString().trim())) {
+            res.status(400).json({ message: 'A valid email address is required.' });
             return;
         }
-        const successMessage = "If an account exists with this email address, we've sent a password reset link.";
-        const normalizedEmail = email.trim().toLowerCase();
+        const effectivePortal = (portal && ['patient', 'hospital'].includes(portal)) ? portal : 'hospital';
+        const successMessage = "If an account exists with this email address, you will receive a password reset link shortly.";
+        const normalizedEmail = email.toString().trim().toLowerCase();
         // Check if user exists
         const user = yield User_1.default.findOne({ email: normalizedEmail });
         if (!user) {
-            // Always return success to prevent account enumeration
+            // Always return identical success message to prevent account enumeration
             res.status(200).json({ message: successMessage });
             return;
         }
         // Restrict based on role compatibility for security
         let isRoleAllowed = false;
-        if (portal === 'hospital') {
+        if (effectivePortal === 'hospital') {
             isRoleAllowed = ['hospital', 'admin'].includes(user.role);
         }
-        else if (portal === 'patient') {
+        else if (effectivePortal === 'patient') {
             isRoleAllowed = ['customer', 'seller', 'delivery'].includes(user.role);
         }
         if (!isRoleAllowed) {
@@ -772,37 +774,42 @@ const forgotPassword = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const token = crypto_1.default.randomBytes(32).toString('hex');
         const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-        // Invalidate active reset tokens for the same user
-        yield PasswordResetToken_1.default.updateMany({ userId: user._id, portal }, { used: true });
+        // Invalidate active reset tokens for the same user & portal
+        yield PasswordResetToken_1.default.updateMany({ userId: user._id, portal: effectivePortal }, { used: true });
         // Save hashed token
         yield PasswordResetToken_1.default.create({
             userId: user._id,
             email: normalizedEmail,
-            portal,
+            portal: effectivePortal,
             tokenHash,
             expiresAt,
             used: false
         });
         // Determine portal URL prefix
         let baseUrl = '';
-        if (portal === 'patient') {
+        const origin = req.headers.origin;
+        if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('pillorahospital.in') || origin.includes('pillora.in'))) {
+            baseUrl = origin;
+        }
+        else if (effectivePortal === 'patient') {
             baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://pillora.in';
         }
         else {
-            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3002' : 'https://pillorahospital.in';
+            baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3002' : 'https://www.pillorahospital.in';
         }
         const resetLink = `${baseUrl}/reset-password?token=${token}`;
-        // Send email
+        // Send email (never expose token in logs)
         yield (0, emailService_1.sendPasswordResetEmail)({
             toEmail: normalizedEmail,
             name: user.name,
-            resetLink
+            resetLink,
+            portal: effectivePortal
         });
         res.status(200).json({ message: successMessage });
     }
     catch (error) {
-        console.error('Forgot Password Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        console.error('Forgot Password Error:', error.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 });
 exports.forgotPassword = forgotPassword;
@@ -810,11 +817,11 @@ exports.forgotPassword = forgotPassword;
 const verifyResetToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { token } = req.query;
-        if (!token) {
-            res.status(400).json({ valid: false, message: 'Token is required.' });
+        if (!token || typeof token !== 'string') {
+            res.status(400).json({ valid: false, message: 'Reset token is required.' });
             return;
         }
-        const tokenHash = crypto_1.default.createHash('sha256').update(token.toString()).digest('hex');
+        const tokenHash = crypto_1.default.createHash('sha256').update(token.trim()).digest('hex');
         const resetToken = yield PasswordResetToken_1.default.findOne({
             tokenHash,
             used: false,
@@ -827,8 +834,8 @@ const verifyResetToken = (req, res) => __awaiter(void 0, void 0, void 0, functio
         res.status(200).json({ valid: true, message: 'Token is valid.' });
     }
     catch (error) {
-        console.error('Verify Reset Token Error:', error);
-        res.status(500).json({ valid: false, message: 'Server Error', error: error.message || error });
+        console.error('Verify Reset Token Error:', error.message || error);
+        res.status(500).json({ valid: false, message: 'Server Error' });
     }
 });
 exports.verifyResetToken = verifyResetToken;
@@ -837,10 +844,10 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         const { token, password } = req.body;
         if (!token || !password) {
-            res.status(400).json({ message: 'Token and password are required.' });
+            res.status(400).json({ message: 'Token and new password are required.' });
             return;
         }
-        // Real password regex verification on backend
+        // Real password regex verification on backend (min 8 chars, uppercase, lowercase, number, special char)
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/~`\-]).{8,}$/;
         if (!passwordRegex.test(password)) {
             res.status(400).json({
@@ -848,7 +855,7 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             });
             return;
         }
-        const tokenHash = crypto_1.default.createHash('sha256').update(token).digest('hex');
+        const tokenHash = crypto_1.default.createHash('sha256').update(token.toString().trim()).digest('hex');
         const resetToken = yield PasswordResetToken_1.default.findOne({
             tokenHash,
             used: false,
@@ -863,7 +870,7 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(404).json({ message: 'User not found.' });
             return;
         }
-        // Hash new password using bcryptjs
+        // Hash new password using bcrypt
         const salt = yield bcryptjs_1.default.genSalt(10);
         user.passwordHash = yield bcryptjs_1.default.hash(password, salt);
         user.isPasswordResetRequired = false;
@@ -872,12 +879,16 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         resetToken.used = true;
         yield resetToken.save();
         // Invalidate all other active reset tokens for this user
-        yield PasswordResetToken_1.default.updateMany({ userId: user._id, _id: { $ne: resetToken._id } }, { used: true });
-        res.status(200).json({ message: 'Password has been updated successfully.' });
+        yield PasswordResetToken_1.default.updateMany({ userId: user._id, used: false }, { used: true });
+        // Invalidate existing sessions for the administrator
+        yield Session_1.default.revokeAllForAdmin(user._id.toString());
+        res.status(200).json({
+            message: 'Your password has been reset successfully. Please log in using your new password.'
+        });
     }
     catch (error) {
-        console.error('Reset Password Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        console.error('Reset Password Error:', error.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 });
 exports.resetPassword = resetPassword;

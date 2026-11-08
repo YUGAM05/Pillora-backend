@@ -18,7 +18,7 @@ export interface ISettlementAudit {
 export interface ISettlement extends Document {
     settlementId: string; // SET-YYYYMMDD-XXXX
     hospitalId: mongoose.Types.ObjectId;
-    status: 'Waiting for Razorpay Settlement' | 'Ready for Settlement' | 'Payment Initiated' | 'Awaiting Hospital Confirmation' | 'Settlement Completed' | 'Failed' | 'On Hold' | 'Under Review';
+    status: 'Pending' | 'Processing' | 'Settled' | 'Failed' | 'Reversed' | 'Waiting for Razorpay Settlement' | 'Ready for Settlement' | 'Payment Initiated' | 'Awaiting Hospital Confirmation' | 'Settlement Completed' | 'On Hold' | 'Under Review';
     grossCollection: number;
     razorpayCharges: number;
     gstCharges: number;
@@ -57,8 +57,21 @@ const SettlementSchema: Schema = new Schema({
     hospitalId: { type: Schema.Types.ObjectId, ref: 'Hospital', required: true },
     status: { 
         type: String, 
-        enum: ['Waiting for Razorpay Settlement', 'Ready for Settlement', 'Payment Initiated', 'Awaiting Hospital Confirmation', 'Settlement Completed', 'Failed', 'On Hold', 'Under Review'],
-        default: 'Waiting for Razorpay Settlement',
+        enum: [
+            'Pending', 
+            'Processing', 
+            'Settled', 
+            'Failed', 
+            'Reversed',
+            'Waiting for Razorpay Settlement', 
+            'Ready for Settlement', 
+            'Payment Initiated', 
+            'Awaiting Hospital Confirmation', 
+            'Settlement Completed', 
+            'On Hold', 
+            'Under Review'
+        ],
+        default: 'Pending',
         required: true 
     },
     grossCollection: { type: Number, required: true, default: 0 },

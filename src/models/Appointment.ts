@@ -11,7 +11,7 @@ export interface IAppointment extends Document {
     // 'pending' kept as legacy alias for 'unpaid' (existing documents remain valid).
     // 'failed' kept for legacy compatibility.
     // paymentSource distinguishes manual staff entry from future gateway webhooks.
-    paymentStatus: 'unpaid' | 'paid' | 'waived' | 'pending' | 'failed';
+    paymentStatus: 'unpaid' | 'partial' | 'paid' | 'waived' | 'pending' | 'failed';
     paymentSource: 'manual' | 'gateway';
     paymentUpdatedAt?: Date;
     paymentUpdatedBy?: mongoose.Types.ObjectId;
@@ -29,10 +29,16 @@ export interface IAppointment extends Document {
     doctorName?: string;
     hospitalName?: string;
     consultationFee?: number;
+    advanceRequired?: number;
+    advancePaid?: number;
+    balanceDue?: number;
+    balancePaid?: number;
     appointmentDate?: string;
     appointmentTime?: string;
     reminder24hSent?: boolean;
     reminder2hSent?: boolean;
+    createdAt?: Date;
+    updatedAt?: Date;
 }
 
 const AppointmentSchema: Schema = new Schema({
@@ -48,9 +54,9 @@ const AppointmentSchema: Schema = new Schema({
     },
     paymentStatus: {
         type: String,
-        // 'unpaid'/'paid'/'waived' — new canonical values.
+        // 'unpaid'/'partial'/'paid'/'waived'/'refunded' — canonical values.
         // 'pending'/'failed' — legacy values kept for backward compat with existing documents.
-        enum: ['unpaid', 'paid', 'waived', 'pending', 'failed'],
+        enum: ['unpaid', 'partial', 'paid', 'waived', 'refunded', 'pending', 'failed'],
         default: 'unpaid'
     },
     // Source field: allows future gateway webhook to override without schema rewrite.
@@ -75,6 +81,10 @@ const AppointmentSchema: Schema = new Schema({
     doctorName: { type: String },
     hospitalName: { type: String },
     consultationFee: { type: Number },
+    advanceRequired: { type: Number, default: 0 },
+    advancePaid: { type: Number, default: 0 },
+    balanceDue: { type: Number, default: 0 },
+    balancePaid: { type: Number, default: 0 },
     appointmentDate: { type: String },
     appointmentTime: { type: String },
     reminder24hSent: { type: Boolean, default: false },

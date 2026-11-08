@@ -344,16 +344,66 @@ const sendDonorFoundEmail = (_a) => __awaiter(void 0, [_a], void 0, function* ({
     }
 });
 exports.sendDonorFoundEmail = sendDonorFoundEmail;
-const sendPasswordResetEmail = (_a) => __awaiter(void 0, [_a], void 0, function* ({ toEmail, name, resetLink }) {
+const sendPasswordResetEmail = (_a) => __awaiter(void 0, [_a], void 0, function* ({ toEmail, name, resetLink, portal = 'hospital' }) {
     if (!toEmail) {
         console.error('[EmailService] Cannot send Password Reset email: toEmail is missing');
         throw new Error('Recipient email is missing');
     }
-    const mailOptions = {
-        from: DEFAULT_FROM,
-        to: toEmail,
-        subject: 'Reset Your Pillora Password',
-        html: `
+    const isHospital = portal === 'hospital';
+    const subject = isHospital
+        ? 'Reset Your Pillora Hospital Account Password'
+        : 'Reset Your Pillora Password';
+    const html = isHospital
+        ? `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background-color: #f8fafc;">
+        <div style="background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <div style="display: inline-block; width: 44px; height: 44px; line-height: 44px; background-color: #2563eb; border-radius: 12px; margin-bottom: 12px; text-align: center;">
+              <span style="color: #ffffff; font-size: 24px; font-weight: 800; vertical-align: middle;">+</span>
+            </div>
+            <h2 style="color: #0f172a; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.025em;">Pillora <span style="color: #2563eb;">Hospital</span></h2>
+            <p style="color: #64748b; font-size: 13px; margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Hospital Administration Portal</p>
+          </div>
+          
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 28px;" />
+          
+          <p style="font-size: 16px; color: #1e293b; line-height: 1.6; margin-bottom: 18px;">Hello,</p>
+          
+          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin-bottom: 20px;">
+            We received a request to reset the password for your Pillora Hospital Admin account.
+          </p>
+          
+          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin-bottom: 28px;">
+            Click the button below to securely create a new password.
+          </p>
+          
+          <div style="text-align: center; margin: 32px 0;">
+            <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 16px 36px; border-radius: 12px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);">Reset My Password</a>
+          </div>
+          
+          <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 10px; padding: 14px 18px; margin-bottom: 24px;">
+            <p style="font-size: 13px; color: #b91c1c; margin: 0; font-weight: 600; line-height: 1.5;">
+              ⚠️ This link is valid for 15 minutes and can only be used once.
+            </p>
+          </div>
+          
+          <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 28px;">
+            If you did not request this password reset, please ignore this email. Your existing password will remain unchanged.
+          </p>
+          
+          <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 24px;" />
+          
+          <p style="font-size: 14px; color: #475569; margin: 0; line-height: 1.6;">
+            Regards,<br />
+            <strong style="color: #0f172a;">Team Pillora</strong>
+          </p>
+        </div>
+        <div style="text-align: center; margin-top: 20px;">
+          <p style="font-size: 12px; color: #94a3b8; margin: 0;">This is an automated notification from Pillora Hospital Portal. Please do not reply directly to this email.</p>
+        </div>
+      </div>
+    `
+        : `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 40px 20px; background-color: #f8fafc;">
         <div style="background-color: #ffffff; border-radius: 16px; padding: 40px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
           <div style="text-align: center; margin-bottom: 30px;">
@@ -363,7 +413,7 @@ const sendPasswordResetEmail = (_a) => __awaiter(void 0, [_a], void 0, function*
           
           <hr style="border: 0; border-top: 1px solid #f1f5f9; margin-bottom: 30px;" />
           
-          <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 24px;">Hello ${name},</p>
+          <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 24px;">Hello ${name || 'User'},</p>
           
           <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 24px;">We received a request to reset your password. Click the button below to create a new password.</p>
           
@@ -385,7 +435,12 @@ const sendPasswordResetEmail = (_a) => __awaiter(void 0, [_a], void 0, function*
           <p style="font-size: 12px; color: #94a3b8; margin: 0;">This is an automated email from Pillora. Please do not reply.</p>
         </div>
       </div>
-    `
+    `;
+    const mailOptions = {
+        from: DEFAULT_FROM,
+        to: toEmail,
+        subject,
+        html
     };
     try {
         yield transporter.sendMail(mailOptions);

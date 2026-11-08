@@ -47,9 +47,9 @@ const AppointmentSchema = new mongoose_1.Schema({
     },
     paymentStatus: {
         type: String,
-        // 'unpaid'/'paid'/'waived' — new canonical values.
+        // 'unpaid'/'partial'/'paid'/'waived'/'refunded' — canonical values.
         // 'pending'/'failed' — legacy values kept for backward compat with existing documents.
-        enum: ['unpaid', 'paid', 'waived', 'pending', 'failed'],
+        enum: ['unpaid', 'partial', 'paid', 'waived', 'refunded', 'pending', 'failed'],
         default: 'unpaid'
     },
     // Source field: allows future gateway webhook to override without schema rewrite.
@@ -74,6 +74,10 @@ const AppointmentSchema = new mongoose_1.Schema({
     doctorName: { type: String },
     hospitalName: { type: String },
     consultationFee: { type: Number },
+    advanceRequired: { type: Number, default: 0 },
+    advancePaid: { type: Number, default: 0 },
+    balanceDue: { type: Number, default: 0 },
+    balancePaid: { type: Number, default: 0 },
     appointmentDate: { type: String },
     appointmentTime: { type: String },
     reminder24hSent: { type: Boolean, default: false },
