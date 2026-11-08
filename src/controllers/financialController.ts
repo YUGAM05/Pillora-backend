@@ -7,9 +7,26 @@ import Settlement from '../models/Settlement';
 import Refund from '../models/Refund';
 import Doctor from '../models/Doctor';
 import User from '../models/User';
+import Notification from '../models/Notification';
+import { decrypt, encrypt } from '../utils/cryptoHelper';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { AuthRequest } from '../middleware/authMiddleware';
+
+/**
+ * Helper to safely decrypt hospital bank details (handles encrypted or plain text)
+ */
+export const safeDecryptBankDetails = (bank: any) => {
+    if (!bank) return null;
+    return {
+        accountHolderName: decrypt(bank.accountHolderName || ''),
+        bankName: decrypt(bank.bankName || ''),
+        branchName: decrypt(bank.branchName || ''),
+        accountNumber: decrypt(bank.accountNumber || ''),
+        ifscCode: decrypt(bank.ifscCode || ''),
+        upiId: decrypt(bank.upiId || '')
+    };
+};
 
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
@@ -894,6 +911,7 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
             totalConsultationFees += (a.consultationFee || 500);
         }
 
+        let onlineAdvanceCount = 0;
         let grossOnlineAdvances = 0;
         let gatewayCharges = 0;
         let gatewayTaxes = 0;
@@ -902,7 +920,12 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
 
         for (const p of payments) {
             const amt = p.amount || 0;
-            if (p.paymentSource === 'pillora_online' || (p.razorpayPaymentId && p.paymentType === 'advance')) {
+            const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
+                                    (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
+                                    p.mode === 'online';
+
+            if (isOnlineAdvance) {
+                onlineAdvanceCount++;
                 grossOnlineAdvances += amt;
                 const c = p.gatewayCharges || (amt * 0.02);
                 const t = p.gatewayTaxes || (c * 0.18);
@@ -922,7 +945,11 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         let pendingSettlement = 0;
 
         for (const p of payments) {
-            if (p.paymentSource === 'pillora_online') {
+            const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
+                                    (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
+                                    p.mode === 'online';
+
+            if (isOnlineAdvance) {
                 const amt = p.amount || 0;
                 const c = p.gatewayCharges || (amt * 0.02);
                 const t = p.gatewayTaxes || (c * 0.18);
@@ -947,10 +974,11 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
                 address: hospital.address,
                 phone: hospital.contactNumber || (hospital.phoneNumbers && hospital.phoneNumbers[0]) || '',
                 email: hospital.email,
-                bankDetails: hospital.bankDetails || null
+                bankDetails: safeDecryptBankDetails(hospital.bankDetails)
             },
             financialSummary: {
                 totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
+                onlineAdvanceCount,
                 grossOnlineAdvances: Math.round(grossOnlineAdvances * 100) / 100,
                 gatewayCharges: Math.round(totalGatewayDeductions * 100) / 100,
                 netPayable: Math.round(netPayable * 100) / 100,
@@ -992,7 +1020,11 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             const payQuery: any = {
                 hospitalId: hosp._id,
                 status: { $in: ['completed', 'paid'] },
-                paymentSource: 'pillora_online'
+                $or: [
+                    { paymentSource: 'pillora_online' },
+                    { razorpayPaymentId: { $exists: true, $ne: '' } },
+                    { mode: 'online' }
+                ]
             };
 
             if (dateFilter !== 'all') {
@@ -1034,7 +1066,9 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             const latestSettlement = await Settlement.findOne({ hospitalId: hosp._id }).sort({ createdAt: -1 }).lean();
 
             let calculatedStatus = 'Pending';
-            if (pendingSettlement === 0 && alreadySettled > 0) {
+            if (latestSettlement?.status === 'Awaiting Hospital Confirmation') {
+                calculatedStatus = 'Awaiting Hospital Confirmation';
+            } else if (pendingSettlement === 0 && alreadySettled > 0) {
                 calculatedStatus = 'Settled';
             } else if (latestSettlement?.status === 'Processing') {
                 calculatedStatus = 'Processing';
@@ -1047,9 +1081,12 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
                 continue;
             }
 
+            const decryptedBank = safeDecryptBankDetails(hosp.bankDetails);
+
             settlementList.push({
                 hospitalId: hosp._id,
                 hospitalName: hosp.name,
+                advanceCount: payments.length,
                 totalGrossAdvances: Math.round(grossAdvances * 100) / 100,
                 gatewayCharges: Math.round(gatewayCharges * 100) / 100,
                 netPayable: Math.round(netPayable * 100) / 100,
@@ -1058,8 +1095,8 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
                 settlementDate: latestSettlement?.transferDate || null,
                 bankTransactionReference: latestSettlement?.utrNumber || 'N/A',
                 settlementStatus: calculatedStatus,
-                hasBankDetails: Boolean(hosp.bankDetails?.accountNumber),
-                bankDetails: hosp.bankDetails || null,
+                hasBankDetails: Boolean(decryptedBank?.accountNumber),
+                bankDetails: decryptedBank,
                 eligibleDate: earliestPendingDate ? new Date(earliestPendingDate.getTime() + (2 * 86400000)) : null
             });
         }
@@ -1195,6 +1232,343 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
     } catch (error: any) {
         console.error('[RecordAdminSettlementPayoutError]', error.message || error);
         res.status(500).json({ error: 'Failed to record settlement payout', details: error.message });
+    }
+};
+
+/**
+ * @desc    Update Hospital Bank Account Details (Admin)
+ * @route   PUT /api/admin/financial/hospital/:hospitalId/bank-details
+ * @access  Private/Admin
+ */
+export const updateHospitalBankDetailsAdmin = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { hospitalId } = req.params;
+        const { accountHolderName, bankName, branchName, accountNumber, ifscCode, upiId } = req.body;
+
+        if (!hospitalId) {
+            res.status(400).json({ error: 'Hospital ID is required' });
+            return;
+        }
+
+        const hospital = await Hospital.findById(hospitalId);
+        if (!hospital) {
+            res.status(404).json({ error: 'Hospital not found' });
+            return;
+        }
+
+        hospital.bankDetails = {
+            accountHolderName: String(accountHolderName || '').trim(),
+            bankName: String(bankName || '').trim(),
+            branchName: String(branchName || '').trim(),
+            accountNumber: String(accountNumber || '').trim(),
+            ifscCode: String(ifscCode || '').trim().toUpperCase(),
+            upiId: String(upiId || '').trim()
+        };
+
+        await hospital.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Hospital bank account details updated successfully',
+            bankDetails: hospital.bankDetails
+        });
+    } catch (error: any) {
+        console.error('[UpdateHospitalBankDetailsAdminError]', error.message || error);
+        res.status(500).json({ error: 'Failed to update hospital bank details', details: error.message });
+    }
+};
+
+/**
+ * @desc    Calculate settlement amount for a hospital in a custom date range
+ * @route   GET /api/admin/financial/hospital/:hospitalId/settlement-calculate
+ * @access  Private/Admin
+ */
+export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { hospitalId } = req.params;
+        const { startDate, endDate } = req.query;
+
+        if (!hospitalId) {
+            res.status(400).json({ error: 'Hospital ID is required' });
+            return;
+        }
+
+        const hospital = await Hospital.findById(hospitalId).lean();
+        if (!hospital) {
+            res.status(404).json({ error: 'Hospital not found' });
+            return;
+        }
+
+        let start: Date;
+        let end: Date;
+
+        if (startDate) {
+            start = new Date(String(startDate));
+            start.setHours(0, 0, 0, 0);
+        } else {
+            const now = new Date();
+            start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        }
+
+        if (endDate) {
+            end = new Date(String(endDate));
+            end.setHours(23, 59, 59, 999);
+        } else {
+            end = new Date();
+            end.setHours(23, 59, 59, 999);
+        }
+
+        // Find all online advances within this date range that are not already Settlement Completed
+        const query: any = {
+            hospitalId: hospital._id,
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
+            createdAt: { $gte: start, $lte: end },
+            settlementStatus: { $ne: 'Settlement Completed' }
+        };
+
+        const payments = await Payment.find(query)
+            .populate('appointmentId', 'tokenNumber patientName slotTime consultationFee')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        let totalGross = 0;
+        let totalDeductions = 0;
+        let totalNet = 0;
+
+        const paymentBreakdown = payments.map((p) => {
+            const amt = p.amount || p.advanceFee || 0;
+            const charge = Math.round(amt * 0.02 * 100) / 100;
+            const gst = Math.round(charge * 0.18 * 100) / 100;
+            const deduction = Math.round((charge + gst) * 100) / 100; // 2.36%
+            const net = Math.max(0, Math.round((amt - deduction) * 100) / 100);
+
+            totalGross += amt;
+            totalDeductions += deduction;
+            totalNet += net;
+
+            const appt = p.appointmentId as any;
+            return {
+                paymentId: p._id,
+                transactionId: p.transactionId || `TXN-${p._id}`,
+                razorpayPaymentId: p.razorpayPaymentId || 'N/A',
+                appointmentId: appt?._id || p.appointmentId,
+                tokenNumber: appt?.tokenNumber || null,
+                patientName: p.patientName || appt?.patientName || 'Patient',
+                consultationFee: appt?.consultationFee || 500,
+                advancePaid: amt,
+                gatewayCharge: deduction,
+                netPayable: net,
+                settlementStatus: p.settlementStatus || 'Pending',
+                createdAt: p.createdAt
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            hospital: {
+                _id: hospital._id,
+                name: hospital.name,
+                bankDetails: safeDecryptBankDetails(hospital.bankDetails)
+            },
+            dateRange: {
+                startDate: start,
+                endDate: end
+            },
+            calculation: {
+                advanceCount: payments.length,
+                grossOnlineAdvances: Math.round(totalGross * 100) / 100,
+                gatewayCharges: Math.round(totalDeductions * 100) / 100,
+                netPayable: Math.round(totalNet * 100) / 100
+            },
+            payments: paymentBreakdown
+        });
+    } catch (error: any) {
+        console.error('[CalculateHospitalSettlementForDateRangeError]', error.message || error);
+        res.status(500).json({ error: 'Failed to calculate settlement', details: error.message });
+    }
+};
+
+/**
+ * @desc    Send Settlement Request to Hospital (sets status to 'Awaiting Hospital Confirmation')
+ * @route   POST /api/admin/financial/hospital/:hospitalId/send-settlement-request
+ * @access  Private/Admin
+ */
+export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const { hospitalId } = req.params;
+        const {
+            startDate,
+            endDate,
+            amount,
+            transferMethod = 'NEFT',
+            utrNumber,
+            notes,
+            paymentIds
+        } = req.body;
+
+        if (!hospitalId || !utrNumber) {
+            res.status(400).json({ error: 'Hospital ID and UTR / Bank Reference number are mandatory' });
+            return;
+        }
+
+        const hospital = await Hospital.findById(hospitalId);
+        if (!hospital) {
+            res.status(404).json({ error: 'Hospital not found' });
+            return;
+        }
+
+        let start: Date;
+        let end: Date;
+
+        if (startDate) {
+            start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+        } else {
+            const now = new Date();
+            start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        }
+
+        if (endDate) {
+            end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+        } else {
+            end = new Date();
+            end.setHours(23, 59, 59, 999);
+        }
+
+        // Query eligible payments
+        let eligiblePayments: any[] = [];
+        if (Array.isArray(paymentIds) && paymentIds.length > 0) {
+            eligiblePayments = await Payment.find({
+                _id: { $in: paymentIds },
+                hospitalId: hospital._id,
+                settlementStatus: { $ne: 'Settlement Completed' }
+            });
+        } else {
+            eligiblePayments = await Payment.find({
+                hospitalId: hospital._id,
+                status: { $in: ['completed', 'paid'] },
+                $or: [
+                    { paymentSource: 'pillora_online' },
+                    { razorpayPaymentId: { $exists: true, $ne: '' } },
+                    { mode: 'online' }
+                ],
+                createdAt: { $gte: start, $lte: end },
+                settlementStatus: { $ne: 'Settlement Completed' }
+            });
+        }
+
+        if (eligiblePayments.length === 0) {
+            res.status(400).json({ error: 'No eligible pending payments found to settle for the selected period' });
+            return;
+        }
+
+        let totalGross = 0;
+        let totalCharges = 0;
+        let totalGst = 0;
+
+        for (const p of eligiblePayments) {
+            const amt = p.amount || p.advanceFee || 0;
+            totalGross += amt;
+            const c = Math.round(amt * 0.02 * 100) / 100;
+            const t = Math.round(c * 0.18 * 100) / 100;
+            totalCharges += c;
+            totalGst += t;
+        }
+
+        const netCalc = Math.max(0, Math.round((totalGross - (totalCharges + totalGst)) * 100) / 100);
+        const payoutAmount = amount ? Math.round(Number(amount) * 100) / 100 : netCalc;
+
+        // Generate SET-YYYYMMDD-XXXX
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const randomStr = crypto.randomBytes(2).toString('hex').toUpperCase();
+        const settlementId = `SET-${dateStr}-${randomStr}`;
+
+        const validMethods = ['NEFT', 'RTGS', 'IMPS', 'UPI'];
+        const chosenMethod = validMethods.includes(transferMethod) ? transferMethod : 'NEFT';
+
+        const settlement = new Settlement({
+            settlementId,
+            hospitalId: hospital._id,
+            status: 'Awaiting Hospital Confirmation', // Awaiting approval from hospital dashboard
+            startDate: start,
+            endDate: end,
+            advanceCount: eligiblePayments.length,
+            grossCollection: Math.round(totalGross * 100) / 100,
+            razorpayCharges: Math.round(totalCharges * 100) / 100,
+            gstCharges: Math.round(totalGst * 100) / 100,
+            netAmount: payoutAmount,
+            transferDate: new Date(),
+            transferMethod: chosenMethod,
+            utrNumber: String(utrNumber).trim(),
+            notes: notes?.trim() || `Transferred via ${chosenMethod} UTR: ${utrNumber}`,
+            eligibleDate: new Date(),
+            paymentIds: eligiblePayments.map(p => p._id),
+            appointmentIds: eligiblePayments.map(p => p.appointmentId).filter(Boolean),
+            timeline: [
+                {
+                    status: 'Awaiting Hospital Confirmation',
+                    timestamp: new Date(),
+                    note: `Settlement payout of ₹${payoutAmount.toFixed(2)} sent via ${chosenMethod} (UTR: ${utrNumber}). Awaiting hospital confirmation.`
+                }
+            ],
+            auditLogs: [
+                {
+                    performedBy: req.user?._id,
+                    action: 'SEND_SETTLEMENT_REQUEST',
+                    previousStatus: 'Pending',
+                    newStatus: 'Awaiting Hospital Confirmation',
+                    notes: `Pillora Admin sent settlement request for ₹${payoutAmount.toFixed(2)} via ${chosenMethod} UTR: ${utrNumber}`,
+                    timestamp: new Date()
+                }
+            ]
+        });
+
+        await settlement.save();
+
+        // Mark all payments as Awaiting Hospital Confirmation
+        await Payment.updateMany(
+            { _id: { $in: eligiblePayments.map(p => p._id) } },
+            {
+                $set: {
+                    settlementStatus: 'Awaiting Hospital Confirmation',
+                    settlementId: settlement._id
+                }
+            }
+        );
+
+        // Notify Hospital User
+        if (hospital.user) {
+            await Notification.create({
+                user: hospital.user,
+                message: `Pillora Admin sent a settlement payout of ₹${payoutAmount.toFixed(2)} for the period ${start.toLocaleDateString('en-IN')} to ${end.toLocaleDateString('en-IN')}. Transfer Method: ${chosenMethod}, UTR: ${utrNumber}. Please confirm receipt in your settlements dashboard.`,
+                type: 'info',
+                relatedId: settlement._id
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `Settlement request of ₹${payoutAmount.toFixed(2)} sent to ${hospital.name}. Status is now 'Awaiting Hospital Confirmation'.`,
+            settlement: {
+                settlementId: settlement.settlementId,
+                netAmount: settlement.netAmount,
+                utrNumber: settlement.utrNumber,
+                transferMethod: settlement.transferMethod,
+                status: settlement.status,
+                advanceCount: eligiblePayments.length,
+                startDate: settlement.startDate,
+                endDate: settlement.endDate
+            }
+        });
+    } catch (error: any) {
+        console.error('[SendSettlementRequestToHospitalError]', error.message || error);
+        res.status(500).json({ error: 'Failed to send settlement request', details: error.message });
     }
 };
 

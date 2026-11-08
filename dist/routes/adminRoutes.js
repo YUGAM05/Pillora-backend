@@ -51,6 +51,9 @@ router.get('/voice-config', authMiddleware_1.protect, authMiddleware_1.adminOnly
 // Central Financial Management
 router.get('/financial/overview', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminFinancialOverview);
 router.get('/financial/hospital/:hospitalId', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminHospitalFinancialReport);
+router.put('/financial/hospital/:hospitalId/bank-details', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.updateHospitalBankDetailsAdmin);
+router.get('/financial/hospital/:hospitalId/settlement-calculate', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.calculateHospitalSettlementForDateRange);
+router.post('/financial/hospital/:hospitalId/send-settlement-request', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.sendSettlementRequestToHospital);
 router.get('/financial/transactions', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminTransactionsLedger);
 router.get('/financial/settlements', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.getAdminSettlementManagement);
 router.post('/financial/settlements/payout', authMiddleware_1.protect, authMiddleware_1.adminOnly, financialController_1.recordAdminSettlementPayout);

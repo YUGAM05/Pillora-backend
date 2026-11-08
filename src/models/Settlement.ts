@@ -19,6 +19,9 @@ export interface ISettlement extends Document {
     settlementId: string; // SET-YYYYMMDD-XXXX
     hospitalId: mongoose.Types.ObjectId;
     status: 'Pending' | 'Processing' | 'Settled' | 'Failed' | 'Reversed' | 'Waiting for Razorpay Settlement' | 'Ready for Settlement' | 'Payment Initiated' | 'Awaiting Hospital Confirmation' | 'Settlement Completed' | 'On Hold' | 'Under Review';
+    startDate?: Date;
+    endDate?: Date;
+    advanceCount?: number;
     grossCollection: number;
     razorpayCharges: number;
     gstCharges: number;
@@ -74,6 +77,9 @@ const SettlementSchema: Schema = new Schema({
         default: 'Pending',
         required: true 
     },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    advanceCount: { type: Number, default: 0 },
     grossCollection: { type: Number, required: true, default: 0 },
     razorpayCharges: { type: Number, required: true, default: 0 },
     gstCharges: { type: Number, required: true, default: 0 },

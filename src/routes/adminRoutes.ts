@@ -6,6 +6,9 @@ import {
     getAdminTransactionsLedger,
     getAdminSettlementManagement,
     recordAdminSettlementPayout,
+    updateHospitalBankDetailsAdmin,
+    calculateHospitalSettlementForDateRange,
+    sendSettlementRequestToHospital,
     getAdminRefunds,
     processAdminRefund
 } from '../controllers/financialController';
@@ -89,6 +92,9 @@ router.get('/voice-config', protect, adminOnly, getVoiceConfigs);
 // Central Financial Management
 router.get('/financial/overview', protect, adminOnly, getAdminFinancialOverview);
 router.get('/financial/hospital/:hospitalId', protect, adminOnly, getAdminHospitalFinancialReport);
+router.put('/financial/hospital/:hospitalId/bank-details', protect, adminOnly, updateHospitalBankDetailsAdmin);
+router.get('/financial/hospital/:hospitalId/settlement-calculate', protect, adminOnly, calculateHospitalSettlementForDateRange);
+router.post('/financial/hospital/:hospitalId/send-settlement-request', protect, adminOnly, sendSettlementRequestToHospital);
 router.get('/financial/transactions', protect, adminOnly, getAdminTransactionsLedger);
 router.get('/financial/settlements', protect, adminOnly, getAdminSettlementManagement);
 router.post('/financial/settlements/payout', protect, adminOnly, recordAdminSettlementPayout);

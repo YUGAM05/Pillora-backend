@@ -69,6 +69,9 @@ const SettlementSchema = new mongoose_1.Schema({
         default: 'Pending',
         required: true
     },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    advanceCount: { type: Number, default: 0 },
     grossCollection: { type: Number, required: true, default: 0 },
     razorpayCharges: { type: Number, required: true, default: 0 },
     gstCharges: { type: Number, required: true, default: 0 },
