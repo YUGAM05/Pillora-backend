@@ -104,22 +104,34 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
             res.status(401).json({ error: 'Hospital not authenticated' });
             return;
         }
-        const { dateFilter = 'this_month', customStart, customEnd } = req.query;
+        const dateFilter = (req.query.period || req.query.dateFilter || 'this_month');
+        const customStart = (req.query.startDate || req.query.customStart);
+        const customEnd = (req.query.endDate || req.query.customEnd);
         const { start, end } = (0, exports.resolveDateRange)(String(dateFilter), customStart ? String(customStart) : undefined, customEnd ? String(customEnd) : undefined);
         const hospitalId = hospital._id;
         // 1. Fetch appointments for this hospital in date range (using slotTime or createdAt)
         const appointmentMatch = {
-            hospital: hospitalId,
-            status: { $ne: 'cancelled' },
             $or: [
-                { slotTime: { $gte: start, $lte: end } },
-                { createdAt: { $gte: start, $lte: end } }
+                { hospital: hospitalId },
+                { hospital: hospitalId.toString() }
+            ],
+            status: { $ne: 'cancelled' },
+            $and: [
+                {
+                    $or: [
+                        { slotTime: { $gte: start, $lte: end } },
+                        { createdAt: { $gte: start, $lte: end } }
+                    ]
+                }
             ]
         };
         const appointments = yield Appointment_1.default.find(appointmentMatch).lean();
         // 2. Fetch completed payments for this hospital within date range
         const paymentMatch = {
-            hospitalId,
+            $or: [
+                { hospitalId },
+                { hospitalId: hospitalId.toString() }
+            ],
             status: { $in: ['completed', 'paid'] },
             createdAt: { $gte: start, $lte: end }
         };
@@ -141,7 +153,12 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
         let clinicOnlineCount = 0;
         for (const p of payments) {
             const amt = p.amount || 0;
-            if (p.paymentSource === 'pillora_online' || (p.razorpayPaymentId && p.paymentType === 'advance')) {
+            const isOnlineAdvance = p.paymentSource === 'pillora_online' ||
+                p.paymentType === 'advance' ||
+                p.paymentType === 'advance_20' ||
+                Boolean(p.razorpayPaymentId || p.razorpayOrderId) ||
+                p.mode === 'online';
+            if (isOnlineAdvance) {
                 onlineAdvanceGross += (p.advanceFee || amt);
                 onlineAdvanceCount += 1;
                 // Gateway charges (2% fee + 18% GST on fee = 2.36%)
@@ -150,7 +167,7 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
                 totalGatewayCharges += charges;
                 totalGatewayTaxes += taxes;
             }
-            else if (p.paymentSource === 'clinic_collection' || p.mode === 'offline' || !p.razorpayPaymentId) {
+            else {
                 if (p.paymentMethod === 'cash' || p.mode === 'offline') {
                     clinicCashCollections += amt;
                     clinicCashCount += 1;
@@ -161,15 +178,41 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
                 }
             }
         }
+        // Safety fallback: If online advance is 0 from payments but appointments record online advance
+        if (onlineAdvanceGross === 0 && appointments.length > 0) {
+            for (const app of appointments) {
+                if (app.advancePaid && app.advancePaid > 0) {
+                    onlineAdvanceGross += app.advancePaid;
+                    onlineAdvanceCount += 1;
+                    const charges = app.advancePaid * 0.02;
+                    const taxes = charges * 0.18;
+                    totalGatewayCharges += charges;
+                    totalGatewayTaxes += taxes;
+                }
+            }
+        }
         // ── Card 3: Payable from Pillora ─────────────────────────────────────────
         // Net Payable = Successful Online Advances - Applicable Gateway Charges - Applicable Gateway Taxes
         const totalGatewayDeductions = totalGatewayCharges + totalGatewayTaxes;
         const totalNetPayableFromPillora = Math.max(0, onlineAdvanceGross - totalGatewayDeductions);
         // Calculate settlement status breakdown for all online advances of this hospital
         const allOnlineAdvances = yield Payment_1.default.find({
-            hospitalId,
+            $or: [
+                { hospitalId },
+                { hospitalId: hospitalId.toString() }
+            ],
             status: { $in: ['completed', 'paid'] },
-            paymentSource: 'pillora_online',
+            $and: [
+                {
+                    $or: [
+                        { paymentSource: 'pillora_online' },
+                        { paymentType: { $in: ['advance', 'advance_20'] } },
+                        { razorpayPaymentId: { $exists: true, $ne: '' } },
+                        { razorpayOrderId: { $exists: true, $ne: '' } },
+                        { mode: 'online' }
+                    ]
+                }
+            ],
             createdAt: { $gte: start, $lte: end }
         }).lean();
         let pendingSettlement = 0;
@@ -190,6 +233,10 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
             else if (['Settled', 'Settlement Completed'].includes(st)) {
                 alreadySettled += net;
             }
+        }
+        // Fallback for pending settlement if payments list is empty but gross advance exists
+        if (pendingSettlement === 0 && processingSettlement === 0 && alreadySettled === 0 && totalNetPayableFromPillora > 0) {
+            pendingSettlement = totalNetPayableFromPillora;
         }
         // ── Additional Indicators ───────────────────────────────────────────────
         // Total Patient Collections = Pillora Gross Advances + Clinic Cash Collections + Clinic Online Collections
@@ -215,7 +262,12 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
             if (!dailyMap[d])
                 dailyMap[d] = { date: d, consultationFees: 0, onlineAdvance: 0, clinicCash: 0, clinicOnline: 0 };
             const amt = p.amount || 0;
-            if (p.paymentSource === 'pillora_online') {
+            const isOnline = p.paymentSource === 'pillora_online' ||
+                p.paymentType === 'advance' ||
+                p.paymentType === 'advance_20' ||
+                Boolean(p.razorpayPaymentId || p.razorpayOrderId) ||
+                p.mode === 'online';
+            if (isOnline) {
                 dailyMap[d].onlineAdvance += amt;
             }
             else if (p.paymentMethod === 'cash' || p.mode === 'offline') {
@@ -226,9 +278,21 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
             }
         }
         const timeSeries = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
-        res.status(200).json({
+        const responsePayload = {
             success: true,
             dateRange: { filter: dateFilter, start, end },
+            cards: {
+                totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
+                grossOnlineAdvances: Math.round(onlineAdvanceGross * 100) / 100,
+                payableFromPillora: {
+                    netPayable: Math.round(totalNetPayableFromPillora * 100) / 100,
+                    pendingSettlement: Math.round(pendingSettlement * 100) / 100,
+                    processing: Math.round(processingSettlement * 100) / 100,
+                    alreadySettled: Math.round(alreadySettled * 100) / 100
+                },
+                cashAtClinic: Math.round(clinicCashCollections * 100) / 100,
+                onlineAtClinic: Math.round(clinicOnlineCollections * 100) / 100
+            },
             primaryCards: {
                 totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
                 onlineAdvanceViaPillora: {
@@ -264,7 +328,8 @@ const getHospitalFinancialOverview = (req, res) => __awaiter(void 0, void 0, voi
                 equationHolds: Math.abs((totalPatientCollections + pendingPatientCollection) - totalConsultationFees) < 1
             },
             timeSeries
-        });
+        };
+        res.status(200).json(responsePayload);
     }
     catch (error) {
         console.error('[GetHospitalFinancialOverviewError]', error.message || error);
@@ -285,10 +350,18 @@ const getHospitalPaymentRecords = (req, res) => __awaiter(void 0, void 0, void 0
             return;
         }
         const hospitalId = hospital._id;
-        const { dateFilter = 'all', customStart, customEnd, paymentMethod, paymentStatus, settlementStatus, doctorId, patientName, search, page = 1, limit = 20, exportFormat } = req.query;
+        const dateFilter = (req.query.period || req.query.dateFilter || 'all');
+        const customStart = (req.query.startDate || req.query.customStart);
+        const customEnd = (req.query.endDate || req.query.customEnd);
+        const { paymentMethod, paymentStatus, settlementStatus, doctorId, patientName, search, page = 1, limit = 20, exportFormat } = req.query;
         const { start, end } = (0, exports.resolveDateRange)(String(dateFilter), customStart ? String(customStart) : undefined, customEnd ? String(customEnd) : undefined);
         // Build appointment match filter
-        const query = { hospital: hospitalId };
+        const query = {
+            $or: [
+                { hospital: hospitalId },
+                { hospital: hospitalId.toString() }
+            ]
+        };
         if (dateFilter !== 'all') {
             query.$or = [
                 { slotTime: { $gte: start, $lte: end } },
