@@ -627,7 +627,12 @@ export const getHospitalSettlementsDashboard = async (req: AuthRequest, res: Res
         // Today's Online Collection
         const todayPayments = await Payment.find({
             hospitalId: hospital._id,
-            status: 'completed',
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
             createdAt: { $gte: startOfToday, $lte: endOfToday }
         });
 
@@ -639,8 +644,13 @@ export const getHospitalSettlementsDashboard = async (req: AuthRequest, res: Res
         // Pending Settlement Amount
         const pendingPayments = await Payment.find({
             hospitalId: hospital._id,
-            status: 'completed',
-            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
         });
 
         let pendingSettlementAmount = 0;
@@ -706,8 +716,13 @@ export const getHospitalExpectedSettlement = async (req: AuthRequest, res: Respo
 
         const pendingPayments = await Payment.find({
             hospitalId: hospital._id,
-            status: 'completed',
-            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
         });
 
         let grossCollection = 0;

@@ -579,7 +579,12 @@ const getHospitalSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, 
         // Today's Online Collection
         const todayPayments = yield Payment_1.default.find({
             hospitalId: hospital._id,
-            status: 'completed',
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
             createdAt: { $gte: startOfToday, $lte: endOfToday }
         });
         let todayOnlineCollection = 0;
@@ -589,8 +594,13 @@ const getHospitalSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, 
         // Pending Settlement Amount
         const pendingPayments = yield Payment_1.default.find({
             hospitalId: hospital._id,
-            status: 'completed',
-            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
         });
         let pendingSettlementAmount = 0;
         let earliestPendingDate = null;
@@ -649,8 +659,13 @@ const getHospitalExpectedSettlement = (req, res) => __awaiter(void 0, void 0, vo
         }
         const pendingPayments = yield Payment_1.default.find({
             hospitalId: hospital._id,
-            status: 'completed',
-            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+            status: { $in: ['completed', 'paid'] },
+            $or: [
+                { paymentSource: 'pillora_online' },
+                { razorpayPaymentId: { $exists: true, $ne: '' } },
+                { mode: 'online' }
+            ],
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
         });
         let grossCollection = 0;
         for (const p of pendingPayments) {
