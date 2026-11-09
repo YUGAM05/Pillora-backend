@@ -927,8 +927,8 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
             if (isOnlineAdvance) {
                 onlineAdvanceCount++;
                 grossOnlineAdvances += amt;
-                const c = p.gatewayCharges || (amt * 0.02);
-                const t = p.gatewayTaxes || (c * 0.18);
+                const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
+                const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
                 gatewayCharges += c;
                 gatewayTaxes += t;
             } else if (p.paymentMethod === 'cash' || p.mode === 'offline') {
@@ -939,9 +939,26 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         }
 
         const totalGatewayDeductions = gatewayCharges + gatewayTaxes;
-        const netPayable = Math.max(0, grossOnlineAdvances - totalGatewayDeductions);
+        const totalNetAdvances = Math.max(0, grossOnlineAdvances - totalGatewayDeductions);
 
         let alreadySettled = 0;
+        let awaitingConfirmation = 0;
+        const settledPaymentIdSet = new Set<string>();
+
+        for (const s of settlements) {
+            if (s.status === 'Settlement Completed') {
+                alreadySettled += (s.netAmount || 0);
+                if (Array.isArray(s.paymentIds)) {
+                    s.paymentIds.forEach((pid: any) => settledPaymentIdSet.add(String(pid)));
+                }
+            } else if (s.status === 'Awaiting Hospital Confirmation') {
+                awaitingConfirmation += (s.netAmount || 0);
+                if (Array.isArray(s.paymentIds)) {
+                    s.paymentIds.forEach((pid: any) => settledPaymentIdSet.add(String(pid)));
+                }
+            }
+        }
+
         let pendingSettlement = 0;
 
         for (const p of payments) {
@@ -950,18 +967,36 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
                                     p.mode === 'online';
 
             if (isOnlineAdvance) {
-                const amt = p.amount || 0;
-                const c = p.gatewayCharges || (amt * 0.02);
-                const t = p.gatewayTaxes || (c * 0.18);
-                const net = Math.max(0, amt - c - t);
+                const isAlreadyHandled = settledPaymentIdSet.has(String(p._id)) || 
+                                         ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation'].includes(p.settlementStatus);
 
-                if (['Settled', 'Settlement Completed'].includes(p.settlementStatus)) {
-                    alreadySettled += net;
-                } else if (!['refunded', 'not_applicable'].includes(p.settlementStatus)) {
+                if (!isAlreadyHandled && !['refunded', 'not_applicable'].includes(p.settlementStatus)) {
+                    const amt = p.amount || 0;
+                    const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
+                    const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
+                    const net = Math.max(0, amt - (c + t));
                     pendingSettlement += net;
                 }
             }
         }
+
+        // Fallback for alreadySettled if settlements collection had no records but payments are marked Settled
+        if (alreadySettled === 0) {
+            for (const p of payments) {
+                const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
+                                        (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
+                                        p.mode === 'online';
+                if (isOnlineAdvance && ['Settled', 'Settlement Completed'].includes(p.settlementStatus)) {
+                    const amt = p.amount || 0;
+                    const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
+                    const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
+                    alreadySettled += Math.max(0, amt - (c + t));
+                }
+            }
+        }
+
+        // Net Amount Pillora Has to Pay is the outstanding pending settlement
+        const netPayable = Math.max(0, pendingSettlement);
 
         const totalPatientCollections = grossOnlineAdvances + cashAtClinic + onlineAtClinic;
         const pendingPatientCollection = Math.max(0, totalConsultationFees - totalPatientCollections);
@@ -981,12 +1016,14 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
                 onlineAdvanceCount,
                 grossOnlineAdvances: Math.round(grossOnlineAdvances * 100) / 100,
                 gatewayCharges: Math.round(totalGatewayDeductions * 100) / 100,
+                totalNetAdvances: Math.round(totalNetAdvances * 100) / 100,
                 netPayable: Math.round(netPayable * 100) / 100,
                 cashAtClinic: Math.round(cashAtClinic * 100) / 100,
                 onlineAtClinic: Math.round(onlineAtClinic * 100) / 100,
                 totalPatientCollections: Math.round(totalPatientCollections * 100) / 100,
                 pendingPatientCollection: Math.round(pendingPatientCollection * 100) / 100,
                 alreadySettled: Math.round(alreadySettled * 100) / 100,
+                awaitingConfirmation: Math.round(awaitingConfirmation * 100) / 100,
                 pendingSettlement: Math.round(pendingSettlement * 100) / 100
             },
             recentTransactions: payments.slice(0, 50),
@@ -1037,25 +1074,58 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             let gatewayCharges = 0;
             let alreadySettled = 0;
             let pendingSettlement = 0;
+            let awaitingConfirmation = 0;
             let earliestPendingDate: Date | null = null;
+
+            // Fetch hospital settlement records for exact settled amounts
+            const hospSettlements = await Settlement.find({ hospitalId: hosp._id }).lean();
+            const settledPaymentIdSet = new Set<string>();
+
+            for (const s of hospSettlements) {
+                if (s.status === 'Settlement Completed') {
+                    alreadySettled += (s.netAmount || 0);
+                    if (Array.isArray(s.paymentIds)) {
+                        s.paymentIds.forEach((pid: any) => settledPaymentIdSet.add(String(pid)));
+                    }
+                } else if (s.status === 'Awaiting Hospital Confirmation') {
+                    awaitingConfirmation += (s.netAmount || 0);
+                    if (Array.isArray(s.paymentIds)) {
+                        s.paymentIds.forEach((pid: any) => settledPaymentIdSet.add(String(pid)));
+                    }
+                }
+            }
 
             for (const p of payments) {
                 const amt = p.amount || 0;
                 grossAdvances += amt;
-                const charge = p.gatewayCharges || (amt * 0.02);
-                const tax = p.gatewayTaxes || (charge * 0.18);
+                const charge = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
+                const tax = p.gatewayTaxes || Math.round(charge * 0.18 * 100) / 100;
                 const totalDeduction = charge + tax;
                 gatewayCharges += totalDeduction;
 
                 const net = Math.max(0, amt - totalDeduction);
                 const st = p.settlementStatus || 'Pending';
 
-                if (['Settled', 'Settlement Completed'].includes(st)) {
-                    alreadySettled += net;
-                } else if (!['refunded', 'not_applicable'].includes(st)) {
+                const isAlreadyHandled = settledPaymentIdSet.has(String(p._id)) || 
+                                         ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation'].includes(st);
+
+                if (!isAlreadyHandled && !['refunded', 'not_applicable'].includes(st)) {
                     pendingSettlement += net;
                     if (!earliestPendingDate || p.createdAt < earliestPendingDate) {
                         earliestPendingDate = p.createdAt;
+                    }
+                }
+            }
+
+            // Fallback for alreadySettled if settlements collection had no records but payments are marked Settled
+            if (alreadySettled === 0) {
+                for (const p of payments) {
+                    const st = p.settlementStatus || 'Pending';
+                    if (['Settled', 'Settlement Completed'].includes(st)) {
+                        const amt = p.amount || 0;
+                        const charge = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
+                        const tax = p.gatewayTaxes || Math.round(charge * 0.18 * 100) / 100;
+                        alreadySettled += Math.max(0, amt - (charge + tax));
                     }
                 }
             }
@@ -1066,7 +1136,7 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             const latestSettlement = await Settlement.findOne({ hospitalId: hosp._id }).sort({ createdAt: -1 }).lean();
 
             let calculatedStatus = 'Pending';
-            if (latestSettlement?.status === 'Awaiting Hospital Confirmation') {
+            if (latestSettlement?.status === 'Awaiting Hospital Confirmation' || awaitingConfirmation > 0) {
                 calculatedStatus = 'Awaiting Hospital Confirmation';
             } else if (pendingSettlement === 0 && alreadySettled > 0) {
                 calculatedStatus = 'Settled';
@@ -1318,7 +1388,7 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
             end.setHours(23, 59, 59, 999);
         }
 
-        // Find all online advances within this date range that are not already Settlement Completed
+        // Find all online advances within this date range that are not already settled or awaiting confirmation
         const query: any = {
             hospitalId: hospital._id,
             status: { $in: ['completed', 'paid'] },
@@ -1328,7 +1398,7 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
                 { mode: 'online' }
             ],
             createdAt: { $gte: start, $lte: end },
-            settlementStatus: { $ne: 'Settlement Completed' }
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
         };
 
         const payments = await Payment.find(query)
@@ -1441,13 +1511,13 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
             end.setHours(23, 59, 59, 999);
         }
 
-        // Query eligible payments
+        // Query eligible payments (excluding already settled or awaiting confirmation)
         let eligiblePayments: any[] = [];
         if (Array.isArray(paymentIds) && paymentIds.length > 0) {
             eligiblePayments = await Payment.find({
                 _id: { $in: paymentIds },
                 hospitalId: hospital._id,
-                settlementStatus: { $ne: 'Settlement Completed' }
+                settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
             });
         } else {
             eligiblePayments = await Payment.find({
@@ -1459,7 +1529,7 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
                     { mode: 'online' }
                 ],
                 createdAt: { $gte: start, $lte: end },
-                settlementStatus: { $ne: 'Settlement Completed' }
+                settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
             });
         }
 

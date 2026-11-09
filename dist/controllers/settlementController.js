@@ -600,7 +600,7 @@ const getHospitalSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, 
                 { razorpayPaymentId: { $exists: true, $ne: '' } },
                 { mode: 'online' }
             ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
         });
         let pendingSettlementAmount = 0;
         let earliestPendingDate = null;
@@ -665,7 +665,7 @@ const getHospitalExpectedSettlement = (req, res) => __awaiter(void 0, void 0, vo
                 { razorpayPaymentId: { $exists: true, $ne: '' } },
                 { mode: 'online' }
             ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
         });
         let grossCollection = 0;
         for (const p of pendingPayments) {

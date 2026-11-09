@@ -650,7 +650,7 @@ export const getHospitalSettlementsDashboard = async (req: AuthRequest, res: Res
                 { razorpayPaymentId: { $exists: true, $ne: '' } },
                 { mode: 'online' }
             ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
         });
 
         let pendingSettlementAmount = 0;
@@ -722,7 +722,7 @@ export const getHospitalExpectedSettlement = async (req: AuthRequest, res: Respo
                 { razorpayPaymentId: { $exists: true, $ne: '' } },
                 { mode: 'online' }
             ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'refunded', 'not_applicable'] }
+            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
         });
 
         let grossCollection = 0;
