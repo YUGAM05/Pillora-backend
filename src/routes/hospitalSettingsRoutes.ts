@@ -66,3 +66,4 @@ router.post('/support/tickets', createHospitalSupportTicket);
 router.post('/account/deactivate-request', requestAccountDeactivation);
 
 export default router;
+
