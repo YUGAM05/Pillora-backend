@@ -44,6 +44,10 @@ const UserSchema = new mongoose_1.Schema({
     profilePicture: { type: String }, // Profile picture URL from Google
     role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin', 'hospital'], default: 'customer' },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'approved' },
+    hospitalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', index: true },
+    hospitalStaffRole: { type: String, enum: ['owner', 'administrator', 'receptionist', 'doctor', 'accounts'], default: 'administrator' },
+    isActiveStaff: { type: Boolean, default: true },
+    lastLogin: { type: Date },
     isPasswordResetRequired: { type: Boolean, default: false },
     phone: { type: String },
     pharmacy_name: { type: String },

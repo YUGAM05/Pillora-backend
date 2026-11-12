@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IAuditLog extends Document {
     action: string;
     adminId?: mongoose.Types.ObjectId;
+    hospitalId?: mongoose.Types.ObjectId;
+    userId?: mongoose.Types.ObjectId;
     email?: string;
     ipAddress: string;
     details?: any;
@@ -13,6 +15,8 @@ export interface IAuditLog extends Document {
 const AuditLogSchema: Schema = new Schema({
     action: { type: String, required: true },
     adminId: { type: Schema.Types.ObjectId, ref: 'User' },
+    hospitalId: { type: Schema.Types.ObjectId, ref: 'Hospital', index: true },
+    userId: { type: Schema.Types.ObjectId, ref: 'User' },
     email: { type: String },
     ipAddress: { type: String, required: true },
     details: { type: Schema.Types.Mixed },

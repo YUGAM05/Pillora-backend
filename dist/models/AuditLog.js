@@ -37,6 +37,8 @@ const mongoose_1 = __importStar(require("mongoose"));
 const AuditLogSchema = new mongoose_1.Schema({
     action: { type: String, required: true },
     adminId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    hospitalId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Hospital', index: true },
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     email: { type: String },
     ipAddress: { type: String, required: true },
     details: { type: mongoose_1.Schema.Types.Mixed },

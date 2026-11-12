@@ -10,6 +10,25 @@ const supportTicketSchema = new mongoose_1.default.Schema({
         ref: 'User',
         required: false
     },
+    hospitalId: {
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'Hospital',
+        required: false,
+        index: true
+    },
+    category: {
+        type: String,
+        default: 'General Support'
+    },
+    priority: {
+        type: String,
+        enum: ['Low', 'Medium', 'High', 'Urgent'],
+        default: 'Medium'
+    },
+    attachmentUrl: {
+        type: String,
+        default: ''
+    },
     guestName: {
         type: String,
         trim: true

@@ -278,6 +278,11 @@ const hospitalDashboardRoutes = require('./routes/hospitalDashboardRoutes').defa
 app.use('/api/hospital/dashboard', hospitalDashboardRoutes);
 console.log('=== HOSPITAL DASHBOARD ROUTES LOADED ===');
 
+console.log('=== HOSPITAL SETTINGS ROUTES LOADING ===');
+const hospitalSettingsRoutes = require('./routes/hospitalSettingsRoutes').default || require('./routes/hospitalSettingsRoutes');
+app.use('/api/hospital/settings', hospitalSettingsRoutes);
+console.log('=== HOSPITAL SETTINGS ROUTES LOADED ===');
+
 console.log('=== PAYMENT ROUTES LOADING ===');
 const paymentRoutes = require('./routes/paymentRoutes').default || require('./routes/paymentRoutes');
 app.use('/api/payments', paymentRoutes);

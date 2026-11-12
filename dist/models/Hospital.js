@@ -57,6 +57,15 @@ const HospitalSchema = new mongoose_1.Schema({
     phoneNumbers: [{ type: String }],
     description: { type: String },
     rating: { type: Number, default: 0 },
+    registrationNumber: { type: String, default: '' },
+    state: { type: String, default: '' },
+    pincode: { type: String, default: '' },
+    website: { type: String, default: '' },
+    operatingHours: { type: String, default: '09:00 AM - 08:00 PM' },
+    location: {
+        lat: { type: Number, default: 23.0225 },
+        lng: { type: Number, default: 72.5714 }
+    },
     doctors: [DoctorSchema],
     management_type: { type: String, enum: ['SELF', 'PILLORA'], default: 'SELF' },
     is_verified: { type: Boolean, default: false },
