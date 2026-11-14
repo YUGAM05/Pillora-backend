@@ -48,6 +48,8 @@ router.patch('/appointments/:id/payment-status', authMiddleware_1.protect, hospi
 router.get('/financial/overview', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.getHospitalFinancialOverview);
 router.get('/financial/appointments', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.getHospitalPaymentRecords);
 router.post('/appointments/:id/collect-balance', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.collectClinicBalance);
+router.put('/appointments/:id/financial-edit', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.editAppointmentPaymentRecord);
+router.get('/appointments/:id/payment-history', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, financialController_1.getAppointmentPaymentHistory);
 // Hospital Subscription & 30-Day Cycle Details
 router.get('/subscription', authMiddleware_1.protect, hospitalMiddleware_1.isHospital, hospitalMiddleware_1.attachHospital, hospitalDashboardController_1.getHospitalSubscription);
 // Follow-Up Reminder routes (Walk-in & Online Modes)

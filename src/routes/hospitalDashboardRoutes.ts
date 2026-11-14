@@ -51,7 +51,9 @@ import {
 import {
     getHospitalFinancialOverview,
     getHospitalPaymentRecords,
-    collectClinicBalance
+    collectClinicBalance,
+    editAppointmentPaymentRecord,
+    getAppointmentPaymentHistory
 } from '../controllers/financialController';
 
 const router = express.Router();
@@ -99,6 +101,8 @@ router.patch('/appointments/:id/payment-status', protect, isHospital, attachHosp
 router.get('/financial/overview', protect, isHospital, attachHospital, getHospitalFinancialOverview);
 router.get('/financial/appointments', protect, isHospital, attachHospital, getHospitalPaymentRecords);
 router.post('/appointments/:id/collect-balance', protect, isHospital, attachHospital, collectClinicBalance);
+router.put('/appointments/:id/financial-edit', protect, isHospital, attachHospital, editAppointmentPaymentRecord);
+router.get('/appointments/:id/payment-history', protect, isHospital, attachHospital, getAppointmentPaymentHistory);
 
 // Hospital Subscription & 30-Day Cycle Details
 router.get('/subscription', protect, isHospital, attachHospital, getHospitalSubscription);

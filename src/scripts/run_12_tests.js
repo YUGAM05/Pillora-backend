@@ -9,7 +9,7 @@ const {
   aggregateFinancialRecords,
   isOnlineAdvancePayment,
   normalizeSettlementStatus
-} = require('../../dist/utils/financialCalculator');
+} = require('../utils/financialCalculator');
 
 console.log('=== RUNNING FINANCIAL AUDIT & RECONCILIATION REGRESSION TESTS ===\n');
 

@@ -51,6 +51,7 @@ export interface ProcessedAppointmentRecord {
     transactionDate?: Date | string;
     transactions: Array<{
         transactionId: string;
+        paymentId?: string;
         amount: number;
         type: string;
         source: string;
@@ -58,6 +59,7 @@ export interface ProcessedAppointmentRecord {
         status: string;
         settlementStatus?: string;
         date: Date | string;
+        notes?: string;
     }>;
 }
 
@@ -403,13 +405,15 @@ export const processAppointmentFinancialRecord = (app: any, payments: any[] = []
         transactionDate,
         transactions: completedPayments.map((p: any) => ({
             transactionId: p.transactionId || `TXN-${p._id}`,
+            paymentId: p._id ? p._id.toString() : undefined,
             amount: p.amount,
             type: p.paymentType,
             source: p.paymentSource,
             method: p.paymentMethod,
             status: p.status,
             settlementStatus: p.settlementStatus,
-            date: p.createdAt
+            date: p.createdAt,
+            notes: p.notes
         }))
     };
 };

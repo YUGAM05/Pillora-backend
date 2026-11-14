@@ -8,6 +8,8 @@ import Refund from '../models/Refund';
 import Doctor from '../models/Doctor';
 import User from '../models/User';
 import Notification from '../models/Notification';
+import AuditLog from '../models/AuditLog';
+import PaymentModificationLog from '../models/PaymentModificationLog';
 import { decrypt, encrypt } from '../utils/cryptoHelper';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
@@ -435,6 +437,404 @@ export const collectClinicBalance = async (req: AuthRequest, res: Response): Pro
     } catch (error: any) {
         console.error('[CollectClinicBalanceError]', error.message || error);
         res.status(500).json({ error: 'Failed to record balance collection', details: error.message });
+    }
+};
+
+/**
+ * @desc    Edit Appointment Payment & Collection Details (with strict audit trail)
+ * @route   PUT /api/hospital/dashboard/appointments/:id/financial-edit
+ * @access  Private/Hospital
+ */
+export const editAppointmentPaymentRecord = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        if (!hospital?._id) {
+            res.status(401).json({ error: 'Hospital not authenticated' });
+            return;
+        }
+
+        const { id } = req.params;
+        const {
+            reason,
+            patientName,
+            doctorId,
+            consultationFee,
+            paymentId,
+            paymentAmount,
+            paymentMethod,
+            paymentDate,
+            transactionReference,
+            notes
+        } = req.body;
+
+        // 1. Mandatory reason check
+        if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
+            res.status(400).json({ error: 'A mandatory reason for modification is required (minimum 3 characters).' });
+            return;
+        }
+
+        // 2. Fetch appointment and verify hospital ownership
+        const appointment = await Appointment.findById(id).populate('doctor');
+        if (!appointment) {
+            res.status(404).json({ error: 'Appointment not found' });
+            return;
+        }
+
+        if (appointment.hospital.toString() !== hospital._id.toString()) {
+            res.status(403).json({ error: 'Unauthorized: Appointment does not belong to your hospital.' });
+            return;
+        }
+
+        // 3. Fetch all completed payments for this appointment
+        const existingPayments = await Payment.find({ appointmentId: appointment._id }).sort({ createdAt: 1 });
+
+        // Capture previous values snapshot
+        const previousSnapshot: any = {
+            patientName: appointment.patientName,
+            doctorId: appointment.doctor ? (appointment.doctor as any)._id?.toString() : undefined,
+            doctorName: appointment.doctorName || (appointment.doctor as any)?.name,
+            consultationFee: appointment.consultationFee,
+            advancePaid: appointment.advancePaid,
+            balancePaid: appointment.balancePaid,
+            balanceDue: appointment.balanceDue,
+            paymentStatus: appointment.paymentStatus
+        };
+
+        const changes: Array<{ field: string; label: string; oldValue: any; newValue: any }> = [];
+
+        // 4. Update Appointment fields if provided
+        if (patientName !== undefined && patientName.trim() && patientName.trim() !== appointment.patientName) {
+            changes.push({
+                field: 'patientName',
+                label: 'Patient Name',
+                oldValue: appointment.patientName,
+                newValue: patientName.trim()
+            });
+            appointment.patientName = patientName.trim();
+        }
+
+        if (doctorId !== undefined && doctorId) {
+            const currentDocId = appointment.doctor ? (appointment.doctor as any)._id?.toString() : '';
+            if (doctorId.toString() !== currentDocId) {
+                const targetDoctor = await Doctor.findById(doctorId);
+                if (targetDoctor) {
+                    changes.push({
+                        field: 'doctorId',
+                        label: 'Doctor',
+                        oldValue: appointment.doctorName || (appointment.doctor as any)?.name || 'Unassigned',
+                        newValue: targetDoctor.name
+                    });
+                    appointment.doctor = targetDoctor._id as any;
+                    appointment.doctorName = targetDoctor.name;
+                }
+            }
+        }
+
+        if (consultationFee !== undefined && consultationFee !== null) {
+            const feeNum = Number(consultationFee);
+            if (isNaN(feeNum) || feeNum < 0) {
+                res.status(400).json({ error: 'Consultation fee must be a non-negative number' });
+                return;
+            }
+            if (feeNum !== appointment.consultationFee) {
+                changes.push({
+                    field: 'consultationFee',
+                    label: 'Consultation Fee',
+                    oldValue: appointment.consultationFee,
+                    newValue: feeNum
+                });
+                appointment.consultationFee = feeNum;
+            }
+        }
+
+        // 5. Update or create Payment record
+        let targetPayment: any = null;
+        if (paymentId) {
+            targetPayment = existingPayments.find(p => p._id.toString() === paymentId.toString());
+        } else {
+            // Find clinic collection payment by default
+            targetPayment = existingPayments.find(p => p.paymentSource === 'clinic_collection');
+        }
+
+        // Security check: Never allow hospital users to modify settled transactions or Razorpay payment records
+        if (targetPayment) {
+            const isSettled = targetPayment.settlementStatus === 'Settled' || targetPayment.settlementStatus === 'Settlement Completed';
+            const isRazorpay = isOnlineAdvancePayment(targetPayment);
+
+            if (isSettled && isRazorpay) {
+                if (paymentAmount !== undefined && Number(paymentAmount) !== targetPayment.amount) {
+                    res.status(403).json({
+                        error: 'Settled online advance transactions are locked and cannot be directly modified. Original Razorpay collections are immutable.'
+                    });
+                    return;
+                }
+            }
+
+            // Save previous payment snapshot
+            previousSnapshot.paymentId = targetPayment._id.toString();
+            previousSnapshot.paymentAmount = targetPayment.amount;
+            previousSnapshot.paymentMethod = targetPayment.paymentMethod;
+            previousSnapshot.paymentDate = targetPayment.createdAt;
+            previousSnapshot.transactionReference = targetPayment.transactionId;
+            previousSnapshot.notes = targetPayment.notes;
+
+            // Apply payment amount change
+            if (paymentAmount !== undefined && paymentAmount !== null) {
+                const amtNum = Number(paymentAmount);
+                if (isNaN(amtNum) || amtNum < 0) {
+                    res.status(400).json({ error: 'Payment amount must be a non-negative number' });
+                    return;
+                }
+                if (amtNum !== targetPayment.amount) {
+                    changes.push({
+                        field: 'paymentAmount',
+                        label: 'Payment Amount',
+                        oldValue: targetPayment.amount,
+                        newValue: amtNum
+                    });
+                    targetPayment.amount = amtNum;
+                    targetPayment.amountInPaise = Math.round(amtNum * 100);
+                }
+            }
+
+            // Apply payment method change
+            if (paymentMethod !== undefined && paymentMethod && !isRazorpay) {
+                const validMethods = ['cash', 'upi', 'card', 'qr', 'other_online'];
+                if (!validMethods.includes(paymentMethod)) {
+                    res.status(400).json({ error: `Invalid payment method. Must be one of: ${validMethods.join(', ')}` });
+                    return;
+                }
+                const normalizedMethod = paymentMethod === 'qr' ? 'upi' : paymentMethod;
+                if (normalizedMethod !== targetPayment.paymentMethod) {
+                    changes.push({
+                        field: 'paymentMethod',
+                        label: 'Payment Method',
+                        oldValue: targetPayment.paymentMethod,
+                        newValue: normalizedMethod
+                    });
+                    targetPayment.paymentMethod = normalizedMethod;
+                    targetPayment.mode = normalizedMethod === 'cash' ? 'offline' : 'online';
+                }
+            }
+
+            // Apply payment date change
+            if (paymentDate && !isRazorpay) {
+                const newDate = new Date(paymentDate);
+                if (!isNaN(newDate.getTime())) {
+                    changes.push({
+                        field: 'paymentDate',
+                        label: 'Payment Date',
+                        oldValue: targetPayment.createdAt,
+                        newValue: newDate
+                    });
+                    targetPayment.createdAt = newDate;
+                }
+            }
+
+            // Apply transaction reference change (never overwrite razorpayPaymentId)
+            if (transactionReference !== undefined && !isRazorpay) {
+                changes.push({
+                    field: 'transactionReference',
+                    label: 'Transaction Reference',
+                    oldValue: targetPayment.transactionId,
+                    newValue: transactionReference.trim()
+                });
+                targetPayment.transactionId = transactionReference.trim() || targetPayment.transactionId;
+            }
+
+            // Apply notes
+            if (notes !== undefined) {
+                changes.push({
+                    field: 'notes',
+                    label: 'Collection Notes',
+                    oldValue: targetPayment.notes,
+                    newValue: notes.trim()
+                });
+                targetPayment.notes = notes.trim();
+            }
+
+            await targetPayment.save();
+        } else if (paymentAmount !== undefined && Number(paymentAmount) > 0) {
+            // No clinic payment existed, create one
+            const amtNum = Number(paymentAmount);
+            const validMethods = ['cash', 'upi', 'card', 'qr', 'other_online'];
+            const chosenMethod = validMethods.includes(paymentMethod) ? (paymentMethod === 'qr' ? 'upi' : paymentMethod) : 'cash';
+
+            targetPayment = new Payment({
+                appointmentId: appointment._id,
+                hospitalId: hospital._id,
+                userId: appointment.patient,
+                patientName: appointment.patientName || 'Patient',
+                amount: amtNum,
+                amountInPaise: Math.round(amtNum * 100),
+                consultationFee: appointment.consultationFee,
+                paymentType: (appointment.advancePaid && appointment.advancePaid > 0) ? 'balance' : 'full',
+                paymentSource: 'clinic_collection',
+                paymentMethod: chosenMethod,
+                mode: chosenMethod === 'cash' ? 'offline' : 'online',
+                status: 'completed',
+                settlementStatus: 'not_applicable',
+                recordedBy: req.user?._id,
+                transactionId: transactionReference ? transactionReference.trim() : `TXN-CLI-${Date.now()}`,
+                notes: notes || `Clinic collection recorded on ${new Date().toLocaleDateString()}`
+            });
+            await targetPayment.save();
+
+            changes.push({
+                field: 'clinicCollection',
+                label: 'New Clinic Collection Added',
+                oldValue: 0,
+                newValue: amtNum
+            });
+        }
+
+        // 6. Recalculate Appointment Totals using single source of truth
+        const allCompletedPayments = await Payment.find({
+            appointmentId: appointment._id,
+            status: { $in: ['completed', 'paid'] }
+        });
+
+        let newAdvancePaid = 0;
+        let newClinicBalancePaid = 0;
+
+        for (const p of allCompletedPayments) {
+            if (isOnlineAdvancePayment(p)) {
+                newAdvancePaid += Number(p.amount || 0);
+            } else {
+                newClinicBalancePaid += Number(p.amount || 0);
+            }
+        }
+
+        const fee = Number(appointment.consultationFee || 500);
+        const newBalanceDue = Math.max(0, fee - newAdvancePaid - newClinicBalancePaid);
+
+        let newPaymentStatus: 'paid' | 'partial' | 'unpaid' = 'unpaid';
+        if (newBalanceDue === 0 && (newAdvancePaid > 0 || newClinicBalancePaid > 0)) {
+            newPaymentStatus = 'paid';
+        } else if (newAdvancePaid > 0 || newClinicBalancePaid > 0) {
+            newPaymentStatus = 'partial';
+        }
+
+        appointment.advancePaid = newAdvancePaid;
+        appointment.balancePaid = newClinicBalancePaid;
+        appointment.balanceDue = newBalanceDue;
+        appointment.paymentStatus = newPaymentStatus;
+        appointment.paymentUpdatedAt = new Date();
+        appointment.paymentUpdatedBy = req.user?._id;
+
+        await appointment.save();
+
+        // 7. Create immutable PaymentModificationLog
+        const updatedSnapshot: any = {
+            patientName: appointment.patientName,
+            doctorId: appointment.doctor ? (appointment.doctor as any)._id?.toString() : undefined,
+            doctorName: appointment.doctorName,
+            consultationFee: appointment.consultationFee,
+            advancePaid: appointment.advancePaid,
+            balancePaid: appointment.balancePaid,
+            balanceDue: appointment.balanceDue,
+            paymentStatus: appointment.paymentStatus,
+            paymentId: targetPayment ? targetPayment._id.toString() : undefined,
+            paymentAmount: targetPayment ? targetPayment.amount : undefined,
+            paymentMethod: targetPayment ? targetPayment.paymentMethod : undefined,
+            notes: targetPayment ? targetPayment.notes : undefined
+        };
+
+        const auditLogEntry = new PaymentModificationLog({
+            appointmentId: appointment._id,
+            paymentId: targetPayment?._id,
+            hospitalId: hospital._id,
+            modifiedBy: req.user?._id,
+            modifierName: req.user?.name || hospital.name || 'Hospital Staff',
+            modifierRole: req.user?.role || 'hospital',
+            reason: reason.trim(),
+            previousValues: previousSnapshot,
+            updatedValues: updatedSnapshot,
+            changes,
+            ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+            userAgent: req.headers['user-agent'] || 'unknown'
+        });
+        await auditLogEntry.save();
+
+        // Also record to general AuditLog
+        try {
+            await AuditLog.create({
+                action: 'PAYMENT_MODIFICATION',
+                hospitalId: hospital._id,
+                userId: req.user?._id,
+                email: req.user?.email,
+                ipAddress: req.ip || 'unknown',
+                details: {
+                    appointmentId: appointment._id,
+                    paymentId: targetPayment?._id,
+                    reason: reason.trim(),
+                    changes
+                },
+                status: 'success'
+            });
+        } catch (auditErr) {
+            console.error('[AuditLogSaveWarning]', auditErr);
+        }
+
+        // 8. Return updated record processed by unified financial calculator
+        const populatedAppointment = await Appointment.findById(appointment._id)
+            .populate('doctor', 'name specialty fee')
+            .populate('patient', 'name phone email')
+            .lean();
+
+        const freshPayments = await Payment.find({ appointmentId: appointment._id }).lean();
+        const processedRecord = processAppointmentFinancialRecord(populatedAppointment, freshPayments);
+
+        res.status(200).json({
+            success: true,
+            message: 'Payment and collection details updated successfully.',
+            record: processedRecord,
+            auditLog: auditLogEntry
+        });
+    } catch (error: any) {
+        console.error('[EditAppointmentPaymentRecordError]', error.message || error);
+        res.status(500).json({ error: 'Failed to update payment record', details: error.message });
+    }
+};
+
+/**
+ * @desc    Get Payment Modification Audit History for an Appointment
+ * @route   GET /api/hospital/dashboard/appointments/:id/payment-history
+ * @access  Private/Hospital
+ */
+export const getAppointmentPaymentHistory = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        if (!hospital?._id) {
+            res.status(401).json({ error: 'Hospital not authenticated' });
+            return;
+        }
+
+        const { id } = req.params;
+        const appointment = await Appointment.findById(id).lean();
+        if (!appointment) {
+            res.status(404).json({ error: 'Appointment not found' });
+            return;
+        }
+
+        if (appointment.hospital.toString() !== hospital._id.toString()) {
+            res.status(403).json({ error: 'Unauthorized: Appointment does not belong to your hospital.' });
+            return;
+        }
+
+        const history = await PaymentModificationLog.find({ appointmentId: appointment._id })
+            .populate('modifiedBy', 'name email role')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        res.status(200).json({
+            success: true,
+            appointmentId: id,
+            history
+        });
+    } catch (error: any) {
+        console.error('[GetAppointmentPaymentHistoryError]', error.message || error);
+        res.status(500).json({ error: 'Failed to retrieve payment history', details: error.message });
     }
 };
 
