@@ -207,3 +207,22 @@ console.log('Test 12 details:', {
     diffAdvAndNetPlusGw: totalAdv - (totalNet + totalGw)
 });
 console.log('Test 12 [Financial Math Integrity Check]:', netReconciles ? 'PASS' : 'FAIL');
+// Case 13: Over-collection detection (Ami Clinic Nov 2026 Scenario)
+const case13App = processAppointmentFinancialRecord({ _id: '6aeece2e182d6617ab949036', consultationFee: 100, patientName: 'yugam' }, [
+    { amount: 20, paymentSource: 'pillora_online', paymentType: 'advance', status: 'completed', settlementStatus: 'Settled' },
+    { amount: 100, paymentSource: 'clinic_collection', paymentMethod: 'cash', mode: 'offline', status: 'completed' }
+]);
+console.log('Test 13 [Over-Collection Detection]:', case13App.consultationFee === 100 &&
+    case13App.advancePaid === 20 &&
+    case13App.balancePaid === 100 &&
+    case13App.totalCollected === 120 &&
+    case13App.overCollectionAmount === 20 &&
+    case13App.appointmentId === '6aeece2e182d6617ab949036' ? 'PASS' : 'FAIL');
+// Case 14: Card 3 Terminology & Outstanding Amount Formula
+const aggregateTest = aggregateFinancialRecords([case1, case2, case8, case13App]);
+const c3 = aggregateTest.primaryCards.payableFromPillora;
+const c3TitlePass = c3.title === 'Total Net Settlement';
+const c3OutstandingPass = c3.outstandingPayable === (c3.breakdown.pendingSettlement + c3.breakdown.processing);
+const c3ExcludesSettled = !c3.outstandingPayable.toString().includes(c3.breakdown.alreadySettled.toString()) || c3.breakdown.alreadySettled > 0;
+const overCollectionAggPass = aggregateTest.additionalIndicators.patientOverCollection === 20;
+console.log('Test 14 [Card 3 Title & Outstanding Formula]:', c3TitlePass && c3OutstandingPass && overCollectionAggPass ? 'PASS' : 'FAIL');

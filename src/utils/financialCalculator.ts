@@ -43,6 +43,8 @@ export interface ProcessedAppointmentRecord {
     balancePaid: number;
     clinicCashCollection: number;
     clinicOnlineCollection: number;
+    totalCollected: number;
+    overCollectionAmount: number;
     paymentStatus: CanonicalPaymentStatus;
     settlementStatus: CanonicalSettlementStatus;
     appointmentDate: Date | string;
@@ -64,7 +66,9 @@ export interface FinancialOverviewSummary {
         totalConsultationFees: number;
         grossOnlineAdvances: number;
         payableFromPillora: {
+            title: string;
             netPayable: number;
+            outstandingPayable: number;
             pendingSettlement: number;
             processing: number;
             alreadySettled: number;
@@ -80,7 +84,9 @@ export interface FinancialOverviewSummary {
             transactionCount: number;
         };
         payableFromPillora: {
+            title: string;
             netAmount: number;
+            outstandingPayable: number;
             breakdown: {
                 pendingSettlement: number;
                 processing: number;
@@ -102,14 +108,17 @@ export interface FinancialOverviewSummary {
         pilloraSettlementPending: number;
         totalSuccessfullySettled: number;
         totalGatewayCharges: number;
+        patientOverCollection: number;
     };
     reconciliation: {
         totalConsultationFees: number;
         totalPatientCollections: number;
         pendingPatientCollection: number;
+        patientOverCollection: number;
         totalNetAdvance: number;
         netSettlementSum: number;
         equationHolds: boolean;
+        overCollectionApptIds: string[];
     };
 }
 
@@ -354,6 +363,8 @@ export const processAppointmentFinancialRecord = (app: any, payments: any[] = []
     const advanceRequired = advancePaid > 0 ? advancePaid : (app.paymentSource === 'gateway' ? Math.round(consultationFee * 0.20) : 0);
     const balancePaid = Math.round((clinicCashCollection + clinicOnlineCollection) * 100) / 100;
     const balanceDue = Math.max(0, Math.round((consultationFee - advancePaid - balancePaid) * 100) / 100);
+    const totalCollected = Math.round((advancePaid + balancePaid) * 100) / 100;
+    const overCollectionAmount = Math.max(0, Math.round((totalCollected - consultationFee) * 100) / 100);
 
     // Canonical payment status
     let paymentStatus: CanonicalPaymentStatus = 'unpaid';
@@ -382,6 +393,8 @@ export const processAppointmentFinancialRecord = (app: any, payments: any[] = []
         netAdvancePayable,
         balanceDue,
         balancePaid,
+        totalCollected,
+        overCollectionAmount,
         clinicCashCollection,
         clinicOnlineCollection,
         paymentStatus,
@@ -418,6 +431,8 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
     let alreadySettled = 0;
     let failedSettlement = 0;
     let pendingPatientCollection = 0;
+    let totalOverCollection = 0;
+    const overCollectionApptIds: string[] = [];
 
     for (const r of records) {
         totalConsultationFees += r.consultationFee;
@@ -449,6 +464,11 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
         }
 
         pendingPatientCollection += r.balanceDue;
+
+        if (r.overCollectionAmount > 0) {
+            totalOverCollection += r.overCollectionAmount;
+            overCollectionApptIds.push(r.appointmentId);
+        }
     }
 
     // Precise rounding
@@ -462,9 +482,12 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
     alreadySettled = Math.round(alreadySettled * 100) / 100;
     failedSettlement = Math.round(failedSettlement * 100) / 100;
     pendingPatientCollection = Math.round(pendingPatientCollection * 100) / 100;
+    totalOverCollection = Math.round(totalOverCollection * 100) / 100;
 
-    // Net Payable from Pillora rule: Total Net Advance = Pending + Processing + Settled
+    // Total Net Settlement rule: Total Net Advance = Pending + Processing + Settled
     const totalNetPayable = Math.round((pendingSettlement + processingSettlement + alreadySettled) * 100) / 100;
+    // Outstanding Payable: Pending + Processing only (NEVER including Settled)
+    const outstandingPayable = Math.round((pendingSettlement + processingSettlement) * 100) / 100;
     const totalPatientCollections = Math.round((grossOnlineAdvances + cashAtClinic + onlineAtClinic) * 100) / 100;
 
     return {
@@ -472,7 +495,9 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
             totalConsultationFees,
             grossOnlineAdvances,
             payableFromPillora: {
+                title: 'Total Net Settlement',
                 netPayable: totalNetPayable,
+                outstandingPayable,
                 pendingSettlement,
                 processing: processingSettlement,
                 alreadySettled,
@@ -488,7 +513,9 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
                 transactionCount: onlineAdvanceCount
             },
             payableFromPillora: {
+                title: 'Total Net Settlement',
                 netAmount: totalNetPayable,
+                outstandingPayable,
                 breakdown: {
                     pendingSettlement,
                     processing: processingSettlement,
@@ -509,15 +536,18 @@ export const aggregateFinancialRecords = (records: ProcessedAppointmentRecord[])
             pendingPatientCollection,
             pilloraSettlementPending: pendingSettlement,
             totalSuccessfullySettled: alreadySettled,
-            totalGatewayCharges
+            totalGatewayCharges,
+            patientOverCollection: totalOverCollection
         },
         reconciliation: {
             totalConsultationFees,
             totalPatientCollections,
             pendingPatientCollection,
+            patientOverCollection: totalOverCollection,
             totalNetAdvance: totalNetPayable,
             netSettlementSum: Math.round((pendingSettlement + processingSettlement + alreadySettled) * 100) / 100,
-            equationHolds: Math.abs(totalNetPayable - (pendingSettlement + processingSettlement + alreadySettled)) < 0.01
+            equationHolds: Math.abs(totalPatientCollections - (totalConsultationFees - pendingPatientCollection + totalOverCollection)) < 0.01,
+            overCollectionApptIds
         }
     };
 };
