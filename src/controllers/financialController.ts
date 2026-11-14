@@ -12,6 +12,15 @@ import { decrypt, encrypt } from '../utils/cryptoHelper';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { AuthRequest } from '../middleware/authMiddleware';
+import {
+    calculateAdvanceGatewaySplit,
+    isOnlineAdvancePayment,
+    normalizeSettlementStatus,
+    resolveISTDateRange,
+    processAppointmentFinancialRecord,
+    aggregateFinancialRecords,
+    ProcessedAppointmentRecord
+} from '../utils/financialCalculator';
 
 /**
  * Helper to safely decrypt hospital bank details (handles encrypted or plain text)
@@ -37,67 +46,114 @@ const razorpay = new Razorpay({
  * Robust date-range resolution helper with Asia/Kolkata (IST) day bounds
  */
 export const resolveDateRange = (filter?: string, customStart?: string, customEnd?: string) => {
-    const now = new Date();
-    // Default to beginning of time if no filter
-    let start = new Date(0);
-    let end = new Date(now.getTime() + 86400000); // end of current day/future bounds
-
-    if (!filter || filter === 'all') {
-        return { start, end };
-    }
-
-    // Helper for IST midnight
-    const getISTDate = (d: Date) => {
-        const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-        return new Date(utc + (3600000 * 5.5)); // UTC + 5:30
-    };
-
-    if (filter === 'today') {
-        const ist = getISTDate(now);
-        start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(now);
-        end.setHours(23, 59, 59, 999);
-    } else if (filter === 'yesterday') {
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        start = new Date(yesterday);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(yesterday);
-        end.setHours(23, 59, 59, 999);
-    } else if (filter === 'week' || filter === 'this_week') {
-        const day = now.getDay();
-        const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
-        start = new Date(now);
-        start.setDate(diff);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(now);
-        end.setHours(23, 59, 59, 999);
-    } else if (filter === 'month' || filter === 'this_month') {
-        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        end = new Date(now);
-        end.setHours(23, 59, 59, 999);
-    } else if (filter === 'last_month') {
-        start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-    } else if (filter === 'custom' && customStart) {
-        start = new Date(customStart);
-        start.setHours(0, 0, 0, 0);
-        if (customEnd) {
-            end = new Date(customEnd);
-            end.setHours(23, 59, 59, 999);
-        } else {
-            end = new Date(now);
-            end.setHours(23, 59, 59, 999);
-        }
-    }
-
-    return { start, end };
+    return resolveISTDateRange(filter, customStart, customEnd);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  HOSPITAL DASHBOARD – PAYMENTS & COLLECTIONS
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Shared helper to fetch appointments, payments, and process canonical records for a hospital
+ */
+export const fetchHospitalFinancialData = async (hospitalId: any, filters: {
+    dateFilter?: string;
+    customStart?: string;
+    customEnd?: string;
+    doctorId?: string;
+    search?: string;
+    patientName?: string;
+    paymentMethod?: string;
+    paymentStatus?: string;
+    settlementStatus?: string;
+}) => {
+    const { start, end } = resolveISTDateRange(filters.dateFilter, filters.customStart, filters.customEnd);
+
+    const query: any = {
+        $or: [
+            { hospital: hospitalId },
+            { hospital: hospitalId.toString() }
+        ],
+        status: { $ne: 'cancelled' }
+    };
+
+    if (filters.dateFilter && filters.dateFilter !== 'all') {
+        query.$and = [
+            {
+                $or: [
+                    { slotTime: { $gte: start, $lte: end } },
+                    { createdAt: { $gte: start, $lte: end } }
+                ]
+            }
+        ];
+    }
+
+    if (filters.doctorId && filters.doctorId !== 'all') {
+        query.doctor = filters.doctorId;
+    }
+
+    if (filters.search) {
+        const searchRegex = new RegExp(String(filters.search).trim(), 'i');
+        const searchCond: any = {
+            $or: [
+                { patientName: searchRegex },
+                { patientPhone: searchRegex }
+            ]
+        };
+        const tokenNum = Number(filters.search);
+        if (!isNaN(tokenNum)) {
+            searchCond.$or.push({ tokenNumber: tokenNum });
+        }
+        if (!query.$and) query.$and = [];
+        query.$and.push(searchCond);
+    } else if (filters.patientName) {
+        query.patientName = new RegExp(String(filters.patientName).trim(), 'i');
+    }
+
+    // Fetch appointments
+    const appointments = await Appointment.find(query)
+        .populate('doctor', 'name specialty fee')
+        .populate('patient', 'name phone email')
+        .sort({ slotTime: -1, createdAt: -1 })
+        .lean();
+
+    const appointmentIds = appointments.map(a => a._id);
+    const payments = await Payment.find({ appointmentId: { $in: appointmentIds } }).lean();
+
+    const paymentsByAppt: { [id: string]: any[] } = {};
+    for (const p of payments) {
+        const k = p.appointmentId.toString();
+        if (!paymentsByAppt[k]) paymentsByAppt[k] = [];
+        paymentsByAppt[k].push(p);
+    }
+
+    // Process canonical records using unified calculator
+    let records = appointments.map(app => processAppointmentFinancialRecord(app, paymentsByAppt[app._id.toString()] || []));
+
+    // Secondary filters (applied to records)
+    if (filters.paymentStatus && filters.paymentStatus !== 'all') {
+        records = records.filter(r => r.paymentStatus === filters.paymentStatus);
+    }
+    if (filters.settlementStatus && filters.settlementStatus !== 'all') {
+        records = records.filter(r => r.settlementStatus === filters.settlementStatus);
+    }
+    if (filters.paymentMethod && filters.paymentMethod !== 'all') {
+        records = records.filter(r => {
+            if (filters.paymentMethod === 'razorpay') return r.advancePaid > 0;
+            if (filters.paymentMethod === 'cash') return r.clinicCashCollection > 0;
+            if (filters.paymentMethod === 'online' || filters.paymentMethod === 'upi' || filters.paymentMethod === 'card') {
+                return r.clinicOnlineCollection > 0;
+            }
+            return true;
+        });
+    }
+
+    return {
+        start,
+        end,
+        records
+    };
+};
 
 /**
  * @desc    Get Hospital Financial Overview (5 Primary Cards + 4 Additional Indicators)
@@ -116,256 +172,32 @@ export const getHospitalFinancialOverview = async (req: AuthRequest, res: Respon
         const customStart = (req.query.startDate || req.query.customStart) as string;
         const customEnd = (req.query.endDate || req.query.customEnd) as string;
 
-        const { start, end } = resolveDateRange(
-            String(dateFilter), 
-            customStart ? String(customStart) : undefined, 
-            customEnd ? String(customEnd) : undefined
-        );
+        const { start, end, records } = await fetchHospitalFinancialData(hospital._id, {
+            dateFilter,
+            customStart,
+            customEnd
+        });
 
-        const hospitalId = hospital._id;
+        const summary = aggregateFinancialRecords(records);
 
-        // 1. Fetch appointments for this hospital in date range (using slotTime or createdAt)
-        const appointmentMatch: any = {
-            $or: [
-                { hospital: hospitalId },
-                { hospital: hospitalId.toString() }
-            ],
-            status: { $ne: 'cancelled' },
-            $and: [
-                {
-                    $or: [
-                        { slotTime: { $gte: start, $lte: end } },
-                        { createdAt: { $gte: start, $lte: end } }
-                    ]
-                }
-            ]
-        };
-
-        const appointments = await Appointment.find(appointmentMatch).lean();
-
-        // 2. Fetch completed payments for this hospital within date range
-        const paymentMatch: any = {
-            $or: [
-                { hospitalId },
-                { hospitalId: hospitalId.toString() }
-            ],
-            status: { $in: ['completed', 'paid'] },
-            createdAt: { $gte: start, $lte: end }
-        };
-
-        const payments = await Payment.find(paymentMatch).lean();
-
-        // ── Card 1: Total Consultation Fees ──────────────────────────────────────
-        let totalConsultationFees = 0;
-        for (const app of appointments) {
-            totalConsultationFees += (app.consultationFee || 500);
-        }
-
-        // ── Card 2: Online Advance via Pillora ────────────────────────────────────
-        let onlineAdvanceGross = 0;
-        let onlineAdvanceCount = 0;
-        let totalGatewayCharges = 0;
-        let totalGatewayTaxes = 0;
-
-        // ── Card 4 & 5: Clinic Collections ───────────────────────────────────────
-        let clinicCashCollections = 0;
-        let clinicCashCount = 0;
-        let clinicOnlineCollections = 0;
-        let clinicOnlineCount = 0;
-
-        for (const p of payments) {
-            const amt = p.amount || 0;
-            const isOnlineAdvance = 
-                p.paymentSource === 'pillora_online' || 
-                p.paymentType === 'advance' || 
-                (p.paymentType as any) === 'advance_20' ||
-                Boolean(p.razorpayPaymentId || p.razorpayOrderId) ||
-                p.mode === 'online';
-
-            if (isOnlineAdvance) {
-                onlineAdvanceGross += (p.advanceFee || amt);
-                onlineAdvanceCount += 1;
-                // Gateway charges (2% fee + 18% GST on fee = 2.36%)
-                const charges = p.gatewayCharges || (amt * 0.02);
-                const taxes = p.gatewayTaxes || (charges * 0.18);
-                totalGatewayCharges += charges;
-                totalGatewayTaxes += taxes;
-            } else {
-                if (p.paymentMethod === 'cash' || p.mode === 'offline') {
-                    clinicCashCollections += amt;
-                    clinicCashCount += 1;
-                } else {
-                    clinicOnlineCollections += amt;
-                    clinicOnlineCount += 1;
-                }
-            }
-        }
-
-        // Safety fallback: If online advance is 0 from payments but appointments record online advance
-        if (onlineAdvanceGross === 0 && appointments.length > 0) {
-            for (const app of appointments) {
-                if (app.advancePaid && app.advancePaid > 0) {
-                    onlineAdvanceGross += app.advancePaid;
-                    onlineAdvanceCount += 1;
-                    const charges = app.advancePaid * 0.02;
-                    const taxes = charges * 0.18;
-                    totalGatewayCharges += charges;
-                    totalGatewayTaxes += taxes;
-                }
-            }
-        }
-
-        // ── Card 3: Payable from Pillora ─────────────────────────────────────────
-        // Net Payable = Successful Online Advances - Applicable Gateway Charges - Applicable Gateway Taxes
-        const totalGatewayDeductions = totalGatewayCharges + totalGatewayTaxes;
-        const totalNetPayableFromPillora = Math.max(0, onlineAdvanceGross - totalGatewayDeductions);
-
-        // Calculate settlement status breakdown for all online advances of this hospital
-        const allOnlineAdvances = await Payment.find({
-            $or: [
-                { hospitalId },
-                { hospitalId: hospitalId.toString() }
-            ],
-            status: { $in: ['completed', 'paid'] },
-            $and: [
-                {
-                    $or: [
-                        { paymentSource: 'pillora_online' },
-                        { paymentType: { $in: ['advance', 'advance_20'] } },
-                        { razorpayPaymentId: { $exists: true, $ne: '' } },
-                        { razorpayOrderId: { $exists: true, $ne: '' } },
-                        { mode: 'online' }
-                    ]
-                }
-            ],
-            createdAt: { $gte: start, $lte: end }
-        }).lean();
-
-        let pendingSettlement = 0;
-        let processingSettlement = 0;
-        let alreadySettled = 0;
-
-        for (const p of allOnlineAdvances) {
-            const amt = p.advanceFee || p.amount || 0;
-            const fee = p.gatewayCharges || (amt * 0.02);
-            const tax = p.gatewayTaxes || (fee * 0.18);
-            const net = Math.max(0, amt - fee - tax);
-
-            const st = p.settlementStatus || 'Pending';
-            if (['Pending', 'Waiting for Razorpay Settlement', 'Ready for Settlement'].includes(st)) {
-                pendingSettlement += net;
-            } else if (['Processing', 'Payment Initiated', 'Awaiting Hospital Confirmation'].includes(st)) {
-                processingSettlement += net;
-            } else if (['Settled', 'Settlement Completed'].includes(st)) {
-                alreadySettled += net;
-            }
-        }
-
-        // Fallback for pending settlement if payments list is empty but gross advance exists
-        if (pendingSettlement === 0 && processingSettlement === 0 && alreadySettled === 0 && totalNetPayableFromPillora > 0) {
-            pendingSettlement = totalNetPayableFromPillora;
-        }
-
-        // ── Additional Indicators ───────────────────────────────────────────────
-        // Total Patient Collections = Pillora Gross Advances + Clinic Cash Collections + Clinic Online Collections
-        const totalPatientCollections = onlineAdvanceGross + clinicCashCollections + clinicOnlineCollections;
-
-        // 1. Pending Patient Collection = Total Consultation Fees - Total Patient Collections
-        const pendingPatientCollection = Math.max(0, totalConsultationFees - totalPatientCollections);
-
-        // 2. Pillora Settlement Pending = net amount not yet transferred
-        const pilloraSettlementPending = pendingSettlement;
-
-        // 3. Total Successfully Settled = already transferred
-        const totalSuccessfullySettled = alreadySettled;
-
-        // 4. Total Gateway Charges = charges + applicable taxes
-        const totalGatewayChargesSummary = totalGatewayDeductions;
-
-        // ── Daily Breakdown for charts ──────────────────────────────────────────
+        // Daily Breakdown for charts
         const dailyMap: { [date: string]: { date: string; consultationFees: number; onlineAdvance: number; clinicCash: number; clinicOnline: number } } = {};
-
-        for (const app of appointments) {
-            const d = new Date(app.slotTime || app.createdAt).toISOString().slice(0, 10);
+        for (const r of records) {
+            const d = new Date(r.appointmentDate).toISOString().slice(0, 10);
             if (!dailyMap[d]) dailyMap[d] = { date: d, consultationFees: 0, onlineAdvance: 0, clinicCash: 0, clinicOnline: 0 };
-            dailyMap[d].consultationFees += (app.consultationFee || 500);
+            dailyMap[d].consultationFees += r.consultationFee;
+            dailyMap[d].onlineAdvance += r.advancePaid;
+            dailyMap[d].clinicCash += r.clinicCashCollection;
+            dailyMap[d].clinicOnline += r.clinicOnlineCollection;
         }
-
-        for (const p of payments) {
-            const d = new Date(p.createdAt).toISOString().slice(0, 10);
-            if (!dailyMap[d]) dailyMap[d] = { date: d, consultationFees: 0, onlineAdvance: 0, clinicCash: 0, clinicOnline: 0 };
-            const amt = p.amount || 0;
-            const isOnline = 
-                p.paymentSource === 'pillora_online' || 
-                p.paymentType === 'advance' || 
-                (p.paymentType as any) === 'advance_20' ||
-                Boolean(p.razorpayPaymentId || p.razorpayOrderId) ||
-                p.mode === 'online';
-
-            if (isOnline) {
-                dailyMap[d].onlineAdvance += amt;
-            } else if (p.paymentMethod === 'cash' || p.mode === 'offline') {
-                dailyMap[d].clinicCash += amt;
-            } else {
-                dailyMap[d].clinicOnline += amt;
-            }
-        }
-
         const timeSeries = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
 
-        const responsePayload = {
+        res.status(200).json({
             success: true,
             dateRange: { filter: dateFilter, start, end },
-            cards: {
-                totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
-                grossOnlineAdvances: Math.round(onlineAdvanceGross * 100) / 100,
-                payableFromPillora: {
-                    netPayable: Math.round(totalNetPayableFromPillora * 100) / 100,
-                    pendingSettlement: Math.round(pendingSettlement * 100) / 100,
-                    processing: Math.round(processingSettlement * 100) / 100,
-                    alreadySettled: Math.round(alreadySettled * 100) / 100
-                },
-                cashAtClinic: Math.round(clinicCashCollections * 100) / 100,
-                onlineAtClinic: Math.round(clinicOnlineCollections * 100) / 100
-            },
-            primaryCards: {
-                totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
-                onlineAdvanceViaPillora: {
-                    grossAmount: Math.round(onlineAdvanceGross * 100) / 100,
-                    transactionCount: onlineAdvanceCount
-                },
-                payableFromPillora: {
-                    netAmount: Math.round(totalNetPayableFromPillora * 100) / 100,
-                    breakdown: {
-                        pendingSettlement: Math.round(pendingSettlement * 100) / 100,
-                        processing: Math.round(processingSettlement * 100) / 100,
-                        alreadySettled: Math.round(alreadySettled * 100) / 100
-                    }
-                },
-                collectedAtClinicCash: {
-                    amount: Math.round(clinicCashCollections * 100) / 100,
-                    transactionCount: clinicCashCount
-                },
-                collectedAtClinicOnline: {
-                    amount: Math.round(clinicOnlineCollections * 100) / 100,
-                    transactionCount: clinicOnlineCount
-                }
-            },
-            additionalIndicators: {
-                pendingPatientCollection: Math.round(pendingPatientCollection * 100) / 100,
-                pilloraSettlementPending: Math.round(pilloraSettlementPending * 100) / 100,
-                totalSuccessfullySettled: Math.round(totalSuccessfullySettled * 100) / 100,
-                totalGatewayCharges: Math.round(totalGatewayChargesSummary * 100) / 100
-            },
-            reconciliation: {
-                totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
-                totalPatientCollections: Math.round(totalPatientCollections * 100) / 100,
-                equationHolds: Math.abs((totalPatientCollections + pendingPatientCollection) - totalConsultationFees) < 1
-            },
+            ...summary,
             timeSeries
-        };
-
-        res.status(200).json(responsePayload);
+        });
     } catch (error: any) {
         console.error('[GetHospitalFinancialOverviewError]', error.message || error);
         res.status(500).json({ error: 'Failed to retrieve financial overview', details: error.message });
@@ -385,7 +217,6 @@ export const getHospitalPaymentRecords = async (req: AuthRequest, res: Response)
             return;
         }
 
-        const hospitalId = hospital._id;
         const dateFilter = (req.query.period || req.query.dateFilter || 'all') as string;
         const customStart = (req.query.startDate || req.query.customStart) as string;
         const customEnd = (req.query.endDate || req.query.customEnd) as string;
@@ -401,174 +232,17 @@ export const getHospitalPaymentRecords = async (req: AuthRequest, res: Response)
             exportFormat
         } = req.query;
 
-        const { start, end } = resolveDateRange(
-            String(dateFilter),
-            customStart ? String(customStart) : undefined,
-            customEnd ? String(customEnd) : undefined
-        );
-
-        // Build appointment match filter
-        const query: any = {
-            $or: [
-                { hospital: hospitalId },
-                { hospital: hospitalId.toString() }
-            ]
-        };
-
-        if (dateFilter !== 'all') {
-            query.$or = [
-                { slotTime: { $gte: start, $lte: end } },
-                { createdAt: { $gte: start, $lte: end } }
-            ];
-        }
-
-        if (doctorId && doctorId !== 'all') {
-            query.doctor = doctorId;
-        }
-
-        if (paymentStatus && paymentStatus !== 'all') {
-            query.paymentStatus = paymentStatus;
-        }
-
-        if (search) {
-            const searchRegex = new RegExp(String(search).trim(), 'i');
-            query.$or = [
-                { patientName: searchRegex },
-                { patientPhone: searchRegex },
-                { tokenNumber: isNaN(Number(search)) ? undefined : Number(search) }
-            ].filter(Boolean);
-        } else if (patientName) {
-            query.patientName = new RegExp(String(patientName).trim(), 'i');
-        }
-
-        // Fetch appointments matching criteria
-        const totalAppointments = await Appointment.countDocuments(query);
-        const pageNum = Math.max(1, Number(page));
-        const pageSize = exportFormat === 'csv' ? 5000 : Math.max(1, Number(limit));
-        const skip = (pageNum - 1) * pageSize;
-
-        const appointments = await Appointment.find(query)
-            .populate('doctor', 'name specialty fee')
-            .populate('patient', 'name phone email')
-            .sort({ slotTime: -1, createdAt: -1 })
-            .skip(skip)
-            .limit(pageSize)
-            .lean();
-
-        const appointmentIds = appointments.map(a => a._id);
-        const payments = await Payment.find({ appointmentId: { $in: appointmentIds } }).lean();
-
-        // Group payments by appointmentId
-        const paymentsByAppt: { [id: string]: any[] } = {};
-        for (const p of payments) {
-            const k = p.appointmentId.toString();
-            if (!paymentsByAppt[k]) paymentsByAppt[k] = [];
-            paymentsByAppt[k].push(p);
-        }
-
-        // Construct detailed records
-        const records = appointments.map(app => {
-            const apptPayments = paymentsByAppt[app._id.toString()] || [];
-            
-            const consultationFee = app.consultationFee || (app.doctor as any)?.fee || 500;
-            const isOnlineBooking = app.paymentSource === 'gateway' || apptPayments.some(p => p.paymentSource === 'pillora_online');
-            const advanceRequired = isOnlineBooking ? Math.round(consultationFee * 0.20) : 0;
-
-            let advancePaid = 0;
-            let gatewayCharges = 0;
-            let gatewayTaxes = 0;
-            let clinicCashCollection = 0;
-            let clinicOnlineCollection = 0;
-            let settlementStatusVal = 'N/A';
-            let transactionDate: Date | null = null;
-
-            for (const p of apptPayments) {
-                if (p.status !== 'completed' && p.status !== 'paid') continue;
-                
-                if (p.createdAt && (!transactionDate || p.createdAt > transactionDate)) {
-                    transactionDate = p.createdAt;
-                }
-
-                if (p.paymentSource === 'pillora_online' || p.paymentType === 'advance') {
-                    advancePaid += (p.advanceFee || p.amount || 0);
-                    const fee = p.gatewayCharges || (p.amount * 0.02);
-                    const tax = p.gatewayTaxes || (fee * 0.18);
-                    gatewayCharges += fee;
-                    gatewayTaxes += tax;
-                    settlementStatusVal = p.settlementStatus || 'Pending';
-                } else if (p.paymentSource === 'clinic_collection' || !p.razorpayPaymentId) {
-                    if (p.paymentMethod === 'cash' || p.mode === 'offline') {
-                        clinicCashCollection += (p.amount || 0);
-                    } else {
-                        clinicOnlineCollection += (p.amount || 0);
-                    }
-                }
-            }
-
-            // Fallback from appointment fields if direct payment records missing (legacy compat)
-            if (advancePaid === 0 && app.advancePaid) advancePaid = app.advancePaid;
-            if (advancePaid > 0 && gatewayCharges === 0) {
-                gatewayCharges = advancePaid * 0.02;
-                gatewayTaxes = gatewayCharges * 0.18;
-            }
-
-            const netAdvancePayable = Math.max(0, advancePaid - (gatewayCharges + gatewayTaxes));
-            const balancePaid = (app.balancePaid || 0) + (clinicCashCollection + clinicOnlineCollection);
-            const balanceDue = Math.max(0, consultationFee - advancePaid - balancePaid);
-
-            // Canonical payment status
-            let canonicalStatus: 'paid' | 'partial' | 'unpaid' = 'unpaid';
-            if (balanceDue === 0 && (advancePaid > 0 || balancePaid > 0)) {
-                canonicalStatus = 'paid';
-            } else if (advancePaid > 0 || balancePaid > 0) {
-                canonicalStatus = 'partial';
-            }
-
-            return {
-                appointmentId: app._id.toString(),
-                tokenNumber: app.tokenNumber || null,
-                patientName: app.patientName || (app.patient as any)?.name || 'Guest Patient',
-                patientPhone: app.patientPhone || (app.patient as any)?.phone || 'N/A',
-                patientEmail: app.patientEmail || (app.patient as any)?.email || 'N/A',
-                doctorName: (app.doctor as any)?.name ? `Dr. ${(app.doctor as any).name}` : (app.doctorName || 'Doctor'),
-                consultationFee: Math.round(consultationFee * 100) / 100,
-                advanceRequired: Math.round(advanceRequired * 100) / 100,
-                advancePaid: Math.round(advancePaid * 100) / 100,
-                gatewayCharges: Math.round((gatewayCharges + gatewayTaxes) * 100) / 100,
-                netAdvancePayable: Math.round(netAdvancePayable * 100) / 100,
-                balanceDue: Math.round(balanceDue * 100) / 100,
-                balancePaid: Math.round(balancePaid * 100) / 100,
-                clinicCashCollection: Math.round(clinicCashCollection * 100) / 100,
-                clinicOnlineCollection: Math.round(clinicOnlineCollection * 100) / 100,
-                paymentStatus: canonicalStatus,
-                settlementStatus: settlementStatusVal,
-                appointmentDate: app.slotTime || app.appointmentDate || app.createdAt,
-                transactionDate: transactionDate || app.createdAt,
-                transactions: apptPayments.map(p => ({
-                    transactionId: p.transactionId,
-                    amount: p.amount,
-                    type: p.paymentType,
-                    source: p.paymentSource,
-                    method: p.paymentMethod,
-                    status: p.status,
-                    date: p.createdAt
-                }))
-            };
+        const { records } = await fetchHospitalFinancialData(hospital._id, {
+            dateFilter: String(dateFilter),
+            customStart: customStart ? String(customStart) : undefined,
+            customEnd: customEnd ? String(customEnd) : undefined,
+            doctorId: doctorId ? String(doctorId) : undefined,
+            search: search ? String(search) : undefined,
+            patientName: patientName ? String(patientName) : undefined,
+            paymentMethod: paymentMethod ? String(paymentMethod) : undefined,
+            paymentStatus: paymentStatus ? String(paymentStatus) : undefined,
+            settlementStatus: settlementStatus ? String(settlementStatus) : undefined
         });
-
-        // Apply secondary filter for payment method or settlement status if requested
-        let filteredRecords = records;
-        if (paymentMethod && paymentMethod !== 'all') {
-            filteredRecords = filteredRecords.filter(r => {
-                if (paymentMethod === 'razorpay') return r.advancePaid > 0;
-                if (paymentMethod === 'cash') return r.clinicCashCollection > 0;
-                if (paymentMethod === 'online' || paymentMethod === 'upi' || paymentMethod === 'card') return r.clinicOnlineCollection > 0;
-                return true;
-            });
-        }
-        if (settlementStatus && settlementStatus !== 'all') {
-            filteredRecords = filteredRecords.filter(r => r.settlementStatus === settlementStatus);
-        }
 
         // CSV Export handling
         if (exportFormat === 'csv') {
@@ -592,24 +266,24 @@ export const getHospitalPaymentRecords = async (req: AuthRequest, res: Response)
             ];
 
             const csvRows = [headers.join(',')];
-            for (const r of filteredRecords) {
+            for (const r of records) {
                 const row = [
                     r.appointmentId,
                     `"${r.patientName.replace(/"/g, '""')}"`,
                     `"${r.doctorName.replace(/"/g, '""')}"`,
-                    r.consultationFee,
-                    r.advanceRequired,
-                    r.advancePaid,
-                    r.gatewayCharges,
-                    r.netAdvancePayable,
-                    r.balanceDue,
-                    r.balancePaid,
-                    r.clinicCashCollection,
-                    r.clinicOnlineCollection,
+                    r.consultationFee.toFixed(2),
+                    r.advanceRequired.toFixed(2),
+                    r.advancePaid.toFixed(2),
+                    r.gatewayCharges.toFixed(2),
+                    r.netAdvancePayable.toFixed(2),
+                    r.balanceDue.toFixed(2),
+                    r.balancePaid.toFixed(2),
+                    r.clinicCashCollection.toFixed(2),
+                    r.clinicOnlineCollection.toFixed(2),
                     r.paymentStatus,
                     r.settlementStatus,
                     new Date(r.appointmentDate).toISOString().slice(0, 10),
-                    new Date(r.transactionDate).toISOString().slice(0, 10)
+                    new Date(r.transactionDate || r.appointmentDate).toISOString().slice(0, 10)
                 ];
                 csvRows.push(row.join(','));
             }
@@ -620,14 +294,21 @@ export const getHospitalPaymentRecords = async (req: AuthRequest, res: Response)
             return;
         }
 
+        const totalRecords = records.length;
+        const pageNum = Math.max(1, Number(page));
+        const pageSize = Math.max(1, Number(limit));
+        const skip = (pageNum - 1) * pageSize;
+        const paginatedRecords = records.slice(skip, skip + pageSize);
+
         res.status(200).json({
             success: true,
-            records: filteredRecords,
+            records: paginatedRecords,
             pagination: {
-                total: totalAppointments,
+                total: totalRecords,
+                totalRecords: totalRecords,
                 page: pageNum,
                 limit: pageSize,
-                totalPages: Math.ceil(totalAppointments / pageSize)
+                totalPages: Math.ceil(totalRecords / pageSize) || 1
             }
         });
     } catch (error: any) {
@@ -798,55 +479,36 @@ export const getAdminFinancialOverview = async (req: AuthRequest, res: Response)
         let totalOnlineAdvances = 0;
         let onlineAdvancesCount = 0;
         let totalGatewayCharges = 0;
-        let totalGatewayTaxes = 0;
         let totalCashCollected = 0;
         let totalOnlineCollectedAtClinic = 0;
+        let totalPendingSettlements = 0;
+        let totalProcessingSettlements = 0;
+        let totalCompletedSettlements = 0;
 
         for (const p of payments) {
             const amt = p.amount || 0;
-            if (p.paymentSource === 'pillora_online' || (p.razorpayPaymentId && p.paymentType === 'advance')) {
+            if (isOnlineAdvancePayment(p)) {
                 totalOnlineAdvances += (p.advanceFee || amt);
                 onlineAdvancesCount += 1;
-                const charge = p.gatewayCharges || (amt * 0.02);
-                const tax = p.gatewayTaxes || (charge * 0.18);
-                totalGatewayCharges += charge;
-                totalGatewayTaxes += tax;
-            } else if (p.paymentSource === 'clinic_collection' || !p.razorpayPaymentId) {
-                if (p.paymentMethod === 'cash' || p.mode === 'offline') {
-                    totalCashCollected += amt;
-                } else {
-                    totalOnlineCollectedAtClinic += amt;
+                const split = calculateAdvanceGatewaySplit(p.advanceFee || amt);
+                totalGatewayCharges += split.gatewayCharges;
+
+                const st = normalizeSettlementStatus(p.settlementStatus, true);
+                if (st === 'Settled') {
+                    totalCompletedSettlements += split.netPayable;
+                } else if (st === 'Processing') {
+                    totalProcessingSettlements += split.netPayable;
+                } else if (st === 'Pending') {
+                    totalPendingSettlements += split.netPayable;
                 }
+            } else if (p.paymentMethod === 'cash' || p.mode === 'offline') {
+                totalCashCollected += amt;
+            } else {
+                totalOnlineCollectedAtClinic += amt;
             }
         }
 
-        const totalGatewayDeductions = totalGatewayCharges + totalGatewayTaxes;
-        const totalNetAmountPayable = Math.max(0, totalOnlineAdvances - totalGatewayDeductions);
-
-        // Settlements tracking across all hospitals
-        const allOnlineAdvances = await Payment.find({
-            status: { $in: ['completed', 'paid'] },
-            paymentSource: 'pillora_online',
-            createdAt: { $gte: start, $lte: end }
-        }).lean();
-
-        let totalPendingSettlements = 0;
-        let totalCompletedSettlements = 0;
-
-        for (const p of allOnlineAdvances) {
-            const amt = p.advanceFee || p.amount || 0;
-            const fee = p.gatewayCharges || (amt * 0.02);
-            const tax = p.gatewayTaxes || (fee * 0.18);
-            const net = Math.max(0, amt - fee - tax);
-
-            const st = p.settlementStatus || 'Pending';
-            if (['Pending', 'Waiting for Razorpay Settlement', 'Ready for Settlement', 'Processing', 'Payment Initiated', 'Awaiting Hospital Confirmation'].includes(st)) {
-                totalPendingSettlements += net;
-            } else if (['Settled', 'Settlement Completed'].includes(st)) {
-                totalCompletedSettlements += net;
-            }
-        }
-
+        const totalNetAmountPayable = Math.round((totalPendingSettlements + totalProcessingSettlements + totalCompletedSettlements) * 100) / 100;
         const hospitalCount = await Hospital.countDocuments();
 
         res.status(200).json({
@@ -855,11 +517,12 @@ export const getAdminFinancialOverview = async (req: AuthRequest, res: Response)
             summary: {
                 totalConsultationFees: Math.round(totalConsultationFees * 100) / 100,
                 totalOnlineAdvances: Math.round(totalOnlineAdvances * 100) / 100,
-                totalNetPayableToHospitals: Math.round(totalNetAmountPayable * 100) / 100,
+                totalNetPayableToHospitals: totalNetAmountPayable,
                 totalCashCollectedAtHospitals: Math.round(totalCashCollected * 100) / 100,
                 totalOnlineCollectedAtHospitals: Math.round(totalOnlineCollectedAtClinic * 100) / 100,
-                totalGatewayCharges: Math.round(totalGatewayDeductions * 100) / 100,
+                totalGatewayCharges: Math.round(totalGatewayCharges * 100) / 100,
                 totalPendingHospitalSettlements: Math.round(totalPendingSettlements * 100) / 100,
+                totalProcessingHospitalSettlements: Math.round(totalProcessingSettlements * 100) / 100,
                 totalCompletedHospitalSettlements: Math.round(totalCompletedSettlements * 100) / 100,
                 hospitalCount,
                 transactionCount: payments.length,
@@ -881,7 +544,7 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
     try {
         const { hospitalId } = req.params;
         const { dateFilter = 'all', customStart, customEnd } = req.query;
-        const { start, end } = resolveDateRange(
+        const { start, end } = resolveISTDateRange(
             String(dateFilter),
             customStart ? String(customStart) : undefined,
             customEnd ? String(customEnd) : undefined
@@ -914,23 +577,16 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         let onlineAdvanceCount = 0;
         let grossOnlineAdvances = 0;
         let gatewayCharges = 0;
-        let gatewayTaxes = 0;
         let cashAtClinic = 0;
         let onlineAtClinic = 0;
 
         for (const p of payments) {
             const amt = p.amount || 0;
-            const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
-                                    (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
-                                    p.mode === 'online';
-
-            if (isOnlineAdvance) {
+            if (isOnlineAdvancePayment(p)) {
                 onlineAdvanceCount++;
-                grossOnlineAdvances += amt;
-                const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
-                const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
-                gatewayCharges += c;
-                gatewayTaxes += t;
+                const split = calculateAdvanceGatewaySplit(p.advanceFee || amt);
+                grossOnlineAdvances += split.grossAmount;
+                gatewayCharges += split.gatewayCharges;
             } else if (p.paymentMethod === 'cash' || p.mode === 'offline') {
                 cashAtClinic += amt;
             } else {
@@ -938,8 +594,8 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
             }
         }
 
-        const totalGatewayDeductions = gatewayCharges + gatewayTaxes;
-        const totalNetAdvances = Math.max(0, grossOnlineAdvances - totalGatewayDeductions);
+        const totalGatewayDeductions = gatewayCharges;
+        const totalNetAdvances = Math.max(0, Math.round((grossOnlineAdvances - totalGatewayDeductions) * 100) / 100);
 
         let alreadySettled = 0;
         let awaitingConfirmation = 0;
@@ -962,20 +618,14 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         let pendingSettlement = 0;
 
         for (const p of payments) {
-            const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
-                                    (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
-                                    p.mode === 'online';
-
-            if (isOnlineAdvance) {
+            if (isOnlineAdvancePayment(p)) {
                 const isAlreadyHandled = settledPaymentIdSet.has(String(p._id)) || 
                                          ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation'].includes(p.settlementStatus);
 
                 if (!isAlreadyHandled && !['refunded', 'not_applicable'].includes(p.settlementStatus)) {
-                    const amt = p.amount || 0;
-                    const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
-                    const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
-                    const net = Math.max(0, amt - (c + t));
-                    pendingSettlement += net;
+                    const amt = p.advanceFee || p.amount || 0;
+                    const split = calculateAdvanceGatewaySplit(amt);
+                    pendingSettlement += split.netPayable;
                 }
             }
         }
@@ -983,14 +633,10 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         // Fallback for alreadySettled if settlements collection had no records but payments are marked Settled
         if (alreadySettled === 0) {
             for (const p of payments) {
-                const isOnlineAdvance = p.paymentSource === 'pillora_online' || 
-                                        (p.razorpayPaymentId && (p.paymentType === 'advance' || (p.paymentType as any) === 'advance_20')) || 
-                                        p.mode === 'online';
-                if (isOnlineAdvance && ['Settled', 'Settlement Completed'].includes(p.settlementStatus)) {
-                    const amt = p.amount || 0;
-                    const c = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
-                    const t = p.gatewayTaxes || Math.round(c * 0.18 * 100) / 100;
-                    alreadySettled += Math.max(0, amt - (c + t));
+                if (isOnlineAdvancePayment(p) && ['Settled', 'Settlement Completed'].includes(p.settlementStatus)) {
+                    const amt = p.advanceFee || p.amount || 0;
+                    const split = calculateAdvanceGatewaySplit(amt);
+                    alreadySettled += split.netPayable;
                 }
             }
         }
@@ -1043,7 +689,7 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
 export const getAdminSettlementManagement = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { dateFilter = 'all', customStart, customEnd, status } = req.query;
-        const { start, end } = resolveDateRange(
+        const { start, end } = resolveISTDateRange(
             String(dateFilter),
             customStart ? String(customStart) : undefined,
             customEnd ? String(customEnd) : undefined
@@ -1096,23 +742,20 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             }
 
             for (const p of payments) {
-                const amt = p.amount || 0;
-                grossAdvances += amt;
-                const charge = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
-                const tax = p.gatewayTaxes || Math.round(charge * 0.18 * 100) / 100;
-                const totalDeduction = charge + tax;
-                gatewayCharges += totalDeduction;
+                if (isOnlineAdvancePayment(p)) {
+                    const amt = p.advanceFee || p.amount || 0;
+                    const split = calculateAdvanceGatewaySplit(amt);
+                    grossAdvances += split.grossAmount;
+                    gatewayCharges += split.gatewayCharges;
 
-                const net = Math.max(0, amt - totalDeduction);
-                const st = p.settlementStatus || 'Pending';
+                    const isAlreadyHandled = settledPaymentIdSet.has(String(p._id)) || 
+                                             ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation'].includes(p.settlementStatus);
 
-                const isAlreadyHandled = settledPaymentIdSet.has(String(p._id)) || 
-                                         ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation'].includes(st);
-
-                if (!isAlreadyHandled && !['refunded', 'not_applicable'].includes(st)) {
-                    pendingSettlement += net;
-                    if (!earliestPendingDate || p.createdAt < earliestPendingDate) {
-                        earliestPendingDate = p.createdAt;
+                    if (!isAlreadyHandled && !['refunded', 'not_applicable'].includes(p.settlementStatus)) {
+                        pendingSettlement += split.netPayable;
+                        if (!earliestPendingDate || p.createdAt < earliestPendingDate) {
+                            earliestPendingDate = p.createdAt;
+                        }
                     }
                 }
             }
@@ -1120,12 +763,13 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             // Fallback for alreadySettled if settlements collection had no records but payments are marked Settled
             if (alreadySettled === 0) {
                 for (const p of payments) {
-                    const st = p.settlementStatus || 'Pending';
-                    if (['Settled', 'Settlement Completed'].includes(st)) {
-                        const amt = p.amount || 0;
-                        const charge = p.gatewayCharges || Math.round(amt * 0.02 * 100) / 100;
-                        const tax = p.gatewayTaxes || Math.round(charge * 0.18 * 100) / 100;
-                        alreadySettled += Math.max(0, amt - (charge + tax));
+                    if (isOnlineAdvancePayment(p)) {
+                        const st = p.settlementStatus || 'Pending';
+                        if (['Settled', 'Settlement Completed'].includes(st)) {
+                            const amt = p.advanceFee || p.amount || 0;
+                            const split = calculateAdvanceGatewaySplit(amt);
+                            alreadySettled += split.netPayable;
+                        }
                     }
                 }
             }
@@ -1226,15 +870,14 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
         let totalTaxes = 0;
 
         for (const p of pendingPayments) {
-            const amt = p.amount || 0;
-            totalGross += amt;
-            const c = p.gatewayCharges || (amt * 0.02);
-            const t = p.gatewayTaxes || (c * 0.18);
-            totalCharges += c;
-            totalTaxes += t;
+            const amt = p.amount || p.advanceFee || 0;
+            const split = calculateAdvanceGatewaySplit(amt);
+            totalGross += split.grossAmount;
+            totalCharges += split.fee;
+            totalTaxes += split.tax;
         }
 
-        const netPayable = Math.max(0, totalGross - (totalCharges + totalTaxes));
+        const netPayable = Math.max(0, Math.round((totalGross - (totalCharges + totalTaxes)) * 100) / 100);
         const payoutAmount = amount ? Number(amount) : netPayable;
 
         // Generate Settlement ID: SET-YYYYMMDD-XXXX
@@ -1412,14 +1055,11 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
 
         const paymentBreakdown = payments.map((p) => {
             const amt = p.amount || p.advanceFee || 0;
-            const charge = Math.round(amt * 0.02 * 100) / 100;
-            const gst = Math.round(charge * 0.18 * 100) / 100;
-            const deduction = Math.round((charge + gst) * 100) / 100; // 2.36%
-            const net = Math.max(0, Math.round((amt - deduction) * 100) / 100);
+            const split = calculateAdvanceGatewaySplit(amt);
 
-            totalGross += amt;
-            totalDeductions += deduction;
-            totalNet += net;
+            totalGross += split.grossAmount;
+            totalDeductions += split.gatewayCharges;
+            totalNet += split.netPayable;
 
             const appt = p.appointmentId as any;
             return {
@@ -1430,9 +1070,9 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
                 tokenNumber: appt?.tokenNumber || null,
                 patientName: p.patientName || appt?.patientName || 'Patient',
                 consultationFee: appt?.consultationFee || 500,
-                advancePaid: amt,
-                gatewayCharge: deduction,
-                netPayable: net,
+                advancePaid: split.grossAmount,
+                gatewayCharge: split.gatewayCharges,
+                netPayable: split.netPayable,
                 settlementStatus: p.settlementStatus || 'Pending',
                 createdAt: p.createdAt
             };
@@ -1544,11 +1184,10 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
 
         for (const p of eligiblePayments) {
             const amt = p.amount || p.advanceFee || 0;
-            totalGross += amt;
-            const c = Math.round(amt * 0.02 * 100) / 100;
-            const t = Math.round(c * 0.18 * 100) / 100;
-            totalCharges += c;
-            totalGst += t;
+            const split = calculateAdvanceGatewaySplit(amt);
+            totalGross += split.grossAmount;
+            totalCharges += split.fee;
+            totalGst += split.tax;
         }
 
         const netCalc = Math.max(0, Math.round((totalGross - (totalCharges + totalGst)) * 100) / 100);
@@ -1727,30 +1366,34 @@ export const getAdminTransactionsLedger = async (req: AuthRequest, res: Response
 
         res.status(200).json({
             success: true,
-            transactions: transactions.map(t => ({
-                _id: t._id,
-                transactionId: t.transactionId || `TXN-${t._id}`,
-                razorpayPaymentId: t.razorpayPaymentId || 'N/A',
-                razorpayOrderId: t.razorpayOrderId || 'N/A',
-                appointmentId: (t.appointmentId as any)?._id || t.appointmentId,
-                tokenNumber: (t.appointmentId as any)?.tokenNumber || null,
-                hospitalId: (t.hospitalId as any)?._id || t.hospitalId,
-                hospitalName: (t.hospitalId as any)?.name || 'Unknown Hospital',
-                patientName: t.patientName || (t.appointmentId as any)?.patientName || 'Patient',
-                amount: t.amount,
-                amountInPaise: t.amountInPaise || Math.round(t.amount * 100),
-                paymentType: t.paymentType || (t.paymentSource === 'pillora_online' ? 'advance' : 'full'),
-                paymentSource: t.paymentSource || (t.razorpayPaymentId ? 'pillora_online' : 'clinic_collection'),
-                paymentMethod: t.paymentMethod || (t.mode === 'offline' ? 'cash' : 'razorpay'),
-                gatewayCharges: t.gatewayCharges || 0,
-                gatewayTaxes: t.gatewayTaxes || 0,
-                netPayable: t.netPayable || 0,
-                status: t.status,
-                settlementStatus: t.settlementStatus || 'N/A',
-                createdAt: t.createdAt,
-                recordedBy: (t.recordedBy as any)?.name || null,
-                notes: t.notes || ''
-            })),
+            transactions: transactions.map(t => {
+                const isAdv = isOnlineAdvancePayment(t);
+                const split = isAdv ? calculateAdvanceGatewaySplit(t.advanceFee || t.amount || 0) : null;
+                return {
+                    _id: t._id,
+                    transactionId: t.transactionId || `TXN-${t._id}`,
+                    razorpayPaymentId: t.razorpayPaymentId || 'N/A',
+                    razorpayOrderId: t.razorpayOrderId || 'N/A',
+                    appointmentId: (t.appointmentId as any)?._id || t.appointmentId,
+                    tokenNumber: (t.appointmentId as any)?.tokenNumber || null,
+                    hospitalId: (t.hospitalId as any)?._id || t.hospitalId,
+                    hospitalName: (t.hospitalId as any)?.name || 'Unknown Hospital',
+                    patientName: t.patientName || (t.appointmentId as any)?.patientName || 'Patient',
+                    amount: t.amount,
+                    amountInPaise: t.amountInPaise || Math.round(t.amount * 100),
+                    paymentType: t.paymentType || (isAdv ? 'advance' : 'full'),
+                    paymentSource: t.paymentSource || (isAdv ? 'pillora_online' : 'clinic_collection'),
+                    paymentMethod: t.paymentMethod || (t.mode === 'offline' ? 'cash' : 'razorpay'),
+                    gatewayCharges: split ? split.gatewayCharges : (t.gatewayCharges || 0),
+                    gatewayTaxes: split ? split.tax : (t.gatewayTaxes || 0),
+                    netPayable: split ? split.netPayable : (t.netPayable || 0),
+                    status: t.status,
+                    settlementStatus: t.settlementStatus || 'N/A',
+                    createdAt: t.createdAt,
+                    recordedBy: (t.recordedBy as any)?.name || null,
+                    notes: t.notes || ''
+                };
+            }),
             pagination: {
                 total: totalTransactions,
                 page: pageNum,

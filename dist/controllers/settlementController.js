@@ -21,39 +21,10 @@ const Notification_1 = __importDefault(require("../models/Notification"));
 const User_1 = __importDefault(require("../models/User"));
 const AuditLog_1 = __importDefault(require("../models/AuditLog"));
 const cryptoHelper_1 = require("../utils/cryptoHelper");
+const financialCalculator_1 = require("../utils/financialCalculator");
 // Helper: Get start and end date based on filter
 const getDateRange = (filter, customStart, customEnd) => {
-    const now = new Date();
-    let start = new Date(0); // Beginning of time
-    let end = new Date();
-    if (filter === 'today') {
-        start = new Date(now.setHours(0, 0, 0, 0));
-        end = new Date(now.setHours(23, 59, 59, 999));
-    }
-    else if (filter === 'yesterday') {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        start = new Date(yesterday.setHours(0, 0, 0, 0));
-        end = new Date(yesterday.setHours(23, 59, 59, 999));
-    }
-    else if (filter === 'week') {
-        const day = now.getDay();
-        const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Start of week is Monday
-        start = new Date(now.setDate(diff));
-        start.setHours(0, 0, 0, 0);
-        end = new Date();
-    }
-    else if (filter === 'month') {
-        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        end = new Date();
-    }
-    else if (filter === 'custom' && customStart && customEnd) {
-        start = new Date(customStart);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(customEnd);
-        end.setHours(23, 59, 59, 999);
-    }
-    return { start, end };
+    return (0, financialCalculator_1.resolveISTDateRange)(filter, customStart, customEnd);
 };
 // @desc    Get Admin Settlements Dashboard
 // @route   GET /api/settlements/admin/dashboard
@@ -80,31 +51,41 @@ const getAdminSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, voi
                 createdAt: { $gte: startOfToday, $lte: endOfToday }
             });
             // Find all completed online payments for this hospital within the date range
-            const payments = yield Payment_1.default.find({
+            const allHospitalPayments = yield Payment_1.default.find({
                 hospitalId: hospital._id,
-                status: 'completed',
+                status: { $in: ['completed', 'paid'] },
                 createdAt: { $gte: start, $lte: end }
-            });
+            }).lean();
+            const onlineAdvances = allHospitalPayments.filter(financialCalculator_1.isOnlineAdvancePayment);
             let totalAdvanceCollected = 0;
-            for (const p of payments) {
-                totalAdvanceCollected += (p.advanceFee || p.amount || 0);
+            let razorpayProcessingCharges = 0;
+            let gstOnRazorpayCharges = 0;
+            let netAmountReceived = 0;
+            for (const p of onlineAdvances) {
+                const amt = p.advanceFee || p.amount || 0;
+                const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+                totalAdvanceCollected += split.grossAmount;
+                razorpayProcessingCharges += split.fee;
+                gstOnRazorpayCharges += split.tax;
+                netAmountReceived += split.netPayable;
             }
-            const razorpayProcessingCharges = totalAdvanceCollected * 0.02;
-            const gstOnRazorpayCharges = razorpayProcessingCharges * 0.18;
-            const netAmountReceived = totalAdvanceCollected - razorpayProcessingCharges - gstOnRazorpayCharges;
             // Pending Settlement Amount: completed payments not yet linked to a completed settlement
-            const pendingPayments = yield Payment_1.default.find({
+            const allHospitalPending = yield Payment_1.default.find({
                 hospitalId: hospital._id,
-                status: 'completed',
-                settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+                status: { $in: ['completed', 'paid'] }
+            }).lean();
+            const pendingPayments = allHospitalPending.filter(p => {
+                if (!(0, financialCalculator_1.isOnlineAdvancePayment)(p))
+                    return false;
+                const st = (0, financialCalculator_1.normalizeSettlementStatus)(p.settlementStatus, true);
+                return st === 'Pending' || st === 'Processing';
             });
             let pendingSettlementAmount = 0;
             let earliestPendingDate = null;
             for (const p of pendingPayments) {
                 const amt = p.advanceFee || p.amount || 0;
-                const rz = amt * 0.02;
-                const gst = rz * 0.18;
-                pendingSettlementAmount += (amt - rz - gst);
+                const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+                pendingSettlementAmount += split.netPayable;
                 if (!earliestPendingDate || p.createdAt < earliestPendingDate) {
                     earliestPendingDate = p.createdAt;
                 }
@@ -174,15 +155,20 @@ const getAdminHospitalSettlementDetails = (req, res) => __awaiter(void 0, void 0
             hospitalId,
             createdAt: { $gte: start, $lte: end }
         });
-        const completedPayments = payments.filter(p => p.status === 'completed');
-        const failedPayments = payments.filter(p => p.status === 'failed');
+        const completedPayments = payments.filter(p => p.status === 'completed' && (0, financialCalculator_1.isOnlineAdvancePayment)(p));
+        const failedPayments = payments.filter(p => p.status === 'failed' && (0, financialCalculator_1.isOnlineAdvancePayment)(p));
         let grossCollection = 0;
+        let razorpayCharges = 0;
+        let gst = 0;
+        let netSettlementAmount = 0;
         for (const p of completedPayments) {
-            grossCollection += (p.advanceFee || p.amount || 0);
+            const amt = p.advanceFee || p.amount || 0;
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+            grossCollection += split.grossAmount;
+            razorpayCharges += split.fee;
+            gst += split.tax;
+            netSettlementAmount += split.netPayable;
         }
-        const razorpayCharges = grossCollection * 0.02;
-        const gst = razorpayCharges * 0.18;
-        const netSettlementAmount = grossCollection - razorpayCharges - gst;
         // Earliest pending payment for eligibility date
         const pendingPayments = yield Payment_1.default.find({
             hospitalId,
@@ -205,10 +191,10 @@ const getAdminHospitalSettlementDetails = (req, res) => __awaiter(void 0, void 0
             totalBookings: payments.length,
             successfulPayments: completedPayments.length,
             failedPayments: failedPayments.length,
-            grossCollection,
-            razorpayCharges,
-            gst,
-            netSettlementAmount,
+            grossCollection: Math.round(grossCollection * 100) / 100,
+            razorpayCharges: Math.round(razorpayCharges * 100) / 100,
+            gst: Math.round(gst * 100) / 100,
+            netSettlementAmount: Math.round(netSettlementAmount * 100) / 100,
             settlementEligibleDate
         };
         // Transaction Table (all completed payments, with details)
@@ -222,19 +208,17 @@ const getAdminHospitalSettlementDetails = (req, res) => __awaiter(void 0, void 0
             var _a;
             const app = t.appointmentId;
             const gross = t.advanceFee || t.amount || 0;
-            const rzFee = gross * 0.02;
-            const gstFee = rzFee * 0.18;
-            const net = gross - rzFee - gstFee;
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(gross);
             return {
                 paymentId: t._id,
                 bookingId: (app === null || app === void 0 ? void 0 : app._id) || t.appointmentId,
                 patientName: (app === null || app === void 0 ? void 0 : app.patientName) || ((_a = app === null || app === void 0 ? void 0 : app.patient) === null || _a === void 0 ? void 0 : _a.name) || t.patientName || 'Patient',
                 appointmentDate: (app === null || app === void 0 ? void 0 : app.slotTime) ? new Date(app.slotTime).toLocaleDateString('en-IN') : 'N/A',
                 consultationFee: (app === null || app === void 0 ? void 0 : app.consultationFee) || t.consultationFee || 500,
-                advancePaid: gross,
-                razorpayFee: rzFee,
-                gst: gstFee,
-                netAmount: net,
+                advancePaid: split.grossAmount,
+                razorpayFee: split.fee,
+                gst: split.tax,
+                netAmount: split.netPayable,
                 paymentStatus: t.status,
                 settlementStatus: t.settlementStatus
             };
@@ -380,14 +364,19 @@ const initiateManualSettlement = (req, res) => __awaiter(void 0, void 0, void 0,
         // Fetch payments
         const payments = yield Payment_1.default.find({ _id: { $in: paymentIds } });
         let grossCollection = 0;
+        let razorpayCharges = 0;
+        let gstCharges = 0;
+        let netAmount = 0;
         const appointmentIds = [];
         for (const p of payments) {
-            grossCollection += (p.advanceFee || p.amount || 0);
+            const amt = p.advanceFee || p.amount || 0;
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+            grossCollection += split.grossAmount;
+            razorpayCharges += split.fee;
+            gstCharges += split.tax;
+            netAmount += split.netPayable;
             appointmentIds.push(p.appointmentId);
         }
-        const razorpayCharges = grossCollection * 0.02;
-        const gstCharges = razorpayCharges * 0.18;
-        const netAmount = grossCollection - razorpayCharges - gstCharges;
         // Generate SET-YYYYMMDD-XXXX ID
         const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
         const countToday = yield Settlement_1.default.countDocuments({
@@ -502,16 +491,17 @@ const getAdminSettlementAnalytics = (req, res) => __awaiter(void 0, void 0, void
         let pendingSettlementAmount = 0;
         let totalRazorpayCharges = 0;
         let totalSettledAmount = 0;
-        const pendingPayments = yield Payment_1.default.find({
+        const pendingPaymentsDocs = yield Payment_1.default.find({
             status: 'completed',
-            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement'] }
-        });
+            settlementStatus: { $in: ['Waiting for Razorpay Settlement', 'Ready for Settlement', 'Pending', 'Processing'] }
+        }).lean();
+        const pendingPayments = pendingPaymentsDocs.filter(financialCalculator_1.isOnlineAdvancePayment);
         for (const p of pendingPayments) {
             const amt = p.advanceFee || p.amount || 0;
-            const rz = amt * 0.02;
-            const gst = rz * 0.18;
-            pendingSettlementAmount += (amt - rz - gst);
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+            pendingSettlementAmount += split.netPayable;
         }
+        pendingSettlementAmount = Math.round(pendingSettlementAmount * 100) / 100;
         const completedCount = settlements.filter(s => s.status === 'Settlement Completed').length;
         const settlementSuccessRate = totalSettlementsCount > 0 ? (completedCount / totalSettlementsCount) * 100 : 100;
         // Payout timings calculation (avg hours between creation and confirmation)
@@ -577,42 +567,38 @@ const getHospitalSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, 
             createdAt: { $gte: startOfToday, $lte: endOfToday }
         });
         // Today's Online Collection
-        const todayPayments = yield Payment_1.default.find({
+        const todayPaymentsDocs = yield Payment_1.default.find({
             hospitalId: hospital._id,
             status: { $in: ['completed', 'paid'] },
-            $or: [
-                { paymentSource: 'pillora_online' },
-                { razorpayPaymentId: { $exists: true, $ne: '' } },
-                { mode: 'online' }
-            ],
             createdAt: { $gte: startOfToday, $lte: endOfToday }
-        });
+        }).lean();
+        const todayPayments = todayPaymentsDocs.filter(financialCalculator_1.isOnlineAdvancePayment);
         let todayOnlineCollection = 0;
         for (const p of todayPayments) {
             todayOnlineCollection += (p.advanceFee || p.amount || 0);
         }
         // Pending Settlement Amount
-        const pendingPayments = yield Payment_1.default.find({
+        const allPendingPayments = yield Payment_1.default.find({
             hospitalId: hospital._id,
-            status: { $in: ['completed', 'paid'] },
-            $or: [
-                { paymentSource: 'pillora_online' },
-                { razorpayPaymentId: { $exists: true, $ne: '' } },
-                { mode: 'online' }
-            ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
+            status: { $in: ['completed', 'paid'] }
+        }).lean();
+        const pendingPayments = allPendingPayments.filter(p => {
+            if (!(0, financialCalculator_1.isOnlineAdvancePayment)(p))
+                return false;
+            const st = (0, financialCalculator_1.normalizeSettlementStatus)(p.settlementStatus, true);
+            return st === 'Pending' || st === 'Processing';
         });
         let pendingSettlementAmount = 0;
         let earliestPendingDate = null;
         for (const p of pendingPayments) {
             const amt = p.advanceFee || p.amount || 0;
-            const rz = amt * 0.02;
-            const gst = rz * 0.18;
-            pendingSettlementAmount += (amt - rz - gst);
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+            pendingSettlementAmount += split.netPayable;
             if (!earliestPendingDate || p.createdAt < earliestPendingDate) {
                 earliestPendingDate = p.createdAt;
             }
         }
+        pendingSettlementAmount = Math.round(pendingSettlementAmount * 100) / 100;
         // Next Expected Settlement Date (earliest pending date + 2 days)
         let nextExpectedSettlementDate = 'N/A';
         if (earliestPendingDate) {
@@ -633,7 +619,7 @@ const getHospitalSettlementsDashboard = (req, res) => __awaiter(void 0, void 0, 
             success: true,
             dashboard: {
                 todayBookings,
-                todayOnlineCollection,
+                todayOnlineCollection: Math.round(todayOnlineCollection * 100) / 100,
                 pendingSettlementAmount,
                 nextExpectedSettlementDate,
                 lastSettlementAmount,
@@ -657,30 +643,30 @@ const getHospitalExpectedSettlement = (req, res) => __awaiter(void 0, void 0, vo
             res.status(404).json({ success: false, message: 'Hospital context not found' });
             return;
         }
-        const pendingPayments = yield Payment_1.default.find({
+        const allPayments = yield Payment_1.default.find({
             hospitalId: hospital._id,
-            status: { $in: ['completed', 'paid'] },
-            $or: [
-                { paymentSource: 'pillora_online' },
-                { razorpayPaymentId: { $exists: true, $ne: '' } },
-                { mode: 'online' }
-            ],
-            settlementStatus: { $nin: ['Settled', 'Settlement Completed', 'Awaiting Hospital Confirmation', 'refunded', 'not_applicable'] }
+            status: { $in: ['completed', 'paid'] }
+        }).lean();
+        const pendingPayments = allPayments.filter(p => {
+            if (!(0, financialCalculator_1.isOnlineAdvancePayment)(p))
+                return false;
+            const st = (0, financialCalculator_1.normalizeSettlementStatus)(p.settlementStatus, true);
+            return st === 'Pending' || st === 'Processing';
         });
         let grossCollection = 0;
-        for (const p of pendingPayments) {
-            grossCollection += (p.advanceFee || p.amount || 0);
-        }
-        const razorpayFee = grossCollection * 0.02;
-        const gst = razorpayFee * 0.18;
-        const expectedSettlementAmount = grossCollection - razorpayFee - gst;
-        // Earliest date check
+        let expectedSettlementAmount = 0;
         let earliestDate = null;
         for (const p of pendingPayments) {
+            const amt = p.advanceFee || p.amount || 0;
+            const split = (0, financialCalculator_1.calculateAdvanceGatewaySplit)(amt);
+            grossCollection += split.grossAmount;
+            expectedSettlementAmount += split.netPayable;
             if (!earliestDate || p.createdAt < earliestDate) {
                 earliestDate = p.createdAt;
             }
         }
+        grossCollection = Math.round(grossCollection * 100) / 100;
+        expectedSettlementAmount = Math.round(expectedSettlementAmount * 100) / 100;
         let estimatedSettlementDate = 'N/A';
         let currentStatus = 'Waiting for Razorpay Settlement';
         if (earliestDate) {
