@@ -12,9 +12,10 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/donors', protect, registerDonor);
-// Donor lists contain phone numbers/addresses: login required (was public)
-router.get('/donors', protect, findDonors);
-router.get('/matches', protect, findMatches);
+// Donor lists contain names and phone numbers: admin only. Requesters get donor
+// contact details through the KYC-gated request flow (POST /requests), not here.
+router.get('/donors', protect, adminOnly, findDonors);
+router.get('/matches', protect, adminOnly, findMatches);
 router.get('/admin/donors', protect, adminOnly, getAllDonors);
 router.post('/admin/donors/delete-many', protect, adminOnly, deleteManyDonors);
 router.patch('/admin/donors/:id', protect, adminOnly, updateDonorAdmin);
