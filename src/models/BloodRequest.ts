@@ -23,6 +23,9 @@ export interface IBloodRequest extends Document {
     email?: string;
     kycStatus?: 'pending' | 'verified' | 'failed';
     kycVerifiedAt?: Date;
+    /** Set once when donor details were sent to the requester (shares happen at most once). */
+    donorsSharedAt?: Date;
+    donorsSharedCount?: number;
 }
 
 const BloodRequestSchema: Schema = new Schema({
@@ -67,7 +70,9 @@ const BloodRequestSchema: Schema = new Schema({
         enum: ['pending', 'verified', 'failed'],
         default: 'pending'
     },
-    kycVerifiedAt: { type: Date }
+    kycVerifiedAt: { type: Date },
+    donorsSharedAt: { type: Date },
+    donorsSharedCount: { type: Number }
 }, { timestamps: true });
 
 export default mongoose.model<IBloodRequest>('BloodRequest', BloodRequestSchema);

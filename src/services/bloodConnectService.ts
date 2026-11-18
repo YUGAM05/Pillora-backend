@@ -4,121 +4,73 @@ import { sendKYCFailedEmail, sendNoDonorFoundEmail, sendDonorFoundEmail } from '
 import { sendWhatsAppTemplate } from './whatsappService';
 
 /**
+ * Donor sharing rules (Nov 2026):
+ *  - Donor details are shared only after an admin has approved the requester's
+ *    ID (PATCH /api/blood-bank/admin/requests/:id/kyc). Nothing is shared automatically.
+ *  - Only donors with a recorded sharing consent (sharingConsentAt) are matched.
+ *    Imported donors without consent are never shared until consent is recorded.
+ *  - At most MAX_DONORS_SHARED donors per request, and each request shares once.
+ *  - Never log donor or requester personal data.
+ */
+export const MAX_DONORS_SHARED = 5;
+
+const escapeRegex = (str: string) => str.slice(0, 100).replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+/** Query filters common to every donor match. */
+const eligibleDonorFilter = (ninetyDaysAgo: Date) => ({
+  // Only donors who agreed to have their name and phone shared with requesters.
+  sharingConsentAt: { $exists: true, $ne: null },
+  $and: [
+    { $or: [{ isAvailable: true }, { isAvailable: { $exists: false } }, { isAvailable: null }] },
+    // Completed the 90-day gap since the last donation
+    { $or: [{ lastDonationDate: { $exists: false } }, { lastDonationDate: null }, { lastDonationDate: { $lte: ninetyDaysAgo } }] },
+  ],
+});
+
+/**
  * Searches for matching blood donors and notifies the requester.
- * First queries by bloodGroup + city + area. If no match is found, fallback to city + bloodGroup.
+ * First queries by bloodGroup + city + area; if none, falls back to city + bloodGroup.
+ * Must only be called after the requester's ID has been approved.
  */
 export const searchAndNotifyDonors = async (requestId: string): Promise<void> => {
   try {
-    const request = await BloodRequest.findById(requestId);
+    // Claim the request atomically so donor details are shared at most once,
+    // even if the approval is clicked twice.
+    const request = await BloodRequest.findOneAndUpdate(
+      { _id: requestId, donorsSharedAt: { $exists: false } },
+      { $set: { donorsSharedAt: new Date() } },
+      { new: true }
+    );
     if (!request) {
-      console.error(`[searchAndNotifyDonors] BloodRequest not found for ID: ${requestId}`);
+      console.log(`[searchAndNotifyDonors] Request ${requestId} not found or donors already shared; skipping.`);
       return;
     }
-
-    console.log('=== DONOR SEARCH START ===');
-    console.log('Request ID:', requestId);
-    console.log('Request blood group:', request.bloodGroup);
-    console.log('Request city:', request.city);
-    console.log('Request area:', request.area);
-
-    // First check how many total donors exist
-    const totalDonors = await BloodDonor.countDocuments();
-    console.log('Total donors in DB:', totalDonors);
-
-    // Check all donors regardless of filters
-    const allDonors = await BloodDonor.find({});
-    console.log('All donors:', JSON.stringify(allDonors.map(d => ({
-      name: d.name,
-      bloodGroup: d.bloodGroup,
-      city: d.city,
-      area: d.area,
-      isAvailable: d.isAvailable
-    })), null, 2));
-
-    // Fix 4 — Check the exact field names in the Donor schema
-    const firstDonor = await BloodDonor.findOne({});
-    if (firstDonor) {
-      console.log('Donor document keys:', Object.keys(firstDonor.toObject()));
-      console.log('Full donor document:', firstDonor.toObject());
-    } else {
-      console.log('No donor document in DB to extract keys from.');
-    }
-
-    // Fix 5 — Check the exact field names in the BloodRequest schema
-    console.log('Request document keys:', Object.keys(request.toObject()));
-    console.log('Full request document:', request.toObject());
 
     const cityVal = (request.city || '').trim();
     const areaVal = (request.area || '').trim();
     const bloodGroupVal = (request.bloodGroup || '').trim();
 
-    const escapeRegex = (str: string) => str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const escapedBloodGroup = escapeRegex(bloodGroupVal);
-    const escapedCity = escapeRegex(cityVal);
-    const escapedArea = escapeRegex(areaVal);
-
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    // Now search with filters
-    // Filter only donors whose status is Eligible (completed 90-day mandatory waiting period)
-    let donors = await BloodDonor.find({
-      bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
-      city: { $regex: escapedCity, $options: 'i' },
-      area: { $regex: escapedArea, $options: 'i' },
-      $and: [
-        {
-          $or: [
-            { isAvailable: true },
-            { isAvailable: { $exists: false } },
-            { isAvailable: null }
-          ]
-        },
-        {
-          $or: [
-            { lastDonationDate: { $exists: false } },
-            { lastDonationDate: null },
-            { lastDonationDate: { $lte: ninetyDaysAgo } }
-          ]
-        }
-      ]
-    });
+    const base = {
+      bloodGroup: { $regex: `^${escapeRegex(bloodGroupVal)}$`, $options: 'i' },
+      city: { $regex: escapeRegex(cityVal), $options: 'i' },
+      ...eligibleDonorFilter(ninetyDaysAgo),
+    };
 
-    console.log('Matching donors found (strict city + area):', donors.length);
-
-    // If no exact area match found search by city and blood group only
+    // Longest since last donation first; capped.
+    let donors = await BloodDonor.find({ ...base, area: { $regex: escapeRegex(areaVal), $options: 'i' } })
+      .sort({ lastDonationDate: 1 })
+      .limit(MAX_DONORS_SHARED);
     if (donors.length === 0) {
-      console.log('No exact area match. Falling back to city + blood group search...');
-      donors = await BloodDonor.find({
-        bloodGroup: { $regex: `^${escapedBloodGroup}$`, $options: 'i' },
-        city: { $regex: escapedCity, $options: 'i' },
-        $and: [
-          {
-            $or: [
-              { isAvailable: true },
-              { isAvailable: { $exists: false } },
-              { isAvailable: null }
-            ]
-          },
-          {
-            $or: [
-              { lastDonationDate: { $exists: false } },
-              { lastDonationDate: null },
-              { lastDonationDate: { $lte: ninetyDaysAgo } }
-            ]
-          }
-        ]
-      });
-      console.log('Matching donors found (city fallback):', donors.length);
+      donors = await BloodDonor.find(base).sort({ lastDonationDate: 1 }).limit(MAX_DONORS_SHARED);
     }
-
-    console.log('=== DONOR SEARCH END ===');
+    console.log(`[searchAndNotifyDonors] Request ${requestId}: ${donors.length} consenting donor(s) matched (max ${MAX_DONORS_SHARED}).`);
 
     const emailToUse = request.email || '';
-
     if (donors.length === 0) {
-      // NO DONORS FOUND
-      await request.updateOne({ status: 'no_donor_found' });
+      await request.updateOne({ status: 'no_donor_found', donorsSharedCount: 0 });
       if (emailToUse) {
         await sendNoDonorFoundEmail({
           toEmail: emailToUse,
@@ -127,23 +79,16 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
           city: cityVal,
           area: areaVal
         });
-      } else {
-        console.log(`[searchAndNotifyDonors] No donor found, but no email address on file for request ${requestId}`);
       }
       return;
     }
 
-    // DONORS FOUND — send email & WhatsApp with donor details
-    await request.updateOne({ status: 'matched' });
-
+    // DONORS FOUND: send email and WhatsApp with donor details
+    await request.updateOne({ status: 'matched', donorsSharedCount: donors.length });
     const contactPhone = request.contactNumber || (request as any).phone;
     if (contactPhone) {
       try {
         const matchedDonor = donors[0];
-        const requesterName = request.patientName || 'Requester';
-        const donorName = matchedDonor?.name || 'Volunteer Donor';
-        const donorPhone = matchedDonor?.phone || 'N/A';
-
         await sendWhatsAppTemplate(
           contactPhone,
           'donor_found_alert',
@@ -152,15 +97,15 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
             {
               type: 'body',
               parameters: [
-                { type: 'text', text: requesterName },
+                { type: 'text', text: request.patientName || 'Requester' },
                 { type: 'text', text: bloodGroupVal },
-                { type: 'text', text: donorName },
-                { type: 'text', text: donorPhone }
+                { type: 'text', text: matchedDonor?.name || 'Volunteer Donor' },
+                { type: 'text', text: matchedDonor?.phone || 'N/A' }
               ]
             }
           ]
         );
-        console.log(`[searchAndNotifyDonors] WhatsApp donor_found_alert sent to ${contactPhone}`);
+        console.log(`[searchAndNotifyDonors] WhatsApp donor_found_alert sent for request ${requestId}`);
       } catch (waErr: any) {
         console.error('[searchAndNotifyDonors] WhatsApp dispatch error:', waErr.message || waErr);
       }
@@ -172,8 +117,8 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
         patientName: request.patientName,
         bloodGroup: bloodGroupVal,
         unitsNeeded: request.unitsNeeded || request.units || 1,
-        requestArea: areaVal,      // ← ADD THIS: the user's entered area
-        requestCity: cityVal,      // ← ADD THIS
+        requestArea: areaVal,
+        requestCity: cityVal,
         donors: donors.map((d: any) => ({
           name: d.name || 'Anonymous',
           bloodGroup: d.bloodGroup || bloodGroupVal,
@@ -182,17 +127,15 @@ export const searchAndNotifyDonors = async (requestId: string): Promise<void> =>
           city: d.city || ''
         }))
       });
-    } else {
-      console.log(`[searchAndNotifyDonors] Matched ${donors.length} donors, but no email address on file for request ${requestId}`);
     }
-  } catch (error) {
-    console.error('[searchAndNotifyDonors] Error searching or notifying donors:', error);
+  } catch (error: any) {
+    console.error('[searchAndNotifyDonors] Error searching or notifying donors:', error?.message || error);
   }
 };
 
 /**
- * Main entry point triggered when KYC verification completes.
- * Updates KYC status and kicks off donor search notifications if successful.
+ * Called when the requester's ID check is decided (by an admin).
+ * Passed: share up to MAX_DONORS_SHARED consenting donors (once). Failed: email the requester.
  */
 export const processKYCResult = async (requestId: string, kycPassed: boolean): Promise<void> => {
   try {
@@ -203,24 +146,19 @@ export const processKYCResult = async (requestId: string, kycPassed: boolean): P
     }
 
     if (!kycPassed) {
-      // KYC FAILED — send failure email and stop
       await bloodRequest.updateOne({ kycStatus: 'failed' });
-      const emailToUse = bloodRequest.email;
-      if (emailToUse) {
+      if (bloodRequest.email) {
         await sendKYCFailedEmail({
-          toEmail: emailToUse,
+          toEmail: bloodRequest.email,
           patientName: bloodRequest.patientName
         });
-      } else {
-        console.log(`[processKYCResult] KYC failed, but no email address on file for request ${requestId}`);
       }
       return;
     }
 
-    // KYC PASSED — update status and search for donors
     await bloodRequest.updateOne({ kycStatus: 'verified', kycVerifiedAt: new Date() });
     await searchAndNotifyDonors(requestId);
-  } catch (error) {
-    console.error('[processKYCResult] Error processing KYC result:', error);
+  } catch (error: any) {
+    console.error('[processKYCResult] Error processing KYC result:', error?.message || error);
   }
 };

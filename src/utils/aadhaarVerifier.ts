@@ -53,7 +53,7 @@ const ollama = new Ollama({
 
 export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientName: string) => {
     try {
-        console.log(`[Agent] Start verify: ${patientName}. Image type: ${typeof imageBuffer}`);
+        console.log(`[Agent] Start verify. Image type: ${typeof imageBuffer}`);
 
         // Prepare image for Tesseract
         let processedImage: any = imageBuffer;
@@ -103,7 +103,7 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
 
         // 🚨 HARD RULE 2: Verhoeff Checksum
         const verhoeffResult = validateVerhoeff(aadhaarNumber);
-        console.log(`[Agent] Found Aadhaar: ${aadhaarNumber}, Verhoeff Valid: ${verhoeffResult}`);
+        console.log(`[Agent] Aadhaar-format number found, Verhoeff valid: ${verhoeffResult}`);
         if (!verhoeffResult) {
             console.log("[Agent] Verhoeff checksum failed. Rejecting.");
             return {
@@ -135,7 +135,7 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             const isNamePresent = nameParts.some(part => lowerText.includes(part));
 
             if (!isNamePresent) {
-                console.log(`[Agent] Name mismatch. User: ${patientName}, Text: ${text.slice(0, 50)}...`);
+                console.log("[Agent] Name on the document does not match the patient name.");
                 // We might perform a stricter check via AI, but for "fake image" protection, this is good.
                 // However, OCR can be messy. Let's trust the AI for name matching IF the hard rules passed.
             }
@@ -159,7 +159,7 @@ export const verifyAadhaarLocal = async (imageBuffer: Buffer | string, patientNa
             result.remarks = "kyc verification is inncorrect";
         }
 
-        console.log("[Agent] Fast Verification Complete. Final Result:", result);
+        console.log("[Agent] Fast verification complete:", result.status);
         return {
             ...result,
             aadhaarNumber: aadhaarNumber // Return the raw extracted number
