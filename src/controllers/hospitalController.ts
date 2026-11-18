@@ -11,14 +11,18 @@ import { logActivity } from '../utils/activityLogger';
 
 // ✅ Cloudinary config
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
-    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
-    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
+    cloud_name: (process.env.CLOUDINARY_CLOUD_NAME as string),
+    api_key: (process.env.CLOUDINARY_API_KEY as string),
+    api_secret: (process.env.CLOUDINARY_API_SECRET as string),
 });
 
 // @desc    Get all unique cities
 // @route   GET /api/hospitals/cities
 // @access  Public
+// Fields that must never leave the server on PUBLIC hospital endpoints
+// (bank account, login password, owner account id, payment history).
+const PUBLIC_HOSPITAL_EXCLUDE = '-tempPassword -bankDetails -user -lastPaymentAmount -lastPaymentDate -lastPaymentMethod -lastPaymentReference -paymentStatus -registrationNumber';
+
 export const getCities = async (req: Request, res: Response): Promise<void> => {
     try {
         const cities = await Hospital.distinct('city');
@@ -98,7 +102,7 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
             query.rating = { $gte: Number(minRating) };
         }
 
-        let hospitals = await Hospital.find(query);
+        let hospitals = await Hospital.find(query).select(PUBLIC_HOSPITAL_EXCLUDE);
 
         if (speciality) {
             const specList = String(speciality).split(',').map(s => s.trim()).filter(Boolean);
@@ -147,19 +151,19 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
 export const getHospitalById = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
-        const querySlug = req.query.slug as string;
-        const queryId = req.query.id as string;
+        const querySlug = typeof req.query.slug === 'string' ? req.query.slug : undefined;
+        const queryId = typeof req.query.id === 'string' && mongoose.isValidObjectId(req.query.id) ? req.query.id : undefined;
 
         let hospital;
         if (querySlug) {
-            hospital = await Hospital.findOne({ slug: querySlug });
+            hospital = await Hospital.findOne({ slug: querySlug }).select(PUBLIC_HOSPITAL_EXCLUDE);
         } else if (queryId) {
-            hospital = await Hospital.findById(queryId);
+            hospital = await Hospital.findById(queryId).select(PUBLIC_HOSPITAL_EXCLUDE);
         } else if (id) {
             if (mongoose.isValidObjectId(id)) {
-                hospital = await Hospital.findById(id);
+                hospital = await Hospital.findById(id).select(PUBLIC_HOSPITAL_EXCLUDE);
             } else {
-                hospital = await Hospital.findOne({ slug: id });
+                hospital = await Hospital.findOne({ slug: id }).select(PUBLIC_HOSPITAL_EXCLUDE);
             }
         }
 

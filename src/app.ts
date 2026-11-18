@@ -2,6 +2,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+import { requireEnv, getMongoUri, assertRequiredEnv } from './config/env';
+assertRequiredEnv();
 
 import express from 'express';
 import helmet from 'helmet';
@@ -145,7 +147,12 @@ app.use(async (req, res, next) => {
     }
 });
 
-app.use(express.json({ limit: '100mb' }));
+// Keep the exact raw bytes: webhook signatures (Razorpay) must be verified
+// against the body as sent, not a re-serialized JSON.stringify(req.body).
+app.use(express.json({
+    limit: '100mb',
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static('uploads')); // Serve uploaded files
 
@@ -155,11 +162,11 @@ app.use(helmet({
 app.use(morgan('dev'));
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'fallback_secret',
+    secret: requireEnv('SESSION_SECRET'),
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({
-        mongoUrl: process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
+        mongoUrl: getMongoUri(),
         collectionName: 'sessions',
     }),
     cookie: {
@@ -347,7 +354,7 @@ export const connectDB = async () => {
     }
     
     try {
-        const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
+        const uri = getMongoUri();
         await mongoose.connect(uri, {
             dbName: 'e-pharmacy',
             serverSelectionTimeoutMS: 4000,

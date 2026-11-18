@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Order from '../models/Order';
 import Prescription from '../models/Prescription';
 import Medicine from '../models/Medicine';
@@ -9,40 +10,117 @@ export const createOrder = async (req: AuthRequest, res: Response) => {
         const user_id = req.user._id;
         const { rx_id, seller_id, medicines, delivery_address } = req.body;
 
-        // 1. Calculate totals
-        let subtotal = 0;
-        for (const item of medicines) {
-            subtotal += item.price * item.quantity;
+        // ── 1. Validate input shape ─────────────────────────────────────────
+        // Prices, names and stock are NEVER taken from the client.
+        if (!Array.isArray(medicines) || medicines.length === 0 || medicines.length > 50) {
+            return res.status(400).json({ message: 'Your order must contain between 1 and 50 items.' });
         }
+        if (!seller_id || !mongoose.isValidObjectId(seller_id)) {
+            return res.status(400).json({ message: 'A valid seller is required.' });
+        }
+        const requested = new Map<string, number>();
+        for (const item of medicines) {
+            const qty = Number(item?.quantity);
+            if (!item?.medicine_id || !mongoose.isValidObjectId(item.medicine_id) || !Number.isInteger(qty) || qty < 1 || qty > 100) {
+                return res.status(400).json({ message: 'Each item needs a valid medicine and a quantity between 1 and 100.' });
+            }
+            const id = String(item.medicine_id);
+            requested.set(id, (requested.get(id) || 0) + qty);
+        }
+
+        // ── 2. Load medicines from the DB (source of truth for price) ───────
+        const dbMeds = await Medicine.find({ _id: { $in: [...requested.keys()] } });
+        if (dbMeds.length !== requested.size) {
+            return res.status(400).json({ message: 'One or more medicines no longer exist.' });
+        }
+        for (const med of dbMeds) {
+            if (med.admin_approved !== 'approved') {
+                return res.status(400).json({ message: `${med.name} is not available for sale.` });
+            }
+            if (String(med.seller_id) !== String(seller_id)) {
+                return res.status(400).json({ message: `${med.name} is not sold by this seller.` });
+            }
+        }
+
+        // ── 3. Prescription check for Rx-only medicines ─────────────────────
+        const needsRx = dbMeds.some((m) => m.requires_prescription);
+        let prescriptionClaimed = false;
+        if (needsRx) {
+            if (!rx_id || typeof rx_id !== 'string') {
+                return res.status(400).json({ message: 'A valid prescription is required for one or more items.' });
+            }
+            // Atomically claim the prescription: must belong to this user, be approved, unused and not expired
+            const now = new Date();
+            const rx = await Prescription.findOneAndUpdate(
+                {
+                    rx_id,
+                    user_id,
+                    admin_status: 'approved',
+                    is_used: { $ne: true },
+                    $or: [{ valid_until: { $exists: false } }, { valid_until: null }, { valid_until: { $gte: now } }],
+                },
+                { is_used: true },
+                { new: true }
+            );
+            if (!rx) {
+                return res.status(400).json({ message: 'Prescription is invalid, not yet approved, expired or already used.' });
+            }
+            prescriptionClaimed = true;
+        }
+
+        // ── 4. Atomically reserve stock (never goes below zero) ─────────────
+        const reserved: Array<{ id: string; qty: number }> = [];
+        const releaseStock = async () => {
+            for (const r of reserved) {
+                await Medicine.updateOne({ _id: r.id }, { $inc: { stock: r.qty } });
+            }
+            if (prescriptionClaimed) await Prescription.updateOne({ rx_id, user_id }, { is_used: false });
+        };
+        for (const [id, qty] of requested) {
+            const ok = await Medicine.findOneAndUpdate(
+                { _id: id, stock: { $gte: qty } },
+                { $inc: { stock: -qty } }
+            );
+            if (!ok) {
+                await releaseStock();
+                const name = dbMeds.find((m) => String(m._id) === id)?.name || 'An item';
+                return res.status(409).json({ message: `${name} does not have enough stock.` });
+            }
+            reserved.push({ id, qty });
+        }
+
+        // ── 5. Totals from server-side prices (in paise to avoid float drift) ──
+        const items = dbMeds.map((m) => ({
+            medicine_id: m._id,
+            name: m.name,
+            quantity: requested.get(String(m._id))!,
+            price: m.price,
+        }));
+        const subtotalPaise = items.reduce((sum, i) => sum + Math.round(i.price * 100) * i.quantity, 0);
+        const subtotal = subtotalPaise / 100;
 
         const platform_fee = 10;
         const seller_commission = Math.round(subtotal * 0.15);
-        const total_amount = subtotal + platform_fee; // simplified
+        const total_amount = (subtotalPaise + platform_fee * 100) / 100;
 
-        // 2. Create Order
-        const order = await Order.create({
-            user_id,
-            rx_id,
-            seller_id,
-            medicines,
-            total_amount,
-            delivery_address,
-            status: 'order_placed',
-            payment_status: 'pending',
-            platform_fee,
-            seller_commission
-        });
-
-        // 3. Update Prescription if provided
-        if (rx_id) {
-            await Prescription.findOneAndUpdate({ rx_id }, { is_used: true });
-        }
-
-        // 4. Reduce Medicine Stock
-        for (const item of medicines) {
-            await Medicine.findByIdAndUpdate(item.medicine_id, {
-                $inc: { stock: -item.quantity }
+        // ── 6. Create Order ─────────────────────────────────────────────────
+        let order;
+        try {
+            order = await Order.create({
+                user_id,
+                rx_id: needsRx ? rx_id : undefined,
+                seller_id,
+                medicines: items,
+                total_amount,
+                delivery_address,
+                status: 'order_placed',
+                payment_status: 'pending',
+                platform_fee,
+                seller_commission
             });
+        } catch (createErr) {
+            await releaseStock();
+            throw createErr;
         }
 
         // 5. Emit Socket Event

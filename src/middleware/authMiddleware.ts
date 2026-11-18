@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
+import { getJwtSecret } from '../config/env';
 
 export interface AuthRequest extends Request {
     user?: any;
@@ -20,34 +21,18 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
         return;
     }
 
-    // Try every known JWT secret in order — covers all deployment states
-    // (.env local key, Vercel dashboard key, and all historical fallbacks)
-    const secretsToTry: string[] = [
-        process.env.JWT_SECRET,                     // 1. Vercel dashboard / .env (primary)
-        'supersecretkey_dev_only',                   // 2. The actual local .env value
-        'pillora_jwt_secret_fallback_2024',          // 3. Our consistent fallback
-        'defaultSecret',                             // 4. Original hardcoded fallback
-        'p!ll0r4_Jw7$3cr3t_K3y_X9mQ2vR8nL5tY1wZ6bF4hC0dA7eG3jN_2026_Pr0d_S3cur3', // 5. If user set it in Vercel
-    ].filter((s): s is string => typeof s === 'string' && s.length > 0);
-
-
+    // Verify only with the configured secret. Hard-coded fallback secrets were
+    // removed: anything in source code is public and lets anyone forge tokens.
     let decoded: any = null;
     let verifyError: any = null;
-
-    for (const secret of secretsToTry) {
-        try {
-            decoded = jwt.verify(token, secret);
-            console.log(`[AuthMiddleware] Token verified with secret index ${secretsToTry.indexOf(secret)}`);
-            break;
-        } catch (err: any) {
-            verifyError = err;
-            // Try next secret
-        }
+    try {
+        decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+    } catch (err: any) {
+        verifyError = err;
     }
 
     if (!decoded) {
-        console.error('[AuthMiddleware] Token verification failed with ALL secrets:', verifyError?.message);
-        console.error('[AuthMiddleware] Token start:', token.substring(0, 20) + '...');
+        console.error('[AuthMiddleware] Token verification failed:', verifyError?.message);
         res.status(401).json({
             message: 'Not authorized, token failed',
             details: verifyError?.name === 'TokenExpiredError' ? 'session_expired' : 'invalid_token',

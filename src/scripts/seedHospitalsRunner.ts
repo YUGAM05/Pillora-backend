@@ -3,10 +3,11 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { seedHospitals } from '../controllers/hospitalController';
 import { Request, Response } from 'express';
+import { getMongoUri } from '../config/env';
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
+const MONGO_URI = getMongoUri();
 
 mongoose.connect(MONGO_URI)
     .then(async () => {

@@ -164,23 +164,19 @@ function getSimulatedResponse(ocrText: string = '') {
       }
   }
   
-  let mappedMedicines = finalMedicines;
-  if (mappedMedicines.length === 0) {
-      mappedMedicines = [
-        { name: "Paracetamol", dosage: "500mg", quantity: "10", duration: "5 days" },
-        { name: "Amoxicillin", dosage: "250mg", quantity: "15", duration: "7 days" }
-      ];
-  }
-
+  // SAFETY: when the AI is unavailable we must NOT claim the prescription is
+  // valid and must NOT invent medicines. Heuristic lines are returned only as
+  // unverified suggestions; a pharmacist/admin has to review the document.
   return {
-    is_valid: true,
-    confidence: 0.85,
-    doctor_name: doctorName !== "Unknown Doctor" ? doctorName : "Dr. Simulation (Fallback)",
-    patient_name: patientName !== "Unknown Patient" ? patientName : "Test Patient",
-    hospital_name: "Pillora Verification",
-    date: new Date().toISOString().split('T')[0],
-    medicines: mappedMedicines,
-    issues: ["Extracted via offline heuristic engine due to AI API unavailability."],
-    expiry_date: "2025-12-31"
+    is_valid: false,
+    needs_manual_review: true,
+    confidence: 0,
+    doctor_name: doctorName !== "Unknown Doctor" ? doctorName : null,
+    patient_name: patientName !== "Unknown Patient" ? patientName : null,
+    hospital_name: null,
+    date: null,
+    medicines: finalMedicines.map((m) => ({ ...m, unverified: true })),
+    issues: ["Automatic verification is unavailable right now. This prescription will be reviewed manually by our pharmacist."],
+    expiry_date: null
   };
 }

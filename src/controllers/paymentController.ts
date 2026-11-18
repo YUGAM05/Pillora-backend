@@ -11,13 +11,38 @@ import { sendAppointmentNotification } from '../services/pushNotificationService
 import { sendWhatsAppTemplate } from '../services/whatsappService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import User from '../models/User';
+import Doctor from '../models/Doctor';
 
-// Initialize Razorpay
-// We default to fallback test keys if env variables are not present.
+// Initialize Razorpay (keys come only from the environment)
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+    key_id: (process.env.RAZORPAY_KEY_ID as string),
+    key_secret: (process.env.RAZORPAY_KEY_SECRET as string)
 });
+
+const ADVANCE_RATE = 0.20;
+
+/**
+ * The amount to charge is ALWAYS derived on the server. The doctor's fee is the
+ * source of truth (same as the hold flow); the appointment's stored fee is only
+ * a fallback for legacy appointments whose doctor record is gone.
+ */
+const resolveConsultationFee = async (appointment: any): Promise<number | null> => {
+    const doctor = appointment?.doctor ? await Doctor.findById(appointment.doctor).select('fee') : null;
+    const fee = Number(doctor?.fee) > 0 ? Number(doctor!.fee) : Number(appointment?.consultationFee);
+    return fee > 0 ? fee : null;
+};
+
+/** The logged-in user must be the appointment's patient. */
+const ownsAppointment = (req: AuthRequest, appointment: any): boolean => {
+    const uid = String(req.user?._id || req.user?.id || '');
+    return !!uid && String(appointment.patient) === uid;
+};
+
+/** Constant-time comparison of two hex signatures. */
+const safeEqualHex = (a: string, b: string): boolean => {
+    if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+};
 
 /**
  * @desc    Initiate Razorpay order for advance booking fee (20%)
@@ -26,12 +51,12 @@ const razorpay = new Razorpay({
  */
 export const initiatePayment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { appointmentId, doctorId, hospitalId, consultationFee } = req.body;
-        const userId = req.body.userId || req.user?._id || req.user?.id;
+        // consultationFee / hospitalId / userId from the body are ignored on purpose
+        const { appointmentId } = req.body;
+        const userId = req.user?._id || req.user?.id;
 
-        // Check required input fields
-        if (!appointmentId || !hospitalId || !consultationFee) {
-            res.status(400).json({ error: 'Missing required parameters: appointmentId, hospitalId, consultationFee' });
+        if (!appointmentId || typeof appointmentId !== 'string') {
+            res.status(400).json({ error: 'Missing required parameter: appointmentId' });
             return;
         }
 
@@ -41,11 +66,15 @@ export const initiatePayment = async (req: AuthRequest, res: Response): Promise<
             res.status(404).json({ error: 'Appointment not found' });
             return;
         }
+        if (!ownsAppointment(req, appointment)) {
+            res.status(403).json({ error: 'This appointment does not belong to you' });
+            return;
+        }
+        const hospitalId = appointment.hospital;
 
-        // Check consultationFee > 0
-        const feeNum = Number(consultationFee);
-        if (isNaN(feeNum) || feeNum <= 0) {
-            res.status(400).json({ error: 'Invalid consultation fee' });
+        const feeNum = await resolveConsultationFee(appointment);
+        if (!feeNum) {
+            res.status(400).json({ error: 'Consultation fee is not configured for this doctor' });
             return;
         }
 
@@ -67,7 +96,7 @@ export const initiatePayment = async (req: AuthRequest, res: Response): Promise<
             return;
         }
 
-        const advanceFee = feeNum * 0.20;
+        const advanceFee = feeNum * ADVANCE_RATE;
 
         // Create Razorpay order
         let order;
@@ -132,18 +161,24 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         let razorpaySignature = '';
         let isWebhook = false;
 
+        // Amount Razorpay says was actually paid (paise) — compared to what we expect below
+        let paidAmountPaise: number | null = null;
+
         // Check if it is a Webhook event from Razorpay
         if (req.headers['x-razorpay-signature']) {
             isWebhook = true;
             const signature = req.headers['x-razorpay-signature'] as string;
-            const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'fallback_secret';
-            
-            const hmac = crypto.createHmac('sha256', webhookSecret);
-            hmac.update(JSON.stringify(req.body));
-            const generatedSignature = hmac.digest('hex');
-            
-            // Allow failure bypass in non-production environments to ease local simulation
-            if (generatedSignature !== signature && process.env.NODE_ENV === 'production') {
+            const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+            const rawBody: Buffer | undefined = (req as any).rawBody;
+
+            // Signature is ALWAYS verified, in every environment, over the raw body
+            if (!webhookSecret || !rawBody) {
+                console.error('[VerifyPayment] Webhook rejected: secret or raw body missing');
+                res.status(400).json({ success: false, message: 'Invalid webhook signature' });
+                return;
+            }
+            const generatedSignature = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+            if (!safeEqualHex(generatedSignature, signature)) {
                 res.status(400).json({ success: false, message: 'Invalid webhook signature' });
                 return;
             }
@@ -154,6 +189,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                 const paymentEntity = req.body.payload.payment.entity;
                 razorpayPaymentId = paymentEntity.id;
                 razorpayOrderId = paymentEntity.order_id;
+                paidAmountPaise = Number(paymentEntity.amount);
             } else {
                 // Ignore other events
                 res.status(200).json({ success: true, message: 'Webhook event ignored' });
@@ -165,27 +201,43 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
             razorpayOrderId = req.body.razorpayOrderId;
             razorpaySignature = req.body.razorpaySignature;
 
-            if (!razorpayPaymentId || !razorpayOrderId) {
+            if (typeof razorpayPaymentId !== 'string' || typeof razorpayOrderId !== 'string' || !razorpayPaymentId || !razorpayOrderId) {
                 res.status(400).json({ success: false, message: 'Missing payment verification tokens' });
                 return;
             }
 
-            // Verify signature
-            const secret = process.env.RAZORPAY_KEY_SECRET || 'fallback_secret';
-            const hmac = crypto.createHmac('sha256', secret);
-            hmac.update(`${razorpayOrderId}|${razorpayPaymentId}`);
-            const generatedSignature = hmac.digest('hex');
-
-            // Skip signature check in dev mode if keys are not fully configured
-            const isTestKeys = !process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_KEY_ID?.startsWith('rzp_test');
-            if (generatedSignature !== razorpaySignature && !isTestKeys && process.env.NODE_ENV === 'production') {
+            // Verify signature — ALWAYS, including with test keys and outside production
+            const secret = process.env.RAZORPAY_KEY_SECRET;
+            if (!secret) {
+                console.error('[VerifyPayment] RAZORPAY_KEY_SECRET is not configured');
+                res.status(500).json({ success: false, message: 'Payment verification unavailable' });
+                return;
+            }
+            const generatedSignature = crypto.createHmac('sha256', secret)
+                .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+                .digest('hex');
+            if (!safeEqualHex(generatedSignature, String(razorpaySignature || ''))) {
                 res.status(400).json({ success: false, message: 'Invalid payment signature' });
+                return;
+            }
+
+            // Ask Razorpay what was actually paid instead of trusting the client
+            try {
+                const rzpPayment: any = await razorpay.payments.fetch(razorpayPaymentId);
+                if (rzpPayment.order_id !== razorpayOrderId || !['captured', 'authorized'].includes(rzpPayment.status)) {
+                    res.status(400).json({ success: false, message: 'Payment is not complete' });
+                    return;
+                }
+                paidAmountPaise = Number(rzpPayment.amount);
+            } catch (fetchErr: any) {
+                console.error('[VerifyPayment] Could not fetch payment from Razorpay:', fetchErr?.message);
+                res.status(502).json({ success: false, message: 'Could not confirm payment with gateway. Please contact support with your payment ID.' });
                 return;
             }
         }
 
         // Retrieve the pending payment record
-        const payment = await Payment.findOne({ razorpayOrderId });
+        const payment = await Payment.findOne({ razorpayOrderId: String(razorpayOrderId) });
         if (!payment) {
             res.status(404).json({ success: false, message: `Payment record not found for Order ID: ${razorpayOrderId}` });
             return;
@@ -199,8 +251,16 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
 
         const appointment = await Appointment.findById(payment.appointmentId);
         const feeNum = payment.consultationFee || appointment?.consultationFee || 500;
-        const advanceFee = payment.advanceFee || Math.round(feeNum * 0.20);
+        const advanceFee = payment.advanceFee || Math.round(feeNum * ADVANCE_RATE);
         const advancePaise = Math.round(advanceFee * 100);
+
+        // The gateway amount must match the server-computed amount for this order
+        const expectedPaise = Number(payment.amountInPaise) || advancePaise;
+        if (paidAmountPaise === null || paidAmountPaise !== expectedPaise) {
+            console.error(`[VerifyPayment] Amount mismatch for order ${razorpayOrderId}: paid=${paidAmountPaise} expected=${expectedPaise}`);
+            res.status(400).json({ success: false, message: 'Paid amount does not match the booking amount. Please contact support.' });
+            return;
+        }
         const feePaise = Math.round(advancePaise * 0.02);
         const taxPaise = Math.round(feePaise * 0.18);
         const netPaise = advancePaise - feePaise - taxPaise;
@@ -367,17 +427,12 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
  */
 export const createPaymentOrder = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { appointmentId, amount, patientName, patientPhone, patientEmail, patientAge } = req.body;
+        // `amount` from the client is ignored: the charge is computed from the doctor's fee
+        const { appointmentId, patientName, patientPhone, patientEmail, patientAge } = req.body;
         const userId = req.user?.id || req.user?._id;
 
-        if (!appointmentId || !amount) {
-            res.status(400).json({ error: 'Missing required parameters: appointmentId, amount' });
-            return;
-        }
-
-        const amountNum = Number(amount);
-        if (isNaN(amountNum) || amountNum <= 0) {
-            res.status(400).json({ error: 'Invalid payment amount' });
+        if (!appointmentId || typeof appointmentId !== 'string') {
+            res.status(400).json({ error: 'Missing required parameter: appointmentId' });
             return;
         }
 
@@ -393,6 +448,18 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
             res.status(404).json({ error: 'Appointment not found' });
             return;
         }
+        if (!ownsAppointment(req, appointment)) {
+            res.status(403).json({ error: 'This appointment does not belong to you' });
+            return;
+        }
+
+        const feeNum = await resolveConsultationFee(appointment);
+        if (!feeNum) {
+            res.status(400).json({ error: 'Consultation fee is not configured for this doctor' });
+            return;
+        }
+        const advanceFee = feeNum * ADVANCE_RATE;
+        const advancePaise = Math.round(advanceFee * 100);
 
         // Update patient details if provided
         if (patientName) appointment.patientName = patientName;
@@ -405,7 +472,7 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
         let order;
         try {
             order = await razorpay.orders.create({
-                amount: Math.round(amount), // paise
+                amount: advancePaise, // paise, server-computed
                 currency: 'INR',
                 receipt: appointmentId.toString(),
                 payment_capture: 1 as any
@@ -420,8 +487,6 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
         await Payment.deleteMany({ appointmentId, status: { $ne: 'completed' } });
 
         // Save to DB
-        const feeNum = appointment.consultationFee || 500;
-        const advanceFee = feeNum * 0.20;
         const payment = new Payment({
             appointmentId,
             userId: userId || appointment.patient,
@@ -429,7 +494,7 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
             consultationFee: feeNum,
             advanceFee,
             amount: advanceFee, // satisfies Mongoose schema validation requirement
-            amountInPaise: Math.round(advanceFee * 100),
+            amountInPaise: advancePaise,
             paymentType: 'advance',
             paymentSource: 'pillora_online',
             paymentMethod: 'razorpay',
@@ -446,7 +511,7 @@ export const createPaymentOrder = async (req: AuthRequest, res: Response): Promi
             orderId: order.id,
             amount: order.amount,
             currency: 'INR',
-            keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn'
+            keyId: (process.env.RAZORPAY_KEY_ID as string)
         });
     } catch (error: any) {
         console.error('[CreatePaymentOrderError]', error.message);

@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Appointment from '../models/Appointment';
 import Payment from '../models/Payment';
@@ -10,8 +11,8 @@ import Hospital from '../models/Hospital';
 import { createHold } from '../utils/holdManager';
 
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+    key_id: (process.env.RAZORPAY_KEY_ID as string),
+    key_secret: (process.env.RAZORPAY_KEY_SECRET as string)
 });
 
 /**
@@ -110,10 +111,20 @@ export const cancelAppointment = async (req: AuthRequest, res: Response): Promis
  */
 export const createAppointment = async (req: any, res: Response): Promise<void> => {
     try {
-        const { userId, doctorId, hospitalId, appointmentDate, appointmentTime, consultationFee, status } = req.body;
+        // Patient and fee are never taken from the request body
+        const { doctorId, hospitalId, appointmentDate, appointmentTime, status } = req.body;
 
         if (!doctorId || !hospitalId || !appointmentDate || !appointmentTime) {
             res.status(400).json({ error: 'Missing required fields' });
+            return;
+        }
+        if (!mongoose.isValidObjectId(doctorId) || !mongoose.isValidObjectId(hospitalId)) {
+            res.status(400).json({ error: 'Invalid doctor or hospital' });
+            return;
+        }
+        const doctorCheck = await Doctor.findById(doctorId).select('fee hospital');
+        if (!doctorCheck || String(doctorCheck.hospital) !== String(hospitalId)) {
+            res.status(404).json({ error: 'Doctor not found at this hospital' });
             return;
         }
 
@@ -155,7 +166,7 @@ export const createAppointment = async (req: any, res: Response): Promise<void> 
         const tokenNumber = activeAppointmentsCount + 1;
 
         // Resolve patient ID
-        const patientId = userId || req.user?._id || req.user?.id;
+        const patientId = req.user?._id || req.user?.id;
         if (!patientId) {
             res.status(400).json({ error: 'User ID is required' });
             return;
@@ -167,7 +178,7 @@ export const createAppointment = async (req: any, res: Response): Promise<void> 
 
         const finalDocName = doctorObj ? `Dr. ${doctorObj.name}` : "Dr. test";
         const finalHospName = hospitalObj ? hospitalObj.name : "Test";
-        const finalFee = Number(consultationFee) || (doctorObj ? doctorObj.fee : 500);
+        const finalFee = doctorCheck.fee;
 
         // Create Appointment
         const appointment = new Appointment({

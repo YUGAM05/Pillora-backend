@@ -40,8 +40,8 @@ export const safeDecryptBankDetails = (bank: any) => {
 };
 
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+    key_id: (process.env.RAZORPAY_KEY_ID as string),
+    key_secret: (process.env.RAZORPAY_KEY_SECRET as string)
 });
 
 /**

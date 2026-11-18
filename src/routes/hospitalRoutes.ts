@@ -1,5 +1,5 @@
 import express from 'express';
-import { getHospitals, getHospitalById, seedHospitals, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities, getHospitalSettlements } from '../controllers/hospitalController';
+import { getHospitals, getHospitalById, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities, getHospitalSettlements } from '../controllers/hospitalController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import multer from 'multer';
 
@@ -10,7 +10,7 @@ router.get('/cities', getCities);
 router.get('/search', searchHospitals);
 router.get('/:hospitalId/settlements', protect, getHospitalSettlements);
 router.get('/:id', getHospitalById);
-router.post('/seed', seedHospitals);
+// POST /seed removed: it was public and ran Hospital.deleteMany({}) + Doctor.deleteMany({}).
 router.post('/', protect, adminOnly, createHospital);
 router.put('/:id', protect, adminOnly, updateHospital);
 router.delete('/:id', protect, adminOnly, deleteHospital);

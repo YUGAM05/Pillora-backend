@@ -2,7 +2,7 @@ import express from 'express';
 import {
     registerUser, loginUser, sendOtp, verifyOtp,
     sendPhoneOtp, verifyPhoneOtp,
-    setupMfa, verifyMfa, setupAdmin,
+    setupMfa, verifyMfa,
     refreshToken, validateSession, logoutAdmin, emergencyLockdown,
     changePassword, forgotPassword, verifyResetToken, resetPassword
 } from '../controllers/authController';
@@ -12,6 +12,19 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { requireAdminAuth } from '../middleware/requireAdminAuth';
 import LoginHistory from '../models/LoginHistory';
+import { getJwtSecret } from '../config/env';
+
+// ─── Rate limiters for OTP / MFA / register (brute-force protection) ────────
+const simpleLimiter = (max: number, message: string) => rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message },
+});
+const otpLimiter = simpleLimiter(10, 'Too many OTP attempts. Please try again in 15 minutes.');
+const mfaLimiter = simpleLimiter(10, 'Too many authenticator attempts. Please try again in 15 minutes.');
+const registerLimiter = simpleLimiter(10, 'Too many sign-up attempts. Please try again later.');
 
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = rateLimit({
@@ -149,19 +162,19 @@ const loginCors = (req: express.Request, res: express.Response, next: express.Ne
 router.options('/login', loginCors);
 
 // ── Public routes ────────────────────────────────────────────────────────────
-router.post('/register', registerUser);
+router.post('/register', registerLimiter, registerUser);
 router.post('/login', loginCors, loginLimiter, loginUser);
-router.post('/send-otp', sendOtp);
-router.post('/verify-otp', verifyOtp);
-router.post('/phone/send-otp', sendPhoneOtp);
-router.post('/phone/verify-otp', verifyPhoneOtp);
+router.post('/send-otp', otpLimiter, sendOtp);
+router.post('/verify-otp', otpLimiter, verifyOtp);
+router.post('/phone/send-otp', otpLimiter, sendPhoneOtp);
+router.post('/phone/verify-otp', otpLimiter, verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, forgotPassword);
 router.get('/verify-reset-token', verifyResetToken);
 router.post('/reset-password', resetPasswordLimiter, resetPassword);
 
-// ── MFA routes (semi-public — user ID required but no full auth) ─────────────
-router.post('/setup-mfa', setupMfa);
-router.post('/verify-mfa', verifyMfa);
+// ── MFA routes: require the short-lived mfaToken issued by /login after a correct password
+router.post('/setup-mfa', mfaLimiter, setupMfa);
+router.post('/verify-mfa', mfaLimiter, verifyMfa);
 
 // ── Session management ───────────────────────────────────────────────────────
 router.post('/refresh', refreshToken);
@@ -171,8 +184,6 @@ router.post('/logout', logoutAdmin);
 // ── Protected admin-only routes ──────────────────────────────────────────────
 router.post('/emergency-lockdown', requireAdminAuth, emergencyLockdown);
 
-// ── Setup (remove in production) ─────────────────────────────────────────────
-router.get('/setup-admin', setupAdmin);
 router.post('/change-password', protect, changePassword);
 
 // ─────────────────────────────────────────────
@@ -211,7 +222,7 @@ router.get('/google/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );
@@ -281,7 +292,7 @@ router.get('/google/seller/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );
@@ -351,7 +362,7 @@ router.get('/google/delivery/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );

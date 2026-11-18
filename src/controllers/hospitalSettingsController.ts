@@ -19,9 +19,9 @@ import { computeSubscriptionStatus } from '../services/subscriptionService';
 
 // Cloudinary config
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
-    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
-    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
+    cloud_name: (process.env.CLOUDINARY_CLOUD_NAME as string),
+    api_key: (process.env.CLOUDINARY_API_KEY as string),
+    api_secret: (process.env.CLOUDINARY_API_SECRET as string),
 });
 
 // Helper: mask account number (e.g. •••• •••• 5678)

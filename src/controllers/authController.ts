@@ -16,17 +16,39 @@ import PasswordResetToken from '../models/PasswordResetToken';
 import { sendPasswordResetEmail } from '../services/emailService';
 import { sendWhatsAppTemplate, formatPhoneNumber, getPhoneVariants } from '../services/whatsappService';
 import OtpVerification from '../models/OtpVerification';
+import { getJwtSecret } from '../config/env';
+import { verifyFirebaseIdToken } from '../utils/firebaseTokenVerifier';
 
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
 const generateToken = (id: string, role: string, sessionId?: string) => {
     const payload: any = { id: id.toString(), role };
     if (sessionId) payload.sessionId = sessionId;
-    return jwt.sign(payload, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024', {
+    return jwt.sign(payload, getJwtSecret(), {
 
         expiresIn: '30d', // Increased to 30 days for better UX
     });
 };
+
+// ─── Short-lived token proving the password step passed (admin MFA) ─────────
+// verify-mfa / setup-mfa require this instead of a bare userId, so nobody can
+// run the MFA step for an account without first knowing its password.
+const MFA_TOKEN_PURPOSE = 'mfa_pending';
+const generateMfaToken = (id: string) =>
+    jwt.sign({ id: id.toString(), purpose: MFA_TOKEN_PURPOSE }, getJwtSecret(), { expiresIn: '10m' });
+
+const readMfaToken = (mfaToken: unknown): string | null => {
+    if (typeof mfaToken !== 'string' || !mfaToken) return null;
+    try {
+        const decoded: any = jwt.verify(mfaToken, getJwtSecret(), { algorithms: ['HS256'] });
+        return decoded?.purpose === MFA_TOKEN_PURPOSE && decoded.id ? String(decoded.id) : null;
+    } catch {
+        return null;
+    }
+};
+
+// Roles anyone may self-register as. admin/hospital accounts are provisioned by an admin.
+const SELF_REGISTER_ROLES = ['customer', 'seller', 'delivery'];
 
 // ─── Helper: get IP and User-Agent ──────────────────────────────────────────
 function getClientInfo(req: Request) {
@@ -40,7 +62,18 @@ function getClientInfo(req: Request) {
 //  REGISTER
 // ═══════════════════════════════════════════════════════════════════════════════
 export const registerUser = async (req: Request, res: Response): Promise<void> => {
-    const { name, email, password, role, bankDetails, pharmacyCertificate, aadhaarCardUrl, phone, address } = req.body;
+    const { name, email, password, bankDetails, pharmacyCertificate, aadhaarCardUrl, phone, address } = req.body;
+    const requestedRole = req.body.role || 'customer';
+
+    if (!SELF_REGISTER_ROLES.includes(requestedRole)) {
+        res.status(403).json({ message: 'This account type cannot be self-registered.' });
+        return;
+    }
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || password.length < 6) {
+        res.status(400).json({ message: 'A valid email and a password of at least 6 characters are required.' });
+        return;
+    }
+    const role: string = requestedRole;
 
     try {
         console.log(`Registering user: ${email}, Role: ${role}`);
@@ -60,7 +93,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
             name,
             email: email.toLowerCase().trim(),
             passwordHash,
-            role: role || 'customer',
+            role,
             status: initialStatus,
             phone,
             address
@@ -150,8 +183,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
     } catch (error: any) {
         console.error('Registration Server Error:', error);
         res.status(500).json({
-            message: 'Internal server error during registration',
-            details: error.message
+            message: 'Internal server error during registration'
         });
     }
 };
@@ -164,23 +196,47 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     const { ip, ua } = getClientInfo(req);
     console.log(`[LoginRequest] Attempt for: ${email} (Google: ${!!googleToken}) | DB: ${mongoose.connection.name} (state: ${mongoose.connection.readyState})`);
 
+    // Reject non-string inputs (blocks NoSQL operator injection like {"$ne": null})
+    if ((email !== undefined && typeof email !== 'string') || (password !== undefined && typeof password !== 'string')) {
+        res.status(400).json({ message: 'Invalid email or password' });
+        return;
+    }
+
     try {
-        const userEmail = email?.toLowerCase()?.trim();
-        let user = userEmail ? await User.findOne({ email: userEmail }) : null;
+        let userEmail = email?.toLowerCase()?.trim();
+        let user = userEmail && !googleToken ? await User.findOne({ email: userEmail }) : null;
 
         // ── Google Login Flow ───────────────────────────────────────────────
         if (googleToken) {
-            if (!userEmail) {
-                res.status(400).json({ message: 'Email is required for Google login' });
+            // Never trust the email in the request body: take it from the
+            // cryptographically verified Firebase ID token.
+            let verified;
+            try {
+                verified = await verifyFirebaseIdToken(googleToken);
+            } catch (verifyErr: any) {
+                console.warn('[GoogleLogin] Token verification failed:', verifyErr.message);
+                res.status(401).json({ message: 'Google sign-in could not be verified. Please try again.' });
+                return;
+            }
+            if (!verified.emailVerified) {
+                res.status(401).json({ message: 'Your Google email address is not verified.' });
+                return;
+            }
+            userEmail = verified.email;
+            user = await User.findOne({ email: userEmail });
+
+            // Admins must use password + MFA
+            if (user && user.role === 'admin') {
+                res.status(403).json({ message: 'Admin accounts must sign in with password and authenticator code.' });
                 return;
             }
 
             if (!user) {
                 // Create new user if they don't exist
                 user = await User.create({
-                    name: name || userEmail.split('@')[0],
+                    name: verified.name || name || userEmail.split('@')[0],
                     email: userEmail,
-                    profilePicture: profilePicture,
+                    profilePicture: verified.picture || profilePicture,
                     role: 'customer',
                     status: 'approved',
                 }) as any;
@@ -248,6 +304,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                     res.json({
                         mfaRequired: true,
                         userId: user._id,
+                        mfaToken: generateMfaToken(user._id as unknown as string),
                         message: 'Please enter your 6-digit authenticator code'
                     });
                     return;
@@ -272,6 +329,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 res.json({
                     mfaSetupRequired: true,
                     userId: user._id,
+                    mfaToken: generateMfaToken(user._id as unknown as string),
                     qrCode,
                     secret,
                     message: 'MFA setup is required before accessing the admin panel'
@@ -317,11 +375,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         }
     } catch (error: any) {
         console.error('LOGIN ROUTE CRASH:', error.message, error.stack);
-        res.status(500).json({ 
-            message: `Internal server error: ${error.message || 'Unknown error'}`, 
-            error: error.message,
-            stack: error.stack
-        });
+        res.status(500).json({ message: 'Internal server error. Please try again.' });
     }
 };
 
@@ -329,8 +383,19 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
 //  VERIFY MFA — creates session + issues token ONLY after MFA passes
 // ═══════════════════════════════════════════════════════════════════════════════
 export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
-    const { userId, token: mfaCode } = req.body;
+    const { token: mfaCode, mfaToken } = req.body;
     const { ip, ua } = getClientInfo(req);
+
+    // userId comes ONLY from the signed mfaToken issued after a correct password
+    const userId = readMfaToken(mfaToken);
+    if (!userId) {
+        res.status(401).json({ message: 'Your sign-in step has expired. Please log in again.' });
+        return;
+    }
+    if (typeof mfaCode !== 'string' || !/^\d{6}$/.test(mfaCode)) {
+        res.status(400).json({ message: 'Enter the 6-digit authenticator code.' });
+        return;
+    }
 
     try {
         const user = await User.findById(userId);
@@ -400,7 +465,7 @@ export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
 
     } catch (error: any) {
         console.error('MFA Verify Error:', error);
-        res.status(500).json({ message: 'Error verifying MFA', error: error.message });
+        res.status(500).json({ message: 'Error verifying MFA' });
     }
 };
 
@@ -408,11 +473,21 @@ export const verifyMfa = async (req: Request, res: Response): Promise<void> => {
 //  SETUP MFA — generates QR code for first-time setup
 // ═══════════════════════════════════════════════════════════════════════════════
 export const setupMfa = async (req: Request, res: Response): Promise<void> => {
-    const { userId } = req.body;
+    const userId = readMfaToken(req.body.mfaToken);
+    if (!userId) {
+        res.status(401).json({ message: 'Your sign-in step has expired. Please log in again.' });
+        return;
+    }
     try {
         const user = await User.findById(userId);
         if (!user) {
             res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        // Once MFA is active, its secret can only be reset by an admin offline,
+        // never re-generated through this endpoint.
+        if (user.isMfaEnabled) {
+            res.status(403).json({ message: 'MFA is already set up for this account.' });
             return;
         }
 
@@ -430,7 +505,7 @@ export const setupMfa = async (req: Request, res: Response): Promise<void> => {
 
         res.json({ secret, qrCode: qrCodeDataUrl });
     } catch (error: any) {
-        res.status(500).json({ message: 'Error setting up MFA', error: error.message });
+        res.status(500).json({ message: 'Error setting up MFA' });
     }
 };
 
@@ -494,7 +569,7 @@ export const validateSession = async (req: Request, res: Response): Promise<void
     }
 
     try {
-        const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+        const decoded: any = jwt.verify(token, getJwtSecret());
 
 
         if (decoded.role !== 'admin') {
@@ -530,7 +605,7 @@ export const logoutAdmin = async (req: Request, res: Response): Promise<void> =>
 
     try {
         if (token) {
-            const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+            const decoded: any = jwt.verify(token, getJwtSecret());
 
             if (decoded.sessionId) {
                 await Session.findOneAndUpdate(
@@ -577,6 +652,10 @@ export const emergencyLockdown = async (req: Request, res: Response): Promise<vo
 // ═══════════════════════════════════════════════════════════════════════════════
 export const sendOtp = async (req: Request, res: Response): Promise<void> => {
     const { phone } = req.body;
+    if (typeof phone !== 'string' || !/^\+?\d{10,13}$/.test(phone.trim())) {
+        res.status(400).json({ message: 'Enter a valid mobile number.' });
+        return;
+    }
     try {
         const user = await User.findOne({ phone });
         if (!user) {
@@ -590,7 +669,7 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
         user.otpExpiresAt = new Date(Date.now() + 10 * 60000);
         await user.save();
 
-        console.log(`[OTP GENERATED] For phone ${phone}: ${otpValue}`);
+        console.log(`[OTP GENERATED] For phone ending ${phone.slice(-4)}`);
         
         // Trigger WhatsApp OTP template dispatch alongside SMS
         try {
@@ -628,10 +707,11 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
             console.log('[OTP] Fast2SMS API key not configured. Mocking SMS sending.');
         }
         
-        res.json({ message: 'OTP sent to your mobile number successfully!', otp: otpValue });
+        // The OTP must never be returned to the client — it is the login secret.
+        res.json({ message: 'OTP sent to your mobile number successfully!' });
     } catch (error: any) {
         console.error('Send OTP Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
@@ -640,10 +720,19 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
 // ═══════════════════════════════════════════════════════════════════════════════
 export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
     const { phone, otp } = req.body;
+    if (typeof phone !== 'string' || typeof otp !== 'string' || !/^\d{6}$/.test(otp)) {
+        res.status(400).json({ message: 'Invalid OTP.' });
+        return;
+    }
     try {
         const user = await User.findOne({ phone });
         if (!user) {
             res.status(404).json({ message: 'User not found.' });
+            return;
+        }
+        // Admins must go through password + MFA
+        if (user.role === 'admin') {
+            res.status(403).json({ message: 'Admin accounts must sign in with password and authenticator code.' });
             return;
         }
 
@@ -658,7 +747,11 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
         }
 
         if (user.otp !== otp) {
-            res.status(400).json({ message: 'Invalid OTP.' });
+            // One wrong guess burns the code, so it cannot be brute-forced
+            user.otp = undefined;
+            user.otpExpiresAt = undefined;
+            await user.save();
+            res.status(400).json({ message: 'Invalid OTP. Please request a new code.' });
             return;
         }
 
@@ -666,7 +759,8 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
         user.otpExpiresAt = undefined;
         await user.save();
 
-        if (user.role !== 'admin' && user.status === 'rejected') {
+        // (admins were already rejected above)
+        if (user.status === 'rejected') {
             res.status(403).json({
                 message: 'Your account has been rejected. Please contact support.',
                 status: user.status
@@ -700,33 +794,12 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
 
     } catch (error: any) {
         console.error('Verify OTP Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message || error });
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SETUP ADMIN (temporary)
-// ═══════════════════════════════════════════════════════════════════════════════
-export const setupAdmin = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const email = 'admin@pillora.in';
-        const password = 'admin';
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(password, salt);
-
-        await User.findOneAndUpdate(
-            { email },
-            { name: 'Super Admin', email, passwordHash, role: 'admin', status: 'approved' },
-            { upsert: true, new: true }
-        );
-
-        console.log("Admin setup complete via API.");
-        res.json({ message: "Admin Account Created Successfully! Login with admin@pillora.in / admin" });
-    } catch (error: any) {
-        console.error('Setup Admin Error:', error);
-        res.status(500).json({ message: 'Setup Failed', error: error.message || error });
-    }
-};
+// setupAdmin was removed: it was a public GET endpoint that reset the admin
+// password to a known value. Create admins offline with scripts/seedAdmin.ts.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHANGE PASSWORD
@@ -1150,6 +1223,12 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
             });
         } catch (lhErr) {
             console.warn('[PhoneAuth] Failed to save login history:', lhErr);
+        }
+
+        // Admins must go through password + MFA, never phone OTP
+        if (user.role === 'admin') {
+            res.status(403).json({ success: false, message: 'Admin accounts must sign in with password and authenticator code.' });
+            return;
         }
 
         const token = generateToken(user._id as unknown as string, user.role);

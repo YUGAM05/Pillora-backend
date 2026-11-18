@@ -9,6 +9,8 @@ import { logActivity } from '../utils/activityLogger';
 import { processKYCResult } from '../services/bloodConnectService';
 import { sendTelegramMessage } from '../utils/telegram';
 
+// Escape user input before building a RegExp (prevents ReDoS / regex errors)
+const escapeRegex = (s: string): string => s.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 
 // @desc    Register as a blood donor
@@ -89,7 +91,8 @@ export const findDonors = async (req: Request, res: Response): Promise<void> => 
         let query: any = { isAvailable: true };
 
         if (bloodGroup) {
-            query.bloodGroup = bloodGroup;
+            // String() blocks operator injection like ?bloodGroup[$ne]=x
+            query.bloodGroup = String(bloodGroup);
         }
 
         if (lng && lat) {
@@ -104,7 +107,10 @@ export const findDonors = async (req: Request, res: Response): Promise<void> => 
             };
         }
 
-        const donors = await BloodDonor.find(query).populate('user', 'name email phone');
+        // Only what a requester needs to contact a donor — no address, no linked account email
+        const donors = await BloodDonor.find(query)
+            .select('name bloodGroup gender age phone area city isAvailable lastDonationDate')
+            .limit(200);
         res.json(donors);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -124,7 +130,7 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
         }
 
         // Get all compatible blood groups
-        const compatibleGroups = getCompatibleDonors(bloodGroup as string);
+        const compatibleGroups = getCompatibleDonors(String(bloodGroup).trim().toUpperCase().replace(/ $/, '+'));
 
         const ninetyDaysAgo = new Date();
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
@@ -141,16 +147,16 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 
         // Filter by city if provided
         if (city) {
-            query.city = new RegExp(city as string, 'i');
+            query.city = new RegExp(escapeRegex(String(city)), 'i');
         }
 
         // Filter by area if provided
         if (area) {
-            query.area = new RegExp(area as string, 'i');
+            query.area = new RegExp(escapeRegex(String(area)), 'i');
         }
 
         // Find matches in unified BloodDonor model
-        const donors = await BloodDonor.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 });
+        const donors = await BloodDonor.find(query).select('name phone bloodGroup').sort({ lastDonationDate: 1 }).limit(200);
 
         // Map and remove duplicates if any (based on phone)
         const allDonors = donors.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup }));
@@ -304,6 +310,8 @@ export const getMyDonorProfile = async (req: AuthRequest, res: Response): Promis
 export const getRequests = async (req: Request, res: Response): Promise<void> => {
     try {
         const requests = await BloodRequest.find({ status: { $ne: 'Closed' } })
+            // KYC document number/image and requester email are admin-only
+            .select('-kycDocumentId -kycDocumentImage -kycDocumentType -aiVerificationRemarks -email')
             .sort({ isUrgent: -1, createdAt: -1 }) // Urgent first
             .populate('user', 'name');
         res.json(requests);

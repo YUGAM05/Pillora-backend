@@ -12,15 +12,17 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/donors', protect, registerDonor);
-router.get('/donors', findDonors);
-router.get('/matches', findMatches);
+// Donor lists contain phone numbers/addresses: login required (was public)
+router.get('/donors', protect, findDonors);
+router.get('/matches', protect, findMatches);
 router.get('/admin/donors', protect, adminOnly, getAllDonors);
 router.post('/admin/donors/delete-many', protect, adminOnly, deleteManyDonors);
 router.patch('/admin/donors/:id', protect, adminOnly, updateDonorAdmin);
 router.delete('/admin/donors/:id', protect, adminOnly, deleteDonor);
 
 router.post('/requests', protect, createRequest);
-router.get('/requests', getRequests);
+// Requests contain patient contact + KYC data: login required (was public)
+router.get('/requests', protect, getRequests);
 router.get('/my-requests', protect, getMyRequests);
 router.delete('/requests/:id', protect, deleteMyRequest);
 router.get('/my-donor', protect, getMyDonorProfile);

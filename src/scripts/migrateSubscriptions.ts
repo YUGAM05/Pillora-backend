@@ -3,8 +3,9 @@ import path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import mongoose from 'mongoose';
 import Hospital from '../models/Hospital';
+import { getMongoUri } from '../config/env';
 async function migrate() {
-    const mongoUri = process.env.MONGO_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
+    const mongoUri = getMongoUri();
     await mongoose.connect(mongoUri);
     console.log('Connected to DB for subscription migration');
 

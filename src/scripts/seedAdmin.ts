@@ -2,12 +2,13 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import User from '../models/User';
+import { getMongoUri } from '../config/env';
 
 dotenv.config();
 
 const seedAdmin = async () => {
     try {
-        const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/e-pharmacy';
+        const uri = getMongoUri();
         console.log('Connecting to MongoDB at:', uri);
         await mongoose.connect(uri);
         console.log('Connected! Creating Admin...');

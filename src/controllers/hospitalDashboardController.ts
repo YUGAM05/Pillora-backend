@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { getJwtSecret } from '../config/env';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Hospital from '../models/Hospital';
 import Doctor from '../models/Doctor';
@@ -18,9 +19,9 @@ import { v2 as cloudinary } from 'cloudinary';
 import { sendInvoiceEmail } from '../services/emailService';
 
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djlttfqje',
-    api_key: process.env.CLOUDINARY_API_KEY || '372769319742221',
-    api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU'
+    cloud_name: (process.env.CLOUDINARY_CLOUD_NAME as string),
+    api_key: (process.env.CLOUDINARY_API_KEY as string),
+    api_secret: (process.env.CLOUDINARY_API_SECRET as string)
 });
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
@@ -710,8 +711,8 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         // Update affected bookings to cancelled and refund online payments (hospital initiated)
         const affectedAppointments = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } });
         const razorpay = new Razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-            key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
+            key_id: (process.env.RAZORPAY_KEY_ID as string),
+            key_secret: (process.env.RAZORPAY_KEY_SECRET as string)
         });
 
         for (const app of affectedAppointments) {
@@ -1819,22 +1820,12 @@ export const getAppointmentPrescriptionFile = async (req: any, res: Response): P
             return;
         }
 
-        // Validate token manually using the same secrets
-        const secretsToTry: string[] = [
-            process.env.JWT_SECRET,
-            'supersecretkey_dev_only',
-            'pillora_jwt_secret_fallback_2024',
-            'defaultSecret'
-        ].filter((s): s is string => typeof s === 'string' && s.length > 0);
-
+        // Validate token (only the configured secret, HS256 only)
         let decoded: any = null;
-        for (const secret of secretsToTry) {
-            try {
-                decoded = jwt.verify(token, secret);
-                break;
-            } catch (err) {
-                // Try next
-            }
+        try {
+            decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+        } catch (err) {
+            decoded = null;
         }
 
         if (!decoded) {
