@@ -5,6 +5,7 @@ import { registerDonor, findDonors, createRequest, getRequests, getAllDonors, ge
 import { exportDonorsToExcel, exportRequestsToExcel, exportDonorsToPDF, exportRequestsToPDF } from '../controllers/bloodBankExportController';
 import { importDonorsFromExcel, getDonorStats } from '../controllers/bloodBankImportController';
 import { downloadDonorTemplate } from '../controllers/bloodBankTemplateController';
+import { getCityDonorStats } from '../controllers/bloodBankStatsController';
 
 const router = express.Router();
 
@@ -12,6 +13,8 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/donors', protect, registerDonor);
+// Public aggregate counts per city (no personal data) for pillora.in city pages
+router.get('/stats/cities', getCityDonorStats);
 // Donor lists contain names and phone numbers: admin only. Requesters get donor
 // contact details through the KYC-gated request flow (POST /requests), not here.
 router.get('/donors', protect, adminOnly, findDonors);
