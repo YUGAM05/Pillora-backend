@@ -13,6 +13,8 @@ export interface IAppointment extends Document {
     // paymentSource distinguishes manual staff entry from future gateway webhooks.
     paymentStatus: 'unpaid' | 'partial' | 'paid' | 'waived' | 'pending' | 'failed';
     paymentSource: 'manual' | 'gateway';
+    // How the appointment was made. Optional: older documents don't have it.
+    bookingSource?: 'ai_call' | 'online' | 'walk_in' | 'staff';
     paymentUpdatedAt?: Date;
     paymentUpdatedBy?: mongoose.Types.ObjectId;
     bookingDate: Date;
@@ -64,6 +66,12 @@ const AppointmentSchema: Schema = new Schema({
         type: String,
         enum: ['manual', 'gateway'],
         default: 'manual'
+    },
+    // How the appointment was made ('ai_call' = booked by the AI phone receptionist).
+    // No default, so existing appointments are unchanged.
+    bookingSource: {
+        type: String,
+        enum: ['ai_call', 'online', 'walk_in', 'staff']
     },
     paymentUpdatedAt: { type: Date },
     paymentUpdatedBy: { type: Schema.Types.ObjectId, ref: 'User' },

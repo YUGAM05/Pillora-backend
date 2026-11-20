@@ -83,8 +83,11 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
             specialty: d.specialty
         }));
 
+        // Hospital name, so the AI receptionist can greet callers with it.
+        const hospital = await Hospital.findById(req.hospitalId).select('name').lean();
+
         res.status(200).json({
-            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors }) }]
+            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors, hospitalName: hospital?.name?.trim() }) }]
         });
     } catch (error: any) {
         console.error('[VoiceDoctorsError]', error.message);
@@ -339,6 +342,7 @@ router.post('/book', voiceAuth, resolveVoiceHospital, async (req: Request, res: 
                 status: 'confirmed',
                 paymentStatus: 'unpaid',
                 paymentSource: 'manual',
+                bookingSource: 'ai_call',
                 tokenNumber,
                 patientName: patientName.trim(),
                 patientPhone: normalizedPhone,
