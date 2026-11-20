@@ -23,7 +23,10 @@ export async function runFollowUpReminders() {
 
             console.log(`[Cron Follow-Up] Found ${dueReminders.length} due follow-up reminder(s). Dispatching...`);
 
+            // Stop starting new ones before Vercel's time limit; the rest go on the next run.
+            const deadline = Date.now() + Number(process.env.REMINDER_TIME_BUDGET_MS || 5000);
             for (const reminder of dueReminders) {
+                if (Date.now() > deadline) break;
                 try {
                     await dispatchFollowUpReminder(reminder._id.toString());
                     dispatched++;
