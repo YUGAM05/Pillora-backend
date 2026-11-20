@@ -13,6 +13,7 @@ import VoiceCallLog from '../models/VoiceCallLog';
 import { voiceAuth } from '../middleware/voiceAuth.middleware';
 import { resolveVoiceHospital } from '../middleware/resolveVoiceHospital.middleware';
 import { sendSms } from '../services/sms.service';
+import { sendWhatsAppTemplate } from '../services/whatsappService';
 
 const router = express.Router();
 
@@ -396,6 +397,33 @@ router.post('/book', voiceAuth, resolveVoiceHospital, async (req: Request, res: 
                 io.emit('appointmentsUpdated', { hospitalId: req.hospitalId });
             }
 
+            // WhatsApp confirmation: same approved template and wording as walk-in
+            // and online bookings. Awaited (serverless functions stop after the
+            // response) but capped at 6 s, and never fails the booking.
+            let whatsapp: 'sent' | 'failed' = 'failed';
+            try {
+                const slotDate = new Date(freshSlot.startTime);
+                const waResult: any = await Promise.race([
+                    sendWhatsAppTemplate(normalizedPhone, 'appointment_confirmation', 'en', [
+                        {
+                            type: 'body',
+                            parameters: [
+                                { type: 'text', text: patientName.trim() },
+                                { type: 'text', text: `Dr. ${doctor.name}` },
+                                { type: 'text', text: hospitalName },
+                                { type: 'text', text: slotDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
+                                { type: 'text', text: slotDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) }
+                            ]
+                        }
+                    ]),
+                    new Promise((resolve) => setTimeout(() => resolve({ success: false, error: 'timeout after 6s' }), 6000))
+                ]);
+                if (waResult?.success) whatsapp = 'sent';
+                else console.error('[VoiceBook] WhatsApp confirmation failed (booking kept):', waResult?.error);
+            } catch (waErr: any) {
+                console.error('[VoiceBook] WhatsApp confirmation error (booking kept):', waErr?.message || waErr);
+            }
+
             res.status(201).json({
                 results: [{
                     toolCallId,
@@ -404,7 +432,8 @@ router.post('/book', voiceAuth, resolveVoiceHospital, async (req: Request, res: 
                         status: "confirmed",
                         doctorName: `Dr. ${doctor.name}`,
                         time: appointmentTimeStr,
-                        date: appointmentDateStr
+                        date: appointmentDateStr,
+                        whatsapp
                     })
                 }]
             });
