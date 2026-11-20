@@ -24,7 +24,7 @@ cloudinary.config({
 });
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail, sendPrescriptionEmail } from '../services/emailService';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
-import { sendWhatsAppTemplate } from '../services/whatsappService';
+import { sendCountedTemplate, doctorLimit } from '../services/usageService';
 import HospitalSubscriptionPayment from '../models/HospitalSubscriptionPayment';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
 import { getHospitalFinancialOverview } from './financialController';
@@ -79,6 +79,17 @@ export const addDoctor = async (req: AuthRequest, res: Response): Promise<void> 
     try {
         const hospital = (req as any).hospital;
         const { name, email, phone, specialty, fee, availability, isSpecialtyGroup, department, maxAppointmentsPerSlot, doctorsCount, description } = req.body;
+
+        // Plan limit: Clinic 5 doctors, Hospital 25, Enterprise unlimited.
+        const limit = await doctorLimit(hospital._id);
+        if (!limit.allowed) {
+            res.status(403).json({
+                message: `Your ${limit.plan} plan allows up to ${limit.max} doctors. Please upgrade your plan to add more.`,
+                code: 'doctor_limit_reached',
+                limit,
+            });
+            return;
+        }
 
         const doctor = await Doctor.create({
             hospital: hospital._id,
@@ -1056,7 +1067,8 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                         : '4:00 PM';
 
                     console.log(`[WhatsApp Service] 🚀 Dispatching manual appointment_confirmation template to ${targetPhone}...`);
-                    const waResult = await sendWhatsAppTemplate(
+                    const waResult = await sendCountedTemplate(
+                        { hospitalId: hospital._id, kind: 'confirmation' },
                         targetPhone,
                         'appointment_confirmation',
                         'en',

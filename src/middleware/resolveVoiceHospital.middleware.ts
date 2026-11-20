@@ -31,9 +31,16 @@ export const resolveVoiceHospital = async (req: Request, res: Response, next: Ne
         }
 
         const config = await VoiceHospitalConfig.findOne({ exotelNumber });
-        if (!config || !config.isEnabled) {
-            console.warn(`[ResolveVoiceHospital] Voice config not found or disabled for exotelNumber: ${exotelNumber}`);
+        if (!config) {
+            console.warn(`[ResolveVoiceHospital] No hospital linked to number: ${exotelNumber}`);
             res.status(403).json({ error: "voice_booking_not_enabled_for_this_number" });
+            return;
+        }
+        // Linked but switched off (e.g. paused by admin): a distinct answer, so the
+        // voice server ends the call politely instead of treating it as unlinked.
+        if (!config.isEnabled) {
+            console.warn(`[ResolveVoiceHospital] AI calling is disabled for number: ${exotelNumber}`);
+            res.status(403).json({ error: "voice_booking_disabled_for_this_number" });
             return;
         }
 

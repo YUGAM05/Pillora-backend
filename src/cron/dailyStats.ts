@@ -4,11 +4,8 @@ import User from '../models/User';
 import BloodRequest from '../models/BloodRequest';
 import { sendTelegramMessage } from '../utils/telegram';
 
-export const initDailyStatsCron = () => {
-  console.log('[Cron] Initializing Daily Stats Cron Job at 09:00 AM IST');
-  
-  // '0 9 * * *' triggers every day at 9:00 AM
-  cron.schedule('0 9 * * *', async () => {
+/** Sends the daily stats summary. Triggered daily at 09:00 IST by POST /api/cron/daily-stats. */
+export async function runDailyStats() {
     console.log('[Cron] Running Daily Stats Job...');
     try {
       // Get the start and end of today in Asia/Kolkata time zone
@@ -36,7 +33,13 @@ export const initDailyStatsCron = () => {
     } catch (err) {
       console.error('[Cron] Error running daily stats:', err);
     }
-  }, {
-    timezone: 'Asia/Kolkata'
-  });
+  return { ok: true };
+}
+
+/** In-process timer, for long-running servers only (not used on Vercel). */
+export const initDailyStatsCron = () => {
+  console.log('[Cron] Initializing Daily Stats Cron Job at 09:00 AM IST');
+  cron.schedule('0 9 * * *', () => {
+    runDailyStats().catch(() => {});
+  }, { timezone: 'Asia/Kolkata' });
 };

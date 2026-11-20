@@ -10,10 +10,11 @@ import Appointment from '../models/Appointment';
 import User from '../models/User';
 import Hospital from '../models/Hospital';
 import VoiceCallLog from '../models/VoiceCallLog';
+import VoiceCall from '../models/VoiceCall';
 import { voiceAuth } from '../middleware/voiceAuth.middleware';
 import { resolveVoiceHospital } from '../middleware/resolveVoiceHospital.middleware';
 import { sendSms } from '../services/sms.service';
-import { sendWhatsAppTemplate } from '../services/whatsappService';
+import { sendCountedTemplate, aiStatus, consumeAiSeconds, billableSeconds } from '../services/usageService';
 
 const router = express.Router();
 
@@ -84,11 +85,18 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
             specialty: d.specialty
         }));
 
-        // Hospital name, so the AI receptionist can greet callers with it.
-        const hospital = await Hospital.findById(req.hospitalId).select('name').lean();
+        // Hospital name, so the AI receptionist can greet callers with it, and
+        // whether the hospital still has AI call minutes (plan + packs).
+        const [hospital, ai] = await Promise.all([
+            Hospital.findById(req.hospitalId).select('name').lean(),
+            aiStatus(req.hospitalId!).catch((e: any) => {
+                console.error('[VoiceDoctors] AI minutes check failed, allowing the call:', e?.message);
+                return { allowed: true, remainingMinutes: null as any, planMinutes: null as any };
+            }),
+        ]);
 
         res.status(200).json({
-            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors, hospitalName: hospital?.name?.trim() }) }]
+            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors, hospitalName: hospital?.name?.trim(), ai }) }]
         });
     } catch (error: any) {
         console.error('[VoiceDoctorsError]', error.message);
@@ -404,7 +412,7 @@ router.post('/book', voiceAuth, resolveVoiceHospital, async (req: Request, res: 
             try {
                 const slotDate = new Date(freshSlot.startTime);
                 const waResult: any = await Promise.race([
-                    sendWhatsAppTemplate(normalizedPhone, 'appointment_confirmation', 'en', [
+                    sendCountedTemplate({ hospitalId: req.hospitalId, kind: 'confirmation', appointmentId: appointment._id }, normalizedPhone, 'appointment_confirmation', 'en', [
                         {
                             type: 'body',
                             parameters: [
@@ -511,6 +519,53 @@ router.post('/confirm', voiceAuth, resolveVoiceHospital, async (req: Request, re
         res.status(500).json({
             results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
         });
+    }
+});
+
+/**
+ * 5. POST /api/voice/call-usage
+ * Sent by the voice server when an AI call ends:
+ * { callUuid, durationSeconds, from?, outcome?, appointmentId?, language?, startedAt? }
+ * Records the call (once per callUuid) and charges its AI minutes:
+ * plan minutes first, then minute packs (30-second blocks, < 10 s free).
+ */
+router.post('/call-usage', voiceAuth, resolveVoiceHospital, async (req: Request, res: Response): Promise<void> => {
+    const toolCall = req.body?.message?.toolCallList?.[0];
+    const toolCallId = toolCall?.id;
+    const args = toolCall?.function?.arguments || {};
+    try {
+        const { callUuid, durationSeconds, from, outcome, appointmentId, language, startedAt } = args;
+        const duration = Number(durationSeconds);
+        if (!callUuid || typeof callUuid !== 'string' || !Number.isFinite(duration) || duration < 0 || duration > 4 * 3600) {
+            res.status(400).json({ results: [{ toolCallId, result: JSON.stringify({ error: 'invalid_input' }) }] });
+            return;
+        }
+        const billed = billableSeconds(Math.round(duration));
+        try {
+            await VoiceCall.create({
+                hospital: req.hospitalId,
+                callUuid,
+                from: typeof from === 'string' ? from.replace(/[^\d+]/g, '').slice(0, 16) : undefined,
+                to: typeof req.body?.to === 'string' ? req.body.to.replace(/\D/g, '') : undefined,
+                startedAt: startedAt ? new Date(startedAt) : undefined,
+                durationSeconds: Math.round(duration),
+                billedSeconds: billed,
+                outcome: ['booked', 'no_booking', 'ended_early', 'unavailable'].includes(outcome) ? outcome : (appointmentId ? 'booked' : 'no_booking'),
+                appointment: appointmentId && mongoose.Types.ObjectId.isValid(appointmentId) ? appointmentId : undefined,
+                language: typeof language === 'string' ? language.slice(0, 8) : undefined,
+            });
+        } catch (e: any) {
+            if (e?.code === 11000) {
+                res.status(200).json({ results: [{ toolCallId, result: JSON.stringify({ ok: true, duplicate: true }) }] });
+                return;
+            }
+            throw e;
+        }
+        const charged = await consumeAiSeconds(req.hospitalId!, billed);
+        res.status(200).json({ results: [{ toolCallId, result: JSON.stringify({ ok: true, billedSeconds: billed, charged }) }] });
+    } catch (error: any) {
+        console.error('[VoiceCallUsageError]', error.message);
+        res.status(500).json({ results: [{ toolCallId, result: JSON.stringify({ error: 'internal_server_error' }) }] });
     }
 });
 

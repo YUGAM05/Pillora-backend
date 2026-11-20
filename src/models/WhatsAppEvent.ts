@@ -26,4 +26,7 @@ const WhatsAppEventSchema: Schema = new Schema(
     }
 );
 
+// Kept 90 days (failures and patient replies), then deleted automatically.
+WhatsAppEventSchema.index({ timestamp: 1 }, { expireAfterSeconds: 90 * 24 * 3600 });
+
 export default mongoose.model<IWhatsAppEvent>('WhatsAppEvent', WhatsAppEventSchema);

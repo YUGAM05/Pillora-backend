@@ -39,6 +39,7 @@ import {
     updatePaymentStatus,
     getHospitalSubscription
 } from '../controllers/hospitalDashboardController';
+import { getUsage, orderPack, verifyPack, getVoiceCalls } from '../controllers/usageController';
 import {
     getFollowUpReminders,
     createFollowUpReminder,
@@ -124,5 +125,11 @@ router.post('/slots/generate', protect, isHospital, selfManagedOnly, requireActi
 router.post('/slots/add', protect, isHospital, selfManagedOnly, requireActiveSubscription, addSingleSlot);
 router.post('/slots/:id/cancel', protect, isHospital, selfManagedOnly, cancelSlot);
 router.delete('/slots/:id', protect, isHospital, selfManagedOnly, deleteSlot);
+
+// Plan usage (WhatsApp messages, AI minutes), add-on packs, AI call history
+router.get('/usage', protect, isHospital, attachHospital, getUsage);
+router.post('/packs/order', protect, isHospital, attachHospital, orderPack);
+router.post('/packs/verify', protect, isHospital, attachHospital, verifyPack);
+router.get('/voice-calls', protect, isHospital, attachHospital, getVoiceCalls);
 
 export default router;

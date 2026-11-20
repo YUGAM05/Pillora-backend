@@ -8,7 +8,7 @@ import Settlement from '../models/Settlement';
 import { formatDateIST, formatTimeIST } from '../utils/dateHelper';
 import { sendBookingConfirmationEmail, sendHospitalNotificationEmail } from '../services/emailService';
 import { sendAppointmentNotification } from '../services/pushNotificationService';
-import { sendWhatsAppTemplate } from '../services/whatsappService';
+import { sendCountedTemplate } from '../services/usageService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import User from '../models/User';
 
@@ -281,7 +281,8 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
                                 : String(populatedApp.appointmentTime || '4:00 PM');
 
                             console.log(`[WhatsApp Service] 🚀 Dispatching appointment_confirmation template to ${targetPatientPhone}...`);
-                            const waResult = await sendWhatsAppTemplate(
+                            const waResult = await sendCountedTemplate(
+                                { hospitalId: (populatedApp.hospital as any)?._id ?? populatedApp.hospital, kind: 'confirmation', appointmentId: populatedApp._id },
                                 targetPatientPhone,
                                 'appointment_confirmation',
                                 'en',

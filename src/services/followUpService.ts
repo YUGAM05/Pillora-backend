@@ -1,6 +1,7 @@
 import FollowUpReminder, { IFollowUpReminder } from '../models/FollowUpReminder';
 import Hospital from '../models/Hospital';
-import { sendWhatsAppTemplate, formatPhoneNumber } from './whatsappService';
+import { formatPhoneNumber } from './whatsappService';
+import { sendCountedTemplate } from './usageService';
 import { sendSms } from './sms.service';
 import nodemailer from 'nodemailer';
 import { formatDateIST } from '../utils/dateHelper';
@@ -184,7 +185,8 @@ export const dispatchFollowUpReminder = async (
 
                 // Meta approved 'appointment_reminder' template expects 5 body parameters:
                 // {{1}} Patient Name, {{2}} Doctor Name, {{3}} Hospital Name, {{4}} Date, {{5}} Time
-                const waResult = await sendWhatsAppTemplate(
+                const waResult = await sendCountedTemplate(
+                    { hospitalId: reminder.hospital, kind: 'followup' },
                     targetPhone,
                     'appointment_reminder',
                     'en',

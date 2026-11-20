@@ -13,6 +13,7 @@ import {
     processAdminRefund
 } from '../controllers/financialController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
+import { adminGetUsage, adminGrantPack, adminSetVoiceNumber } from '../controllers/usageController';
 import multer from 'multer';
 
 const router = express.Router();
@@ -100,5 +101,10 @@ router.get('/financial/settlements', protect, adminOnly, getAdminSettlementManag
 router.post('/financial/settlements/payout', protect, adminOnly, recordAdminSettlementPayout);
 router.get('/financial/refunds', protect, adminOnly, getAdminRefunds);
 router.post('/financial/refunds/process', protect, adminOnly, processAdminRefund);
+
+// Hospital usage, add-on packs and AI receptionist number
+router.get('/hospitals/:id/usage', protect, adminOnly, adminGetUsage);
+router.post('/hospitals/:id/packs', protect, adminOnly, adminGrantPack);
+router.put('/hospitals/:id/voice-number', protect, adminOnly, adminSetVoiceNumber);
 
 export default router;

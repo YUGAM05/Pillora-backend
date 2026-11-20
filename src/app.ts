@@ -145,7 +145,14 @@ app.use(async (req, res, next) => {
     }
 });
 
-app.use(express.json({ limit: '100mb' }));
+app.use(express.json({
+    limit: '100mb',
+    // Keep the exact bytes of WhatsApp webhook calls: Meta's signature
+    // (X-Hub-Signature-256) is computed over the raw body.
+    verify: (req: any, _res, buf) => {
+        if (req.originalUrl?.startsWith('/api/webhook/whatsapp')) req.rawBody = buf;
+    },
+}));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static('uploads')); // Serve uploaded files
 
@@ -257,6 +264,10 @@ console.log('=== WEBHOOK ROUTES LOADING ===');
 const webhookRoutes = require('./routes/webhookRoutes').default || require('./routes/webhookRoutes');
 app.use('/api/webhook', webhookRoutes);
 console.log('=== WEBHOOK ROUTES LOADED ===');
+
+// Scheduled jobs, triggered by the always-on voice server (see routes/cronRoutes.ts)
+const cronRoutes = require('./routes/cronRoutes').default || require('./routes/cronRoutes');
+app.use('/api/cron', cronRoutes);
 
 console.log('=== MEDICINE ROUTES LOADING ===');
 const medicineRoutes = require('./routes/medicineRoutes').default || require('./routes/medicineRoutes');
@@ -412,10 +423,17 @@ if (process.env.NODE_ENV !== 'production' && !isServerless) {
     }
 }
 
-// Initialize Crons
-initDailyStatsCron();
-initAppointmentRemindersCron();
-initFollowUpRemindersCron();
-initSubscriptionExpiryCron();
+// Initialize in-process timers only on a long-running server. On Vercel they
+// never fire; there the jobs run via POST /api/cron/* (see routes/cronRoutes.ts).
+// DISABLE_INTERNAL_CRON=true also turns them off (e.g. local testing against
+// the real database, so no real reminders go out).
+if (!process.env.VERCEL && process.env.DISABLE_INTERNAL_CRON !== 'true') {
+    initDailyStatsCron();
+    initAppointmentRemindersCron();
+    initFollowUpRemindersCron();
+    initSubscriptionExpiryCron();
+} else {
+    console.log('[Cron] In-process timers disabled; jobs run via /api/cron/*');
+}
 
 export default app;
