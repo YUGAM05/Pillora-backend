@@ -70,15 +70,28 @@ export const applyHospitalCapacityToFutureSlots = async (hospitalId: any, newVal
     const doctors: any[] = await Doctor.find({ hospital: hospitalId }).select('maxAppointmentsPerSlot').lean();
     const doctorIds = doctors.filter((d) => !doctorHasOwnCapacity(d)).map((d) => d._id);
     if (doctorIds.length === 0) return 0;
+    return setFutureSlotCapacity({ hospital: hospitalId, doctor: { $in: doctorIds } }, cap);
+};
 
+/**
+ * After a doctor / specialty group's own "Max per slot" is edited: apply that doctor's effective capacity
+ * (own value > 1, else the hospital setting, else 1) to its upcoming slots, same rules as above.
+ */
+export const applyDoctorCapacityToFutureSlots = async (doctor: any): Promise<number> => {
+    if (!doctor?._id) return 0;
+    const cap = await effectiveCapacityForDoctor(doctor);
+    return setFutureSlotCapacity({ hospital: doctor.hospital, doctor: doctor._id }, cap);
+};
+
+/** Upcoming, not cancelled/blocked slots matching `match` get capacity max(cap, booked + active holds). */
+const setFutureSlotCapacity = async (match: Record<string, any>, cap: number): Promise<number> => {
     const now = new Date();
     const booked = { $ifNull: ['$booked_count', 0] };
     const target = { $max: [cap, { $add: [booked, { $size: activeHoldsExpr(now) }] }] };
 
     const result = await Slot.updateMany(
         {
-            hospital: hospitalId,
-            doctor: { $in: doctorIds },
+            ...match,
             startTime: { $gt: now },
             status: { $nin: ['cancelled', 'blocked'] },
             $expr: { $ne: [{ $ifNull: ['$max_appointments', 1] }, target] }

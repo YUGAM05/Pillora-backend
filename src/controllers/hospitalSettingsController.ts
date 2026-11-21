@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { v2 as cloudinary } from 'cloudinary';
@@ -494,7 +495,12 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response): Promi
     try {
         const hospital = (req as any).hospital;
         const { id } = req.params;
-        const { role, isActive, newPassword } = req.body;
+        const { role, isActive, newPassword, name, email, phone } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(String(id))) {
+            res.status(404).json({ message: 'Staff account not found' });
+            return;
+        }
 
         if (String(id) === String(hospital.user)) {
             res.status(400).json({ message: 'The hospital owner account cannot be changed or deactivated here' });
@@ -504,6 +510,48 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response): Promi
         const staff = await User.findOne({ _id: id, hospitalId: hospital._id });
         if (!staff) {
             res.status(404).json({ message: 'Staff account not found' });
+            return;
+        }
+
+        if (name !== undefined) {
+            const v = String(name ?? '').trim();
+            if (!v || v.length > 120) {
+                res.status(400).json({ message: 'Please enter a name for the staff member' });
+                return;
+            }
+            staff.name = v;
+        }
+
+        if (phone !== undefined) {
+            const v = String(phone ?? '').trim();
+            if (v.length > 30) {
+                res.status(400).json({ message: 'Phone number is too long' });
+                return;
+            }
+            (staff as any).phoneNumber = v || undefined;
+            (staff as any).phone = v || undefined;
+        }
+
+        let emailChanged = false;
+        if (email !== undefined) {
+            const v = String(email ?? '').trim().toLowerCase();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || v.length > 160) {
+                res.status(400).json({ message: 'Please enter a valid email' });
+                return;
+            }
+            if (v !== String(staff.email || '').toLowerCase()) {
+                const taken = await User.findOne({ email: v, _id: { $ne: staff._id } }).select('_id').lean();
+                if (taken) {
+                    res.status(400).json({ message: 'An account with this email already exists' });
+                    return;
+                }
+                staff.email = v;
+                emailChanged = true;
+            }
+        }
+
+        if (newPassword !== undefined && String(newPassword).trim() !== '' && String(newPassword).trim().length < 6) {
+            res.status(400).json({ message: 'New password must be at least 6 characters' });
             return;
         }
 
@@ -527,7 +575,10 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response): Promi
             endSessions = true;
         }
 
-        // Deactivation or a password reset ends the staff member's existing logins
+        // A new login email also ends existing logins
+        if (emailChanged) endSessions = true;
+
+        // Deactivation, a password reset or a new login email ends the staff member's existing logins
         if (endSessions) {
             (staff as any).tokensRevokedAt = new Date();
         }
@@ -551,6 +602,7 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response): Promi
                 _id: staff._id,
                 name: staff.name,
                 email: staff.email,
+                phone: (staff as any).phoneNumber || (staff as any).phone,
                 role: staff.hospitalStaffRole,
                 isActive: staff.isActiveStaff
             }

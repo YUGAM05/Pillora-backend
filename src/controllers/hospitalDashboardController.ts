@@ -13,7 +13,7 @@ import Settlement from '../models/Settlement';
 import mongoose from 'mongoose';
 import { createHold, releaseHold } from '../utils/holdManager';
 import { claimSeat, releaseSeat, liveSlotView, slotCapacity, holdFailureResponse, HoldFailure } from '../utils/slotBooking';
-import { effectiveCapacityForDoctor } from '../utils/slotCapacity';
+import { effectiveCapacityForDoctor, applyDoctorCapacityToFutureSlots } from '../utils/slotCapacity';
 import { cancelAppointmentWithPolicy, refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
 import PDFDocument from 'pdfkit';
 import { v2 as cloudinary } from 'cloudinary';
@@ -152,18 +152,26 @@ export const updateDoctor = async (req: AuthRequest, res: Response): Promise<voi
     try {
         const hospital = (req as any).hospital;
         const { id } = req.params;
-        const updateData = { ...req.body };
+        if (!mongoose.Types.ObjectId.isValid(String(id))) {
+            res.status(404).json({ message: 'Doctor or Specialty Group not found' });
+            return;
+        }
 
-        if (updateData.fee !== undefined) updateData.fee = Number(updateData.fee);
-        if (updateData.maxAppointmentsPerSlot !== undefined) updateData.maxAppointmentsPerSlot = Number(updateData.maxAppointmentsPerSlot);
-        if (updateData.doctorsCount !== undefined) updateData.doctorsCount = Number(updateData.doctorsCount);
-        if (updateData.isSpecialtyGroup !== undefined) updateData.isSpecialtyGroup = Boolean(updateData.isSpecialtyGroup);
-        if (updateData.is_active !== undefined) updateData.is_active = Boolean(updateData.is_active);
+        const parsed = parseDoctorUpdate(req.body || {});
+        if ('error' in parsed) {
+            res.status(400).json({ message: parsed.error });
+            return;
+        }
+        const updateData = parsed.data;
+        if (Object.keys(updateData).length === 0) {
+            res.status(400).json({ message: 'Nothing to update' });
+            return;
+        }
 
         const doctor = await Doctor.findOneAndUpdate(
             { _id: id, hospital: hospital._id },
-            updateData,
-            { new: true }
+            { $set: updateData },
+            { new: true, runValidators: true }
         );
 
         if (!doctor) {
@@ -171,10 +179,71 @@ export const updateDoctor = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        res.json(doctor);
+        // A new "Max per slot" applies to this doctor's upcoming slots (never below seats already taken)
+        let slotsUpdated = 0;
+        if (updateData.maxAppointmentsPerSlot !== undefined) {
+            slotsUpdated = await applyDoctorCapacityToFutureSlots(doctor);
+        }
+
+        const out: any = doctor.toObject();
+        out.slotsUpdated = slotsUpdated;
+        res.json(out);
     } catch (error: any) {
         res.status(500).json({ message: 'Error updating doctor', error: error.message });
     }
+};
+
+const DOCTOR_TEXT_FIELDS: Record<string, number> = {
+    name: 120, specialty: 120, department: 160, email: 160, phone: 30, description: 2000,
+};
+const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Only the editable doctor / specialty group fields, validated. Never hospital, ids or the group flag. */
+const parseDoctorUpdate = (body: any): { data: Record<string, any> } | { error: string } => {
+    const data: Record<string, any> = {};
+
+    for (const [field, max] of Object.entries(DOCTOR_TEXT_FIELDS)) {
+        if (body[field] === undefined) continue;
+        const v = body[field] === null ? '' : String(body[field]).trim();
+        if ((field === 'name' || field === 'specialty') && !v) return { error: `${field === 'name' ? 'Name' : 'Specialty'} is required` };
+        if (v.length > max) return { error: `${field} is too long` };
+        if (field === 'email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { error: 'Please enter a valid email' };
+        data[field] = field === 'email' ? v.toLowerCase() : v;
+    }
+
+    if (body.fee !== undefined) {
+        const fee = Number(body.fee);
+        if (!Number.isFinite(fee) || fee < 0 || fee > 1000000) return { error: 'Fee must be a number of 0 or more' };
+        data.fee = Math.round(fee);
+    }
+    if (body.maxAppointmentsPerSlot !== undefined) {
+        const n = Number(body.maxAppointmentsPerSlot);
+        if (!Number.isInteger(n) || n < 1 || n > 100) return { error: 'Max per slot must be a whole number from 1 to 100' };
+        data.maxAppointmentsPerSlot = n;
+    }
+    if (body.doctorsCount !== undefined) {
+        const n = Number(body.doctorsCount);
+        if (!Number.isInteger(n) || n < 1 || n > 1000) return { error: 'Doctors count must be a whole number of 1 or more' };
+        data.doctorsCount = n;
+    }
+    if (body.is_active !== undefined) data.is_active = Boolean(body.is_active);
+
+    if (body.availability !== undefined) {
+        if (!Array.isArray(body.availability) || body.availability.length > 21) return { error: 'Invalid availability' };
+        const list = [];
+        for (const a of body.availability) {
+            const day = String(a?.day || '');
+            const startTime = String(a?.startTime || '');
+            const endTime = String(a?.endTime || '');
+            if (!WEEK_DAYS.includes(day) || !TIME_RE.test(startTime) || !TIME_RE.test(endTime)) return { error: 'Invalid availability' };
+            if (startTime >= endTime) return { error: 'End time must be after start time' };
+            list.push({ day, startTime, endTime });
+        }
+        data.availability = list;
+    }
+
+    return { data };
 };
 
 // @desc    Bulk Generate Slots
