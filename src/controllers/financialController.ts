@@ -12,6 +12,7 @@ import AuditLog from '../models/AuditLog';
 import PaymentModificationLog from '../models/PaymentModificationLog';
 import { decrypt, encrypt } from '../utils/cryptoHelper';
 import { refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
+import { createWithDeductions, previewDeductions, deductionRows } from '../utils/hospitalDeductions';
 import { releaseSeat } from '../utils/slotBooking';
 
 /** Escape user text before using it in a RegExp (prevents regex injection / ReDoS). */
@@ -1207,6 +1208,7 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
             }
 
             const decryptedBank = safeDecryptBankDetails(hosp.bankDetails);
+            const ded = await previewDeductions(hosp._id, Math.round(pendingSettlement * 100) / 100);
 
             settlementList.push({
                 hospitalId: hosp._id,
@@ -1216,7 +1218,10 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
                 gatewayCharges: Math.round(gatewayCharges * 100) / 100,
                 netPayable: Math.round(netPayable * 100) / 100,
                 alreadySettled: Math.round(alreadySettled * 100) / 100,
-                pendingSettlement: Math.round(pendingSettlement * 100) / 100,
+                pendingBeforeDeductions: Math.round(pendingSettlement * 100) / 100,
+                cancellationDeductions: ded.total,
+                pendingDeductionsTotal: ded.pendingTotal,
+                pendingSettlement: ded.netAfter,
                 settlementDate: latestSettlement?.transferDate || null,
                 bankTransactionReference: latestSettlement?.utrNumber || 'N/A',
                 settlementStatus: calculatedStatus,
@@ -1288,15 +1293,21 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
         }
 
         const netPayable = Math.max(0, Math.round((totalGross - (totalCharges + totalTaxes)) * 100) / 100);
-        const payoutAmount = amount ? Number(amount) : netPayable;
 
         // Generate Settlement ID: SET-YYYYMMDD-XXXX
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const randomStr = crypto.randomBytes(2).toString('hex').toUpperCase();
         const settlementId = `SET-${dateStr}-${randomStr}`;
 
-        // Create Settlement document
+        // Hospital-cancellation charges (HospitalDeduction) come off this payout. `amount` is what the admin
+        // actually transferred (the panel pre-fills it with the amount after deductions).
+        let payoutAmount = 0;
+        const created = await createWithDeductions(hospital._id, netPayable, async (settlementObjectId, plan) => {
+        payoutAmount = amount ? Number(amount) : plan.netAfter;
         const settlement = new Settlement({
+            _id: settlementObjectId,
+            deductionAmount: plan.total,
+            deductionIds: plan.applied.map((d: any) => d._id),
             settlementId,
             hospitalId: hospital._id,
             status: 'Settled',
@@ -1328,6 +1339,13 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
         });
 
         await settlement.save();
+        return settlement;
+        });
+        if (!created.ok) {
+            res.status(409).json({ error: 'Another settlement for this hospital was created at the same moment. Please refresh and try again.' });
+            return;
+        }
+        const settlement: any = created.result;
 
         // Update all linked payments to Settled
         await Payment.updateMany(
@@ -1488,6 +1506,8 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
             };
         });
 
+        const ded = await previewDeductions(hospital._id, Math.round(totalNet * 100) / 100);
+
         res.status(200).json({
             success: true,
             hospital: {
@@ -1503,8 +1523,12 @@ export const calculateHospitalSettlementForDateRange = async (req: AuthRequest, 
                 advanceCount: payments.length,
                 grossOnlineAdvances: Math.round(totalGross * 100) / 100,
                 gatewayCharges: Math.round(totalDeductions * 100) / 100,
-                netPayable: Math.round(totalNet * 100) / 100
+                netBeforeDeductions: Math.round(totalNet * 100) / 100,
+                cancellationDeductions: ded.total,
+                carriedForwardDeductions: ded.carriedForward,
+                netPayable: ded.netAfter
             },
+            deductions: deductionRows(ded.applied),
             payments: paymentBreakdown
         });
     } catch (error: any) {
@@ -1601,7 +1625,7 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
         }
 
         const netCalc = Math.max(0, Math.round((totalGross - (totalCharges + totalGst)) * 100) / 100);
-        const payoutAmount = amount ? Math.round(Number(amount) * 100) / 100 : netCalc;
+        let payoutAmount = 0;
 
         // Generate SET-YYYYMMDD-XXXX
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1611,7 +1635,14 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
         const validMethods = ['NEFT', 'RTGS', 'IMPS', 'UPI'];
         const chosenMethod = validMethods.includes(transferMethod) ? transferMethod : 'NEFT';
 
+        // Hospital-cancellation charges (HospitalDeduction) come off this payout. `amount` is what the admin
+        // actually transferred (the panel pre-fills it with the amount after deductions).
+        const created = await createWithDeductions(hospital._id, netCalc, async (settlementObjectId, plan) => {
+        payoutAmount = amount ? Math.round(Number(amount) * 100) / 100 : plan.netAfter;
         const settlement = new Settlement({
+            _id: settlementObjectId,
+            deductionAmount: plan.total,
+            deductionIds: plan.applied.map((d: any) => d._id),
             settlementId,
             hospitalId: hospital._id,
             status: 'Awaiting Hospital Confirmation', // Awaiting approval from hospital dashboard
@@ -1649,6 +1680,13 @@ export const sendSettlementRequestToHospital = async (req: AuthRequest, res: Res
         });
 
         await settlement.save();
+        return settlement;
+        });
+        if (!created.ok) {
+            res.status(409).json({ error: 'Another settlement for this hospital was created at the same moment. Please refresh and try again.' });
+            return;
+        }
+        const settlement: any = created.result;
 
         // Mark all payments as Awaiting Hospital Confirmation
         await Payment.updateMany(

@@ -2,6 +2,8 @@ import Appointment from '../models/Appointment';
 import Payment from '../models/Payment';
 import { getRazorpay, razorpayErrorMessage } from './razorpayClient';
 import { releaseSeat, releaseHold } from './slotBooking';
+import { isPaidOutToHospital, recordHospitalCancellationDeduction } from './hospitalDeductions';
+import { notifyPatientOfCancellation } from './cancellationNotice';
 
 // ok=true: gatewayRefundId/gatewayStatus/amount set. ok=false: error set.
 export type RefundResult = { ok: boolean; gatewayRefundId?: string; gatewayStatus?: string; amount?: number; error?: string };
@@ -33,14 +35,19 @@ export const refundRazorpayPayment = async (
     }
 };
 
-/** Apply a successful full/partial refund to the Payment and Appointment documents (not saved). */
+/**
+ * Apply a successful full/partial refund to the Payment and Appointment documents (not saved).
+ * An advance that was already paid out to the hospital keeps its settlement status (the money did go
+ * out); the recovery is tracked as a HospitalDeduction instead.
+ */
 export const applyRefundToRecords = (payment: any, appointment: any, refund: RefundResult, reason: string) => {
     const refundAmount = Number(refund.amount) || 0;
     const paid = Number(payment.amount) || 0;
     const full = refundAmount >= paid - 0.001;
+    const paidOut = isPaidOutToHospital(payment);
     payment.status = full ? (refund.gatewayStatus === 'processed' ? 'refunded' : 'refund_initiated') : payment.status;
     // A refunded advance must not be paid out to the hospital; a partial refund needs an admin decision.
-    payment.settlementStatus = full ? 'refunded' : 'Under Review';
+    if (!paidOut) payment.settlementStatus = full ? 'refunded' : 'Under Review';
     payment.refundDetails = {
         refundId: refund.gatewayRefundId,
         amount: refundAmount,
@@ -57,11 +64,23 @@ export const applyRefundToRecords = (payment: any, appointment: any, refund: Ref
 export type CancelActor = 'patient' | 'hospital' | 'admin';
 
 // ok=true: appointment + refund set. ok=false: status (HTTP) set.
-export type CancelResult = { ok: boolean; appointment?: any; refund?: 'refunded' | 'retained' | 'none'; status?: number; message: string };
+export type CancelResult = {
+    ok: boolean;
+    appointment?: any;
+    refund?: 'refunded' | 'retained' | 'none';
+    refundAmount?: number;
+    /** What the hospital is charged for this cancellation (taken from its next settlement). */
+    hospitalCharge?: number;
+    status?: number;
+    message: string;
+};
 
 /**
  * Shared cancellation logic (patient / hospital / admin), keeping the existing policy:
  *   - hospital or admin cancels a paid online booking  -> full refund of the advance via Razorpay
+ *       hospital: its next settlement is reduced by the Razorpay charge Pillora loses (2.36%), or by the
+ *       full advance if that advance was already paid out (HospitalDeduction); admin: Pillora bears it
+ *   - hospital or admin cancels                        -> the patient is told (in-app, email, WhatsApp)
  *   - patient cancels a paid online booking            -> no refund (advance retained_by_pillora)
  *   - unpaid pending booking                           -> pending payment marked failed
  * If the Razorpay refund fails, NOTHING is changed and the error is returned (no fake "refunded").
@@ -81,10 +100,13 @@ export const cancelAppointmentWithPolicy = async (appointmentId: any, actor: Can
     }).sort({ createdAt: -1 });
 
     let refundOutcome: 'refunded' | 'retained' | 'none' = 'none';
+    let refundAmount = 0;
+    let hospitalCharge = 0;
     const cancelReason = reason || (actor === 'patient' ? 'Cancelled by patient' : actor === 'hospital' ? 'Hospital cancelled appointment' : 'Cancelled by Pillora admin');
 
     if (payment && (payment.status === 'completed' || payment.status === 'paid')) {
         if (actor === 'hospital' || actor === 'admin') {
+            const paidOut = isPaidOutToHospital(payment);
             const refund = await refundRazorpayPayment(payment, Number(payment.amount) || 0, {
                 reason: cancelReason,
                 appointmentId: appointment._id.toString()
@@ -99,6 +121,11 @@ export const cancelAppointmentWithPolicy = async (appointmentId: any, actor: Can
             }
             applyRefundToRecords(payment, appointment, refund, cancelReason);
             refundOutcome = 'refunded';
+            refundAmount = Number(refund.amount) || 0;
+            if (actor === 'hospital') {
+                const deduction = await recordHospitalCancellationDeduction({ payment, appointment, paidOut, reason: cancelReason });
+                hospitalCharge = Number(deduction?.amount) || 0;
+            }
         } else {
             payment.settlementStatus = 'retained_by_pillora';
             refundOutcome = 'retained';
@@ -119,10 +146,16 @@ export const cancelAppointmentWithPolicy = async (appointmentId: any, actor: Can
         await releaseHold(appointment.slot, appointment.patient);
     }
 
+    if (actor === 'hospital' || actor === 'admin') {
+        // Fire and forget: messages must never block or fail the cancellation
+        void notifyPatientOfCancellation(appointment, refundAmount);
+    }
+
     const message = refundOutcome === 'refunded'
-        ? 'Appointment cancelled. The online advance has been refunded to the patient.'
+        ? `Appointment cancelled. ₹${refundAmount.toFixed(2)} has been refunded to the patient` +
+          (hospitalCharge > 0 ? `; ₹${hospitalCharge.toFixed(2)} will be deducted from your next settlement.` : '.')
         : refundOutcome === 'retained'
             ? 'Appointment cancelled. As per policy, the advance paid online is not refunded for patient cancellations.'
             : 'Appointment cancelled successfully.';
-    return { ok: true, appointment, refund: refundOutcome, message };
+    return { ok: true, appointment, refund: refundOutcome, refundAmount, hospitalCharge, message };
 };

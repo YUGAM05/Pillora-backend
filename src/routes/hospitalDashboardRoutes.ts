@@ -10,6 +10,8 @@ import {
     bulkGenerateSlots,
     getHospitalAppointments,
     updateAppointmentStatus,
+    getAppointmentCancelPreview,
+    getSlotCancelPreview,
     getDoctorSlots,
     createAppointment,
     getMyBookings,
@@ -78,6 +80,7 @@ router.get('/analytics/cancellation-rate', ...staff, can('appointments'), getCan
 router.get('/doctors', ...staff, can('self'), getHospitalDoctors);
 router.get('/appointments', ...staff, can('appointments'), getHospitalAppointments);
 router.post('/appointments/manual', ...staff, can('appointments'), createManualAppointment);
+router.get('/appointments/:id/cancel-preview', ...staff, can('appointments'), getAppointmentCancelPreview);
 router.put('/appointments/:id/status', ...staff, can('appointments'), updateAppointmentStatus);
 router.put('/appointments/:id/assign-doctor', ...staff, can('appointments'), assignDoctorToAppointment);
 router.put('/appointments/:id/prescription', ...staff, can('appointments'), updateAppointmentPrescription);
@@ -125,6 +128,7 @@ router.put('/doctors/:id', ...staff, can('doctorsSlots'), updateDoctor);
 router.delete('/doctors/:id', ...staff, can('doctorsSlots'), deleteDoctor);
 router.post('/slots/generate', ...staff, can('doctorsSlots'), requireActiveSubscription, bulkGenerateSlots);
 router.post('/slots/add', ...staff, can('doctorsSlots'), requireActiveSubscription, addSingleSlot);
+router.get('/slots/:id/cancel-preview', ...staff, can('doctorsSlots'), getSlotCancelPreview);
 router.post('/slots/:id/cancel', ...staff, can('doctorsSlots'), cancelSlot);
 router.delete('/slots/:id', ...staff, can('doctorsSlots'), deleteSlot);
 

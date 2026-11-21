@@ -15,6 +15,8 @@ import { createHold, releaseHold } from '../utils/holdManager';
 import { claimSeat, releaseSeat, liveSlotView, slotCapacity, holdFailureResponse, HoldFailure } from '../utils/slotBooking';
 import { effectiveCapacityForDoctor, applyDoctorCapacityToFutureSlots } from '../utils/slotCapacity';
 import { cancelAppointmentWithPolicy, refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
+import { isPaidOutToHospital, recordHospitalCancellationDeduction, hospitalCancellationCharge } from '../utils/hospitalDeductions';
+import { notifyPatientOfCancellation } from '../utils/cancellationNotice';
 import PDFDocument from 'pdfkit';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendInvoiceEmail } from '../services/emailService';
@@ -382,6 +384,67 @@ export const getHospitalAppointments = async (req: AuthRequest, res: Response): 
     }
 };
 
+/** Paid online advance on an appointment (what a hospital cancellation would refund). */
+const paidOnlineAdvance = (appointmentId: any) =>
+    Payment.findOne({ appointmentId, paymentSource: 'pillora_online', status: { $in: ['completed', 'paid'] } }).sort({ createdAt: -1 }).lean();
+
+const cancelPreviewOf = (payments: any[]) => {
+    let refundAmount = 0;
+    let hospitalCharge = 0;
+    let paidOutCount = 0;
+    for (const p of payments) {
+        const c = hospitalCancellationCharge(p);
+        refundAmount += c.refundAmount;
+        hospitalCharge += c.amount;
+        if (c.paidOut) paidOutCount++;
+    }
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    return { refundAmount: r2(refundAmount), hospitalCharge: r2(hospitalCharge), refundCount: payments.length, paidOutCount };
+};
+
+// @desc    What cancelling this appointment would refund and cost the hospital
+// @route   GET /api/hospital/dashboard/appointments/:id/cancel-preview
+export const getAppointmentCancelPreview = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        const appointment: any = await Appointment.findOne({ _id: req.params.id, hospital: hospital._id }).select('_id status').lean();
+        if (!appointment) {
+            res.status(404).json({ message: 'Appointment not found' });
+            return;
+        }
+        const payment = await paidOnlineAdvance(appointment._id);
+        res.json(cancelPreviewOf(payment ? [payment] : []));
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error preparing cancellation', error: error.message });
+    }
+};
+
+// @desc    What cancelling this slot would refund and cost the hospital
+// @route   GET /api/hospital/dashboard/slots/:id/cancel-preview
+export const getSlotCancelPreview = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const hospital = (req as any).hospital;
+        if (!mongoose.Types.ObjectId.isValid(String(req.params.id))) {
+            res.status(404).json({ message: 'Slot not found' });
+            return;
+        }
+        const slot: any = await Slot.findOne({ _id: req.params.id, hospital: hospital._id }).select('_id').lean();
+        if (!slot) {
+            res.status(404).json({ message: 'Slot not found' });
+            return;
+        }
+        const apps: any[] = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } }).select('_id').lean();
+        const payments = (await Promise.all(apps.map((a) => paidOnlineAdvance(a._id)))).filter(Boolean);
+        res.json({ ...cancelPreviewOf(payments), bookings: apps.length });
+    } catch (error: any) {
+        res.status(500).json({ message: 'Error preparing cancellation', error: error.message });
+    }
+};
+
 // @desc    Update Appointment Status
 // @route   PUT /api/hospital/appointments/:id/status
 export const updateAppointmentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -415,7 +478,15 @@ export const updateAppointmentStatus = async (req: AuthRequest, res: Response): 
             }
             const io = req.app.get('io');
             if (io) io.emit('slotsUpdated', { doctorId: appointment.doctor });
-            res.json(result.appointment);
+            const out: any = typeof result.appointment?.toObject === 'function' ? result.appointment.toObject() : result.appointment;
+            res.json({
+                ...out,
+                cancellation: {
+                    message: result.message,
+                    refundAmount: result.refundAmount || 0,
+                    hospitalCharge: result.hospitalCharge || 0
+                }
+            });
             return;
         }
 
@@ -800,7 +871,10 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         const affectedAppointments: any[] = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } });
         const refundFailures: { appointmentId: string; patientName?: string; error: string }[] = [];
         let refundedCount = 0;
+        let refundedTotal = 0;
+        let hospitalChargeTotal = 0;
         const cancelReason = reason || 'Slot cancelled by hospital (doctor unavailable)';
+        const notices: { app: any; refundAmount: number }[] = [];
 
         for (const app of affectedAppointments) {
             const payment: any = await Payment.findOne({
@@ -809,7 +883,9 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
                 status: { $in: ['completed', 'paid', 'pending'] }
             }).sort({ createdAt: -1 });
 
+            let appRefund = 0;
             if (payment && (payment.status === 'completed' || payment.status === 'paid')) {
+                const paidOut = isPaidOutToHospital(payment);
                 const refund = await refundRazorpayPayment(payment, Number(payment.amount) || 0, {
                     reason: cancelReason,
                     appointmentId: app._id.toString()
@@ -817,6 +893,10 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
                 if (refund.ok) {
                     applyRefundToRecords(payment, app, refund, cancelReason);
                     refundedCount++;
+                    appRefund = Number(refund.amount) || 0;
+                    refundedTotal += appRefund;
+                    const deduction = await recordHospitalCancellationDeduction({ payment, appointment: app, paidOut, reason: cancelReason });
+                    hospitalChargeTotal += Number(deduction?.amount) || 0;
                 } else {
                     console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refund.error);
                     payment.settlementStatus = 'Under Review';
@@ -838,7 +918,12 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
             await app.save();
             // Mark the seat released on the appointment (the slot itself is cancelled, so its counts no longer matter)
             await Appointment.updateOne({ _id: app._id }, { $set: { slotSeatHeld: false } });
+            notices.push({ app, refundAmount: appRefund });
         }
+
+        // Tell each patient (in-app, email, WhatsApp). Fire and forget: never blocks the response.
+        for (const n of notices) void notifyPatientOfCancellation(n.app, n.refundAmount);
+        const round2 = (n: number) => Math.round(n * 100) / 100;
 
         // Emit socket update for real-time lists
         const io = req.app.get('io');
@@ -852,9 +937,13 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         res.status(refundFailures.length ? 207 : 200).json({
             message: refundFailures.length
                 ? `Slot cancelled. ${refundFailures.length} online refund(s) FAILED and need a manual refund by Pillora admin.`
-                : 'Slot and all associated bookings cancelled successfully.',
+                : refundedCount > 0
+                    ? `Slot cancelled. ₹${round2(refundedTotal).toFixed(2)} refunded to ${refundedCount} patient(s); ₹${round2(hospitalChargeTotal).toFixed(2)} will be deducted from your next settlement.`
+                    : 'Slot and all associated bookings cancelled successfully.',
             cancelledAppointments: affectedAppointments.length,
             refunded: refundedCount,
+            refundedTotal: round2(refundedTotal),
+            hospitalCharge: round2(hospitalChargeTotal),
             refundFailures
         });
     } catch (error: any) {

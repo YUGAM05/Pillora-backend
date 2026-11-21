@@ -559,3 +559,56 @@ export const sendPasswordResetEmail = async ({
 
 
 
+
+interface CancellationRefundEmailProps {
+  toEmail: string;
+  patientName: string;
+  hospitalName: string;
+  doctorName?: string;
+  date: string;
+  timeSlot: string;
+  bookingRef: string;
+  refundAmount: number;
+}
+
+/** Patient email: the hospital (or Pillora) cancelled the appointment; the online advance is being refunded. */
+export const sendCancellationRefundEmail = async ({
+  toEmail,
+  patientName,
+  hospitalName,
+  doctorName,
+  date,
+  timeSlot,
+  bookingRef,
+  refundAmount
+}: CancellationRefundEmailProps) => {
+  if (!toEmail) return;
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+  const refundLine = refundAmount > 0
+    ? `<p style="margin: 16px 0; padding: 12px 16px; background: #ecfdf5; border-radius: 8px; color: #065f46;"><strong>Refund: ₹${refundAmount.toFixed(2)}</strong> has been sent back to the card / UPI account you paid with. It usually reaches you in 5–7 working days.</p>`
+    : '';
+  try {
+    await transporter.sendMail({
+      from: DEFAULT_FROM,
+      to: toEmail,
+      subject: `Appointment cancelled - ${hospitalName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #0f172a;">Your appointment was cancelled</h2>
+          <p>Hi ${esc(patientName) || 'there'},</p>
+          <p>${esc(hospitalName)} has cancelled your appointment. We're sorry for the inconvenience.</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+            ${doctorName ? `<tr><td style="padding: 6px 0; color: #64748b;">Doctor</td><td style="padding: 6px 0;">${esc(doctorName)}</td></tr>` : ''}
+            <tr><td style="padding: 6px 0; color: #64748b;">Date</td><td style="padding: 6px 0;">${esc(date)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Time</td><td style="padding: 6px 0;">${esc(timeSlot)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;">Booking</td><td style="padding: 6px 0;">#${esc(bookingRef)}</td></tr>
+          </table>
+          ${refundLine}
+          <p>You can book a new appointment any time on <a href="https://pillora.in">pillora.in</a>.</p>
+          <p style="color: #94a3b8; font-size: 12px;">Pillora · team@pillora.in</p>
+        </div>`
+    });
+  } catch (error: any) {
+    console.error('[EmailService] Cancellation email failed:', error?.message || error);
+  }
+};

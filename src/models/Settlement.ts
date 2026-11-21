@@ -26,6 +26,8 @@ export interface ISettlement extends Document {
     razorpayCharges: number;
     gstCharges: number;
     netAmount: number;
+    deductionAmount?: number; // hospital-cancellation charges taken from this payout (see HospitalDeduction)
+    deductionIds?: mongoose.Types.ObjectId[];
     transferDate?: Date;
     transferMethod?: 'NEFT' | 'RTGS' | 'IMPS' | 'UPI';
     utrNumber?: string;
@@ -84,6 +86,8 @@ const SettlementSchema: Schema = new Schema({
     razorpayCharges: { type: Number, required: true, default: 0 },
     gstCharges: { type: Number, required: true, default: 0 },
     netAmount: { type: Number, required: true, default: 0 },
+    deductionAmount: { type: Number, default: 0 },
+    deductionIds: [{ type: Schema.Types.ObjectId, ref: 'HospitalDeduction' }],
     transferDate: { type: Date },
     transferMethod: { type: String, enum: ['NEFT', 'RTGS', 'IMPS', 'UPI'] },
     utrNumber: { type: String },

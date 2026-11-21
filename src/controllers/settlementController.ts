@@ -8,6 +8,7 @@ import Notification from '../models/Notification';
 import User from '../models/User';
 import AuditLog from '../models/AuditLog';
 import mongoose from 'mongoose';
+import { createWithDeductions, previewDeductions, deductionRows } from '../utils/hospitalDeductions';
 import { encrypt, decrypt } from '../utils/cryptoHelper';
 const escapeRegex = (value: string): string => value.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // escape user text used in $regex
 import {
@@ -260,9 +261,14 @@ export const getAdminHospitalSettlementDetails = async (req: AuthRequest, res: R
         // Recent Settlements History
         const settlements = await Settlement.find({ hospitalId }).sort({ createdAt: -1 });
 
+        // Hospital-cancellation charges waiting to come off the next payout (oldest first)
+        const ded = await previewDeductions(hospital._id, Number.MAX_SAFE_INTEGER);
+
         res.json({
             success: true,
             hospitalName: hospital.name,
+            pendingDeductions: deductionRows(ded.pending),
+            pendingDeductionsTotal: ded.pendingTotal,
             dailySummary,
             transactionTable,
             bankDetails,
@@ -447,14 +453,22 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
             timestamp: new Date()
         };
 
-        const settlement = await Settlement.create({
+        // Hospital-cancellation charges (HospitalDeduction) come off this payout
+        const created = await createWithDeductions(hospital._id, netAmount, (settlementObjectId, plan) => {
+            if (plan.total > 0) {
+                timeline.splice(1, 0, { status: 'Ready for Settlement', timestamp: new Date(), note: `₹${plan.total.toFixed(2)} deducted for ${plan.applied.length} booking(s) cancelled by the hospital` });
+            }
+            return Settlement.create({
+            _id: settlementObjectId,
             settlementId,
             hospitalId,
             status: 'Awaiting Hospital Confirmation',
             grossCollection,
             razorpayCharges,
             gstCharges,
-            netAmount,
+            netAmount: plan.netAfter,
+            deductionAmount: plan.total,
+            deductionIds: plan.applied.map((d: any) => d._id),
             transferDate: new Date(),
             transferMethod,
             utrNumber,
@@ -465,6 +479,13 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
             timeline,
             auditLogs: [auditLogEntry]
         });
+        });
+        if (!created.ok) {
+            res.status(409).json({ success: false, message: 'Another settlement for this hospital was created at the same moment. Please refresh and try again.' });
+            return;
+        }
+        const settlement: any = created.result;
+        netAmount = settlement.netAmount;
 
         // Update Payment settlement statuses
         await Payment.updateMany(
@@ -689,12 +710,18 @@ export const getHospitalSettlementsDashboard = async (req: AuthRequest, res: Res
             ? lastSettlement.confirmationDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) 
             : '—';
 
+        const ded = await previewDeductions(hospital._id, pendingSettlementAmount);
+
         res.json({
             success: true,
             dashboard: {
                 todayBookings,
                 todayOnlineCollection: Math.round(todayOnlineCollection * 100) / 100,
-                pendingSettlementAmount,
+                pendingBeforeDeductions: pendingSettlementAmount,
+                cancellationDeductions: ded.total,
+                pendingDeductionsTotal: ded.pendingTotal,
+                pendingDeductions: deductionRows(ded.pending),
+                pendingSettlementAmount: ded.netAfter,
                 nextExpectedSettlementDate,
                 lastSettlementAmount,
                 lastSettlementDate
@@ -760,11 +787,15 @@ export const getHospitalExpectedSettlement = async (req: AuthRequest, res: Respo
             currentStatus = 'Settlement Completed';
         }
 
+        const ded = await previewDeductions(hospital._id, expectedSettlementAmount);
+
         res.json({
             success: true,
             expected: {
                 grossCollection,
-                expectedSettlementAmount,
+                amountBeforeDeductions: expectedSettlementAmount,
+                cancellationDeductions: ded.total,
+                expectedSettlementAmount: ded.netAfter,
                 estimatedSettlementDate,
                 currentStatus
             }
