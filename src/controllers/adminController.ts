@@ -17,6 +17,7 @@ import AuditLog from '../models/AuditLog';
 import PlatformActivity from '../models/PlatformActivity';
 import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
+import { effectiveCapacityForDoctor } from '../utils/slotCapacity';
 import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -858,7 +859,8 @@ export const adminBulkGenerateSlots = async (req: Request, res: Response): Promi
             res.status(404).json({ message: 'Doctor not found for this hospital' });
             return;
         }
-        const maxAppts = (doctor as any).maxAppointmentsPerSlot || 1;
+        // Doctor's own limit (> 1), else the hospital's "Max patients per slot" setting, else 1
+        const maxAppts = await effectiveCapacityForDoctor(doctor);
 
         // Existing (non-cancelled) slots of this doctor in the window: new slots that overlap them are skipped
         const existing = await Slot.find({

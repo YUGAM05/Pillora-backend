@@ -6,6 +6,7 @@ interface Request extends ExpressRequest {
 import mongoose from 'mongoose';
 import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
+import { effectiveCapacityForDoctor } from '../utils/slotCapacity';
 import Appointment from '../models/Appointment';
 import User from '../models/User';
 import Hospital from '../models/Hospital';
@@ -311,7 +312,7 @@ router.post('/book', voiceAuth, resolveVoiceHospital, async (req: Request, res: 
                 return;
             }
 
-            const maxAppts = freshSlot.max_appointments || doctor.maxAppointmentsPerSlot || 1;
+            const maxAppts = freshSlot.max_appointments || await effectiveCapacityForDoctor(doctor);
             if (freshSlot.booked_count >= maxAppts || freshSlot.status === 'booked') {
                 res.status(409).json({
                     results: [{ toolCallId, result: JSON.stringify({ error: "slot_unavailable" }) }]

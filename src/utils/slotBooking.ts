@@ -8,7 +8,7 @@ import Appointment from '../models/Appointment';
  * Model:
  *   - `booked_count`  = seats taken by real bookings (walk-in, AI call, paid online booking).
  *   - `holds[]`       = temporary checkout holds {user, expiresAt}. Only unexpired holds count.
- *   - capacity        = `max_appointments` (fallback: doctor's maxAppointmentsPerSlot, else 1).
+ *   - capacity        = `max_appointments` (fallback: effective capacity from utils/slotCapacity.ts, else 1).
  *
  * A new hold or seat is granted only when
  *       booked_count + (unexpired holds of OTHER users) < capacity
@@ -34,7 +34,7 @@ const bookedExpr = { $ifNull: ['$booked_count', 0] };
 const capExpr = (fallbackCap: number) => ({ $ifNull: ['$max_appointments', Math.max(1, fallbackCap || 1)] });
 
 /** Unexpired holds, optionally excluding one user's hold. */
-const activeHoldsExpr = (now: Date, excludeUser?: mongoose.Types.ObjectId) => ({
+export const activeHoldsExpr = (now: Date, excludeUser?: mongoose.Types.ObjectId) => ({
     $filter: {
         input: { $ifNull: ['$holds', []] },
         as: 'h',
@@ -48,7 +48,7 @@ const activeHoldsExpr = (now: Date, excludeUser?: mongoose.Types.ObjectId) => ({
 });
 
 /** Pipeline stage that recomputes status + hold_count. Runs after `holds` holds only active entries. */
-const statusStage = {
+export const statusStage = {
     $set: {
         hold_count: { $size: '$holds' },
         status: {
@@ -73,9 +73,9 @@ const statusStage = {
     }
 };
 
-/** Capacity of a slot (slot value first, as in the booking flows; doctor setting as fallback). */
-export const slotCapacity = (slot: any, doctor?: any): number =>
-    Math.max(1, Number(slot?.max_appointments) || Number(doctor?.maxAppointmentsPerSlot) || 1);
+/** Capacity of a slot (slot value first, as in the booking flows; `fallbackCap` — see utils/slotCapacity.ts — when missing). */
+export const slotCapacity = (slot: any, fallbackCap?: number): number =>
+    Math.max(1, Number(slot?.max_appointments) || Number(fallbackCap) || 1);
 
 /** Read-side view: status / hold_count as they are right now (expired holds ignored). Never writes. */
 export const liveSlotView = (slot: any, now: Date = new Date()) => {

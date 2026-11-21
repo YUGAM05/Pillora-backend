@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
 import Slot from '../models/Slot';
+import Doctor from '../models/Doctor';
+import { effectiveSlotCapacity, hospitalSlotCapacitySetting } from '../utils/slotCapacity';
 import Appointment from '../models/Appointment';
 import { AuthRequest } from '../middleware/authMiddleware';
 import mongoose from 'mongoose';
@@ -81,6 +83,12 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
             return;
         }
 
+        // Doctor's own limit (> 1), else the hospital's "Max patients per slot" setting, else 1
+        const doctorDoc: any = mongoose.Types.ObjectId.isValid(String(doctorId))
+            ? await Doctor.findById(doctorId).select('maxAppointmentsPerSlot').lean()
+            : null;
+        const maxAppts = effectiveSlotCapacity(doctorDoc, await hospitalSlotCapacitySetting(hospital._id));
+
         const slots = [];
         let current = new Date(start);
 
@@ -92,7 +100,10 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
                     hospital: hospital._id,
                     startTime: new Date(current),
                     endTime: next,
-                    status: 'available'
+                    status: 'available',
+                    max_appointments: maxAppts,
+                    booked_count: 0,
+                    hold_count: 0
                 });
             }
             current = next;

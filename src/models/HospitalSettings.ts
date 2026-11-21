@@ -94,7 +94,7 @@ const HospitalSettingsSchema: Schema = new Schema({
         isOfflineBookingEnabled: { type: Boolean, default: true },
         defaultSlotDuration: { type: Number, default: 15, enum: [10, 15, 20, 30] },
         bufferTimeBetweenSlots: { type: Number, default: 5, enum: [0, 5, 10, 15] },
-        maxAppointmentsPerSlot: { type: Number, default: 1, min: 1, max: 20 },
+        maxAppointmentsPerSlot: { type: Number, default: 1, min: 1, max: 100 },
         advanceBookingWindowDays: { type: Number, default: 30, min: 1, max: 90 },
         minBookingNoticeHours: { type: Number, default: 1, min: 0, max: 48 },
         allowSameDayBooking: { type: Boolean, default: true },

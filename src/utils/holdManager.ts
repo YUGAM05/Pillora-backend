@@ -1,5 +1,5 @@
 import Slot from '../models/Slot';
-import Doctor from '../models/Doctor';
+import { effectiveCapacityForDoctor } from './slotCapacity';
 import { acquireHold, releaseHold as releaseSlotHold, hasActiveHold, HOLD_MS, liveSlotView } from './slotBooking';
 
 /**
@@ -37,9 +37,9 @@ const FAILURE_MESSAGES: Record<string, string> = {
 export const createHold = async (slotId: string, userId: string, io: any, holdMs: number = HOLD_MS): Promise<{ success: boolean; message: string; reason?: string; expiryMs?: number }> => {
     const slotDoc: any = await Slot.findById(slotId).select('doctor').lean();
     if (!slotDoc) return { success: false, message: FAILURE_MESSAGES.NOT_FOUND, reason: 'NOT_FOUND' };
-    const doctor: any = await Doctor.findById(slotDoc.doctor).select('maxAppointmentsPerSlot').lean();
+    const fallbackCap = await effectiveCapacityForDoctor(slotDoc.doctor);
 
-    const result = await acquireHold(slotId, userId, { fallbackCap: doctor?.maxAppointmentsPerSlot || 1, holdMs });
+    const result = await acquireHold(slotId, userId, { fallbackCap, holdMs });
     if (!result.ok) {
         return { success: false, message: FAILURE_MESSAGES[result.reason] || 'Slot not available', reason: result.reason };
     }

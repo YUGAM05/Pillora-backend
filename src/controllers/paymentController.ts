@@ -11,6 +11,7 @@ import { sendAppointmentNotification } from '../services/pushNotificationService
 import { sendCountedTemplate } from '../services/usageService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { getRazorpay, razorpayErrorMessage } from '../utils/razorpayClient';
+import { effectiveCapacityForDoctor } from '../utils/slotCapacity';
 import { acquireHold, claimSeat, holdFailureResponse, PAYMENT_HOLD_MS } from '../utils/slotBooking';
 import { refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
 
@@ -81,8 +82,8 @@ const createOrderForAppointment = async (req: AuthRequest, res: Response, appoin
 
     // The patient must still have (or be able to get) a seat before we take money.
     const slotDoc: any = await Slot.findById(appointment.slot).select('doctor').lean();
-    const doctor: any = slotDoc ? await Doctor.findById(slotDoc.doctor).select('maxAppointmentsPerSlot').lean() : null;
-    const hold = await acquireHold(appointment.slot, uid, { fallbackCap: doctor?.maxAppointmentsPerSlot || 1, holdMs: PAYMENT_HOLD_MS });
+    const fallbackCap = slotDoc ? await effectiveCapacityForDoctor(slotDoc.doctor) : 1;
+    const hold = await acquireHold(appointment.slot, uid, { fallbackCap, holdMs: PAYMENT_HOLD_MS });
     if (!hold.ok) {
         const r = holdFailureResponse(hold.reason);
         res.status(409).json({ error: r.message, code: r.code });
@@ -357,9 +358,9 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         }
 
         // Step 3: take the seat (converts the patient's own hold; other patients' holds count against capacity)
-        const doctor: any = await Doctor.findById(appointment.doctor).select('maxAppointmentsPerSlot').lean();
+        const fallbackCap = await effectiveCapacityForDoctor(appointment.doctor);
         const seat = appointment.status === 'pending'
-            ? await claimSeat(appointment.slot, { holderUserId: appointment.patient, fallbackCap: doctor?.maxAppointmentsPerSlot || 1, appointmentId: appointment._id })
+            ? await claimSeat(appointment.slot, { holderUserId: appointment.patient, fallbackCap, appointmentId: appointment._id })
             : null;
 
         if (!seat) {

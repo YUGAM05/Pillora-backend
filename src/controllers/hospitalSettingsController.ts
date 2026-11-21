@@ -17,6 +17,7 @@ import Notification from '../models/Notification';
 import { encrypt, decrypt } from '../utils/cryptoHelper';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
 import { hasHospitalPermission, permissionsForRole, STAFF_ROLES } from '../utils/hospitalAccess';
+import { clampSlotCapacity, applyHospitalCapacityToFutureSlots } from '../utils/slotCapacity';
 
 // Cloudinary config
 cloudinary.config({
@@ -635,8 +636,10 @@ export const updateAppointmentSettings = async (req: AuthRequest, res: Response)
         if ([0, 5, 10, 15].includes(Number(bufferTimeBetweenSlots))) {
             settings.appointmentSettings.bufferTimeBetweenSlots = Number(bufferTimeBetweenSlots);
         }
+        let newSlotCapacity: number | undefined;
         if (maxAppointmentsPerSlot !== undefined && Number(maxAppointmentsPerSlot) >= 1) {
-            settings.appointmentSettings.maxAppointmentsPerSlot = Number(maxAppointmentsPerSlot);
+            newSlotCapacity = clampSlotCapacity(maxAppointmentsPerSlot);
+            settings.appointmentSettings.maxAppointmentsPerSlot = newSlotCapacity;
         }
         if (advanceBookingWindowDays !== undefined && Number(advanceBookingWindowDays) >= 1) {
             settings.appointmentSettings.advanceBookingWindowDays = Number(advanceBookingWindowDays);
@@ -665,6 +668,16 @@ export const updateAppointmentSettings = async (req: AuthRequest, res: Response)
 
         await settings.save();
 
+        // Apply "Max patients per slot" to upcoming slots of doctors without their own limit
+        let slotsUpdated = 0;
+        if (newSlotCapacity !== undefined) {
+            slotsUpdated = await applyHospitalCapacityToFutureSlots(hospital._id, newSlotCapacity);
+            if (slotsUpdated > 0) {
+                const io = req.app.get('io');
+                if (io) io.emit('slotsUpdated', { hospitalId: hospital._id });
+            }
+        }
+
         await AuditLog.create({
             action: 'APPOINTMENT_SETTINGS_UPDATED',
             hospitalId: hospital._id,
@@ -672,13 +685,14 @@ export const updateAppointmentSettings = async (req: AuthRequest, res: Response)
             email: req.user?.email,
             ipAddress: req.ip || '127.0.0.1',
             status: 'success',
-            details: { settings: settings.appointmentSettings }
+            details: { settings: settings.appointmentSettings, slotsUpdated }
         });
 
         res.json({
             success: true,
             message: 'Appointment preferences saved successfully',
-            appointmentSettings: settings.appointmentSettings
+            appointmentSettings: settings.appointmentSettings,
+            slotsUpdated
         });
     } catch (error: any) {
         console.error('[UpdateAppointmentSettingsError]', error);

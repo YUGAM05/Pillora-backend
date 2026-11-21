@@ -13,6 +13,7 @@ import Settlement from '../models/Settlement';
 import mongoose from 'mongoose';
 import { createHold, releaseHold } from '../utils/holdManager';
 import { claimSeat, releaseSeat, liveSlotView, slotCapacity, holdFailureResponse, HoldFailure } from '../utils/slotBooking';
+import { effectiveCapacityForDoctor } from '../utils/slotCapacity';
 import { cancelAppointmentWithPolicy, refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
 import PDFDocument from 'pdfkit';
 import { v2 as cloudinary } from 'cloudinary';
@@ -244,7 +245,8 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
-        const maxAppts = doctorDoc.maxAppointmentsPerSlot || 1;
+        // Doctor's own limit (> 1), else the hospital's "Max patients per slot" setting, else 1
+        const maxAppts = await effectiveCapacityForDoctor(doctorDoc);
 
         const slots = [];
         let current = new Date(start);
@@ -356,10 +358,9 @@ export const updateAppointmentStatus = async (req: AuthRequest, res: Response): 
         // A booking that did not occupy a seat yet (unpaid online hold, or reopened after cancelling) takes one now,
         // with the same atomic capacity check as every other booking.
         if (priorStatus === 'pending' || priorStatus === 'cancelled') {
-            const doctor: any = await Doctor.findById(appointment.doctor).select('maxAppointmentsPerSlot').lean();
             const seat = await claimSeat(appointment.slot, {
                 holderUserId: appointment.patient,
-                fallbackCap: doctor?.maxAppointmentsPerSlot || 1,
+                fallbackCap: await effectiveCapacityForDoctor(appointment.doctor),
                 appointmentId: appointment._id
             });
             if (!seat) {
@@ -606,7 +607,8 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
             res.status(404).json({ message: 'Doctor not found for this hospital' });
             return;
         }
-        const maxAppts = doctorDoc.maxAppointmentsPerSlot || 1;
+        // Doctor's own limit (> 1), else the hospital's "Max patients per slot" setting, else 1
+        const maxAppts = await effectiveCapacityForDoctor(doctorDoc);
 
         const targetDates = generateDates(date, recurrence);
         const slotsToInsert = [];
@@ -982,7 +984,7 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
             }
 
             const doctor = await Doctor.findOne({ _id: doctorId, hospital: hospital._id }).session(session);
-            const maxAppts = slotCapacity(slot, doctor);
+            const maxAppts = slotCapacity(slot, await effectiveCapacityForDoctor(doctor));
 
             // Take the seat first — atomic capacity check (patients' unexpired checkout holds count too)
             const updatedSlot = await claimSeat(slotId, { fallbackCap: maxAppts, session });
