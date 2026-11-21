@@ -21,6 +21,10 @@ import { verifyFirebaseIdToken } from '../utils/firebaseTokenVerifier';
 
 
 // ─── Generate a short-lived JWT with sessionId ──────────────────────────────
+import { isDeactivatedHospitalStaff } from '../utils/hospitalAccess';
+
+const STAFF_DEACTIVATED_LOGIN = 'Your staff account is deactivated. Please contact your hospital owner.';
+
 const generateToken = (id: string, role: string, sessionId?: string) => {
     const payload: any = { id: id.toString(), role };
     if (sessionId) payload.sessionId = sessionId;
@@ -245,6 +249,11 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
+            if (await isDeactivatedHospitalStaff(user)) {
+                res.status(403).json({ message: STAFF_DEACTIVATED_LOGIN, code: 'STAFF_DEACTIVATED' });
+                return;
+            }
+
             if (!user) {
                 // Create new user if they don't exist
                 user = await User.create({
@@ -300,6 +309,11 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
                     message: 'Your account has been rejected. Please contact support.',
                     status: user.status
                 });
+                return;
+            }
+
+            if (await isDeactivatedHospitalStaff(user)) {
+                res.status(403).json({ message: STAFF_DEACTIVATED_LOGIN, code: 'STAFF_DEACTIVATED' });
                 return;
             }
 
@@ -783,6 +797,11 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
+        if (await isDeactivatedHospitalStaff(user)) {
+            res.status(403).json({ message: STAFF_DEACTIVATED_LOGIN, code: 'STAFF_DEACTIVATED' });
+            return;
+        }
+
         console.log(`[OTP VERIFIED] Login successful for phone: ${phone}`);
 
         // Record login history
@@ -1247,6 +1266,11 @@ export const verifyPhoneOtp = async (req: Request, res: Response): Promise<void>
         // Admins must go through password + MFA, never phone OTP
         if (user.role === 'admin') {
             res.status(403).json({ success: false, message: 'Admin accounts must sign in with password and authenticator code.' });
+            return;
+        }
+
+        if (await isDeactivatedHospitalStaff(user)) {
+            res.status(403).json({ success: false, message: STAFF_DEACTIVATED_LOGIN, code: 'STAFF_DEACTIVATED' });
             return;
         }
 

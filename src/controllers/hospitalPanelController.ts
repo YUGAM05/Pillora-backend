@@ -5,13 +5,20 @@ import Appointment from '../models/Appointment';
 import { AuthRequest } from '../middleware/authMiddleware';
 import mongoose from 'mongoose';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
+import { resolveHospitalAccess } from '../utils/hospitalAccess';
+
+// Owner or active staff hospital (this router is not mounted in app.ts)
+const hospitalOf = async (req: AuthRequest): Promise<any> => {
+    const access = await resolveHospitalAccess(req.user);
+    return access.ok ? access.hospital : null;
+};
 
 // @desc    Get hospital profile for logged-in hospital user
 // @route   GET /api/hospital-panel/profile
 // @access  Private/Hospital
 export const getHospitalProfile = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const hospital = await Hospital.findOne({ user: req.user._id });
+        const hospital = await hospitalOf(req);
         if (!hospital) {
             res.status(404).json({ message: 'Hospital profile not found' });
             return;
@@ -29,7 +36,7 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
     const { doctorId, date, startTime, endTime, slotDuration } = req.body;
 
     try {
-        const hospital = await Hospital.findOne({ user: req.user._id });
+        const hospital = await hospitalOf(req);
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
             return;
@@ -108,7 +115,7 @@ export const generateSlots = async (req: AuthRequest, res: Response): Promise<vo
 // @access  Private/Hospital
 export const getHospitalAppointments = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const hospital = await Hospital.findOne({ user: req.user._id });
+        const hospital = await hospitalOf(req);
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
             return;
@@ -130,7 +137,7 @@ export const getHospitalAppointments = async (req: AuthRequest, res: Response): 
 // @access  Private/Hospital
 export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const hospital = await Hospital.findOne({ user: req.user._id });
+        const hospital = await hospitalOf(req);
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
             return;

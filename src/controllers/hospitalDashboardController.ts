@@ -2,6 +2,7 @@ import { Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Hospital from '../models/Hospital';
+import { resolveHospitalAccess, hasHospitalPermission, permissionsForRole } from '../utils/hospitalAccess';
 import Doctor from '../models/Doctor';
 import Slot from '../models/Slot';
 import Appointment from '../models/Appointment';
@@ -33,6 +34,15 @@ import { getJwtSecret } from '../config/security';
 /** Escape user text before using it in a RegExp (prevents regex injection / ReDoS). */
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * Hospital a hospital user (owner or active staff) may open appointment files
+ * for, or null when their role has no appointments access.
+ */
+const hospitalForAppointmentAccess = async (user: any): Promise<any> => {
+    const access = await resolveHospitalAccess(user);
+    return access.ok && hasHospitalPermission(access.staffRole, 'appointments') ? access.hospital : null;
+};
+
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
 // @access  Private/Hospital
@@ -44,21 +54,40 @@ export const getHospitalStats = async (req: AuthRequest, res: Response): Promise
         const appointmentCount = await Appointment.countDocuments({ hospital: hospital._id });
         const pendingAppointments = await Appointment.countDocuments({ hospital: hospital._id, status: 'pending' });
         
-        const recentAppointments = await Appointment.find({ hospital: hospital._id })
-            .populate('patient', 'name email')
-            .populate('doctor', 'name specialty')
-            .sort({ createdAt: -1 })
-            .limit(5);
+        const staffRole: string = (req as any).staffRole || 'owner';
+        const permissions: string[] = (req as any).hospitalPermissions || permissionsForRole(staffRole);
+        const canSeeAppointments = hasHospitalPermission(staffRole, 'appointments');
+
+        const recentAppointments = canSeeAppointments
+            ? await Appointment.find({ hospital: hospital._id })
+                .populate('patient', 'name email')
+                .populate('doctor', 'name specialty')
+                .sort({ createdAt: -1 })
+                .limit(5)
+            : [];
+
+        // Owners get the hospital document as before; staff get it without
+        // owner-only fields (bank details, temp password, billing notes).
+        let hospitalOut: any = hospital;
+        if (staffRole !== 'owner') {
+            hospitalOut = typeof hospital.toObject === 'function' ? hospital.toObject() : { ...hospital };
+            for (const k of ['tempPassword', 'adminNotes', 'bankDetails', 'lastPaymentAmount', 'lastPaymentMethod', 'lastPaymentReference']) {
+                delete hospitalOut[k];
+            }
+        }
 
         res.json({
             stats: {
                 doctors: doctorCount,
                 appointments: appointmentCount,
                 pending: pendingAppointments,
-                hospital: hospital
+                hospital: hospitalOut
             },
             recentAppointments,
-            management_type: hospital.management_type
+            management_type: hospital.management_type,
+            staffRole,
+            permissions,
+            user: { _id: req.user?._id, name: req.user?.name, email: req.user?.email }
         });
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching stats', error: error.message });
@@ -900,7 +929,9 @@ export const releaseSlotHold = async (req: AuthRequest, res: Response): Promise<
 export const createManualAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
-        const { patientName, patientEmail, patientPhone, doctorId, slotId, notes, paymentStatus } = req.body;
+        const { patientName, patientEmail, patientPhone, doctorId, slotId, notes } = req.body;
+        // Only roles with payments access may mark a walk-in as paid; others book it as pending
+        const paymentStatus = hasHospitalPermission((req as any).staffRole || 'owner', 'payments') ? req.body.paymentStatus : undefined;
 
         if (!patientName || !patientEmail || !doctorId || !slotId || !mongoose.Types.ObjectId.isValid(String(slotId)) || !mongoose.Types.ObjectId.isValid(String(doctorId))) {
             res.status(400).json({ message: 'Missing required manual booking fields' });
@@ -1666,7 +1697,7 @@ export const uploadAppointmentPrescription = async (req: AuthRequest, res: Respo
 
         // b) requesting user.role === "hospital_admin" AND user belongs to appointment.hospitalId
         if (user.role === 'hospital' || user.role === 'hospital_admin') {
-            userHospital = await Hospital.findOne({ user: user._id });
+            userHospital = await hospitalForAppointmentAccess(user);
             if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
                 isAuthorized = true;
                 // Set req.hospital so downstream logic continues to work
@@ -1790,7 +1821,7 @@ export const getAppointmentPrescription = async (req: AuthRequest, res: Response
 
         // b) requesting user.role === "hospital_admin" AND user belongs to appointment.hospitalId
         if (user.role === 'hospital' || user.role === 'hospital_admin') {
-            const userHospital = await Hospital.findOne({ user: user._id });
+            const userHospital = await hospitalForAppointmentAccess(user);
             if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
                 isAuthorized = true;
             }
@@ -1894,7 +1925,7 @@ export const getAppointmentPrescriptionFile = async (req: any, res: Response): P
             isAuthorized = true;
         }
         if (user.role === 'hospital' || (user.role as any) === 'hospital_admin') {
-            const userHospital = await Hospital.findOne({ user: user._id });
+            const userHospital = await hospitalForAppointmentAccess(user);
             if (userHospital && userHospital._id.toString() === appointment.hospital.toString()) {
                 isAuthorized = true;
             }

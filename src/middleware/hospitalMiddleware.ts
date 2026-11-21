@@ -1,6 +1,9 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './authMiddleware';
-import Hospital from '../models/Hospital';
+import {
+    resolveHospitalAccess, permissionsForRole, hasHospitalPermission,
+    HospitalPermission, PERMISSION_LABELS
+} from '../utils/hospitalAccess';
 
 export const isHospital = (req: AuthRequest, res: Response, next: NextFunction) => {
     if (req.user && req.user.role === 'hospital') {
@@ -10,34 +13,51 @@ export const isHospital = (req: AuthRequest, res: Response, next: NextFunction) 
     }
 };
 
-export const selfManagedOnly = async (req: AuthRequest, res: Response, next: NextFunction) => {
+/**
+ * Resolves the hospital for the logged-in hospital user (owner or staff) and
+ * sets req.hospital, req.staffRole and req.hospitalPermissions.
+ * Deactivated staff get 403.
+ */
+export const attachHospital = async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-        const hospital = await Hospital.findOne({ user: req.user?._id });
-        if (!hospital) {
-            res.status(404).json({ message: 'Hospital profile not found' });
+        const access = await resolveHospitalAccess(req.user);
+        if (!access.ok) {
+            res.status(access.status).json({ message: access.message });
             return;
         }
-        
-        (req as any).hospital = hospital;
+        (req as any).hospital = access.hospital;
+        (req as any).staffRole = access.staffRole;
+        (req as any).hospitalPermissions = permissionsForRole(access.staffRole);
         next();
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-export const attachHospital = async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-        const hospital = await Hospital.findOne({ user: req.user?._id });
-        if (!hospital) {
-            res.status(404).json({ message: 'Hospital profile not found' });
+// Kept for existing route definitions; same resolution as attachHospital.
+export const selfManagedOnly = attachHospital;
+
+/**
+ * Server-side permission check for hospital routes. Use after attachHospital.
+ * Passing several permissions allows the request when the role has any of them.
+ */
+export const requireHospitalPermission = (...perms: HospitalPermission[]) =>
+    (req: AuthRequest, res: Response, next: NextFunction) => {
+        const role = (req as any).staffRole as string | undefined;
+        if (!role) {
+            res.status(403).json({ message: 'Hospital access could not be verified' });
             return;
         }
-        (req as any).hospital = hospital;
-        next();
-    } catch (error) {
-        res.status(500).json({ message: 'Server error' });
-    }
-};
+        if (perms.some(p => hasHospitalPermission(role, p))) {
+            next();
+            return;
+        }
+        res.status(403).json({
+            message: `Your role (${role}) does not have access to ${PERMISSION_LABELS[perms[0]]}`,
+            code: 'ROLE_FORBIDDEN',
+            staffRole: role,
+        });
+    };
 
 import { computeSubscriptionStatus } from '../services/subscriptionService';
 
@@ -50,7 +70,12 @@ export const requireActiveSubscription = async (req: AuthRequest, res: Response,
     try {
         let hospital = (req as any).hospital;
         if (!hospital && req.user?._id) {
-            hospital = await Hospital.findOne({ user: req.user._id });
+            const access = await resolveHospitalAccess(req.user);
+            if (!access.ok) {
+                res.status(access.status).json({ message: access.message });
+                return;
+            }
+            hospital = access.hospital;
             (req as any).hospital = hospital;
         }
 

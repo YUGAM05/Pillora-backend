@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Hospital from '../models/Hospital';
+import { resolveHospitalAccess, hasHospitalPermission } from '../utils/hospitalAccess';
 import Doctor from '../models/Doctor'; // ✅ Added
 import Settlement from '../models/Settlement';
 import Appointment from '../models/Appointment';
@@ -846,8 +847,11 @@ export const getHospitalSettlements = async (req: AuthRequest, res: Response): P
         // Only an admin, or the hospital account that owns this hospital (audit B-27).
         const role = req.user?.role;
         if (role !== 'admin') {
-            const owns = role === 'hospital'
-                && await Hospital.exists({ _id: hospitalId, user: req.user?._id });
+            // The owner, or active staff of this hospital with settlements access
+            const access = role === 'hospital' ? await resolveHospitalAccess(req.user) : null;
+            const owns = !!access && access.ok
+                && String(access.hospital._id) === String(hospitalId)
+                && hasHospitalPermission(access.staffRole, 'settlements');
             if (!owns) {
                 res.status(403).json({ success: false, message: 'Not authorized to view these settlements' });
                 return;

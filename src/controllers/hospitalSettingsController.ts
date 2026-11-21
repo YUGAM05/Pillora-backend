@@ -16,6 +16,7 @@ import Session from '../models/Session';
 import Notification from '../models/Notification';
 import { encrypt, decrypt } from '../utils/cryptoHelper';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
+import { hasHospitalPermission, permissionsForRole, STAFF_ROLES } from '../utils/hospitalAccess';
 
 // Cloudinary config
 cloudinary.config({
@@ -99,9 +100,13 @@ export const getHospitalSettings = async (req: AuthRequest, res: Response): Prom
             return;
         }
 
+        const staffRole: string = (req as any).staffRole || 'owner';
+        const canSeeBank = hasHospitalPermission(staffRole, 'bankDetails');
+        const canSeeHospitalSettings = hasHospitalPermission(staffRole, 'hospitalSettings');
+
         const settings = await getOrCreateHospitalSettings(hospital._id);
         const sub = computeSubscriptionStatus(hospital);
-        const bank = getSafeBankDetails(hospital.bankDetails);
+        const bank = canSeeBank ? getSafeBankDetails(hospital.bankDetails) : null;
 
         // Security session count
         const activeSessionsCount = await Session.countDocuments({
@@ -111,10 +116,12 @@ export const getHospitalSettings = async (req: AuthRequest, res: Response): Prom
         });
 
         // Recent Audit Logs
-        const recentAuditLogs = await AuditLog.find({ hospitalId: hospital._id })
-            .sort({ createdAt: -1 })
-            .limit(10)
-            .lean();
+        const recentAuditLogs = canSeeHospitalSettings
+            ? await AuditLog.find({ hospitalId: hospital._id })
+                .sort({ createdAt: -1 })
+                .limit(10)
+                .lean()
+            : [];
 
         res.json({
             success: true,
@@ -158,7 +165,7 @@ export const getHospitalSettings = async (req: AuthRequest, res: Response): Prom
             },
             appointmentSettings: settings.appointmentSettings,
             notificationPreferences: settings.notificationPreferences,
-            bankDetailsPendingApproval: settings.bankDetailsPendingApproval,
+            bankDetailsPendingApproval: canSeeBank ? settings.bankDetailsPendingApproval : undefined,
             security: {
                 twoFactorAuthEnabled: Boolean(settings.twoFactorAuthEnabled),
                 activeSessionsCount: Math.max(1, activeSessionsCount),
@@ -173,7 +180,9 @@ export const getHospitalSettings = async (req: AuthRequest, res: Response): Prom
                 canGenerateSlots: sub.canGenerateSlots
             },
             deactivationRequest: settings.deactivationRequest || { requested: false },
-            recentAuditLogs
+            recentAuditLogs,
+            staffRole,
+            permissions: permissionsForRole(staffRole)
         });
     } catch (error: any) {
         console.error('[GetHospitalSettingsError]', error);
@@ -377,8 +386,9 @@ export const getHospitalStaffAndDoctors = async (req: AuthRequest, res: Response
         // Doctors
         const doctors = await Doctor.find({ hospital: hospital._id }).sort({ createdAt: -1 }).lean();
 
-        // Staff Accounts (linked to this hospital or primary owner)
-        const staffUsers = await User.find({
+        // Staff Accounts (linked to this hospital or primary owner) - owner only
+        const canManageStaff = hasHospitalPermission((req as any).staffRole || 'owner', 'staffManage');
+        const staffUsers = !canManageStaff ? [] : await User.find({
             $or: [
                 { hospitalId: hospital._id },
                 { _id: hospital.user }
@@ -422,8 +432,12 @@ export const addStaffAccount = async (req: AuthRequest, res: Response): Promise<
             return;
         }
 
-        const validRoles = ['owner', 'administrator', 'receptionist', 'doctor', 'accounts'];
-        const chosenRole = validRoles.includes(role) ? role : 'receptionist';
+        // Only Hospital.user is the owner; staff get one of the four staff roles.
+        if (role !== undefined && !STAFF_ROLES.includes(role)) {
+            res.status(400).json({ message: 'Role must be administrator, receptionist, doctor or accounts' });
+            return;
+        }
+        const chosenRole = role || 'receptionist';
 
         // Check if user already exists
         const existing = await User.findOne({ email: email.trim().toLowerCase() });
@@ -481,22 +495,40 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response): Promi
         const { id } = req.params;
         const { role, isActive, newPassword } = req.body;
 
+        if (String(id) === String(hospital.user)) {
+            res.status(400).json({ message: 'The hospital owner account cannot be changed or deactivated here' });
+            return;
+        }
+
         const staff = await User.findOne({ _id: id, hospitalId: hospital._id });
         if (!staff) {
             res.status(404).json({ message: 'Staff account not found' });
             return;
         }
 
-        if (role && ['owner', 'administrator', 'receptionist', 'doctor', 'accounts'].includes(role)) {
+        if (role !== undefined) {
+            if (!STAFF_ROLES.includes(role)) {
+                res.status(400).json({ message: 'Role must be administrator, receptionist, doctor or accounts' });
+                return;
+            }
             staff.hospitalStaffRole = role;
         }
 
+        let endSessions = false;
         if (isActive !== undefined) {
-            staff.isActiveStaff = Boolean(isActive);
+            const active = Boolean(isActive);
+            if (!active && staff.isActiveStaff !== false) endSessions = true;
+            staff.isActiveStaff = active;
         }
 
         if (newPassword && newPassword.trim().length >= 6) {
             staff.passwordHash = await bcrypt.hash(newPassword.trim(), 10);
+            endSessions = true;
+        }
+
+        // Deactivation or a password reset ends the staff member's existing logins
+        if (endSessions) {
+            (staff as any).tokensRevokedAt = new Date();
         }
 
         await staff.save();

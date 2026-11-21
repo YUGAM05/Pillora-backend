@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { protect } from '../middleware/authMiddleware';
-import { isHospital, attachHospital } from '../middleware/hospitalMiddleware';
+import { isHospital, attachHospital, requireHospitalPermission } from '../middleware/hospitalMiddleware';
 import Notification from '../models/Notification';
 import PushSubscription from '../models/PushSubscription';
 
@@ -54,7 +54,7 @@ router.put('/read-all', protect, async (req: any, res: Response) => {
 // @desc    Subscribe to push notifications
 // @route   POST /api/notifications/subscribe
 // @access  Private/Hospital
-router.post('/subscribe', protect, isHospital, attachHospital, async (req: any, res: Response) => {
+router.post('/subscribe', protect, isHospital, attachHospital, requireHospitalPermission('self'), async (req: any, res: Response) => {
     try {
         const { subscription, hospitalId } = req.body;
         const targetHospitalId = hospitalId || req.hospital?._id;

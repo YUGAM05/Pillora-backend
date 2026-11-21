@@ -5,6 +5,7 @@ import Appointment from '../models/Appointment';
 import Slot from '../models/Slot';
 import Doctor from '../models/Doctor';
 import Hospital from '../models/Hospital';
+import { resolveHospitalAccess, hasHospitalPermission } from '../utils/hospitalAccess';
 import { createHold } from '../utils/holdManager';
 import { holdFailureResponse, HoldFailure } from '../utils/slotBooking';
 import { cancelAppointmentWithPolicy, CancelActor } from '../utils/bookingCancellation';
@@ -22,10 +23,11 @@ const resolveActor = async (req: AuthRequest, appointment: any): Promise<CancelA
     if (!uid) return null;
     if (req.user?.role === 'admin') return 'admin';
     if (req.user?.role === 'hospital') {
-        const owns = await Hospital.exists({
-            _id: appointment.hospital,
-            $or: [{ user: uid }, ...(req.user?.hospitalId ? [{ _id: req.user.hospitalId }] : [])]
-        });
+        // Owner or active staff of that hospital whose role covers appointments
+        const access = await resolveHospitalAccess(req.user);
+        const owns = access.ok
+            && String(access.hospital._id) === String(appointment.hospital)
+            && hasHospitalPermission(access.staffRole, 'appointments');
         return owns ? 'hospital' : null;
     }
     return String(appointment.patient) === uid ? 'patient' : null;

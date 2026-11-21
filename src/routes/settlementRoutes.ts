@@ -1,6 +1,6 @@
 import express from 'express';
 import { protect, adminOnly } from '../middleware/authMiddleware';
-import { isHospital, attachHospital } from '../middleware/hospitalMiddleware';
+import { isHospital, attachHospital, requireHospitalPermission } from '../middleware/hospitalMiddleware';
 import {
     getAdminSettlementsDashboard,
     getAdminHospitalSettlementDetails,
@@ -28,10 +28,10 @@ router.get('/admin/history', protect, adminOnly, getAdminSettlementHistory);
 router.get('/admin/analytics', protect, adminOnly, getAdminSettlementAnalytics);
 
 // Hospital Panel Finance Routes
-router.get('/hospital/dashboard', protect, isHospital, attachHospital, getHospitalSettlementsDashboard);
-router.get('/hospital/expected', protect, isHospital, attachHospital, getHospitalExpectedSettlement);
-router.get('/hospital/history', protect, isHospital, attachHospital, getHospitalSettlementHistory);
-router.post('/hospital/confirm/:id', protect, isHospital, attachHospital, confirmSettlementPayment);
-router.post('/hospital/dispute/:id', protect, isHospital, attachHospital, disputeSettlementPayment);
+router.get('/hospital/dashboard', protect, isHospital, attachHospital, requireHospitalPermission('settlements'), getHospitalSettlementsDashboard);
+router.get('/hospital/expected', protect, isHospital, attachHospital, requireHospitalPermission('settlements'), getHospitalExpectedSettlement);
+router.get('/hospital/history', protect, isHospital, attachHospital, requireHospitalPermission('settlements'), getHospitalSettlementHistory);
+router.post('/hospital/confirm/:id', protect, isHospital, attachHospital, requireHospitalPermission('settlements'), confirmSettlementPayment);
+router.post('/hospital/dispute/:id', protect, isHospital, attachHospital, requireHospitalPermission('settlements'), disputeSettlementPayment);
 
 export default router;
