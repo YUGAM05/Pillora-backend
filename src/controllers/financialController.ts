@@ -1047,8 +1047,17 @@ export const getAdminHospitalFinancialReport = async (req: AuthRequest, res: Res
         const totalPatientCollections = grossOnlineAdvances + cashAtClinic + onlineAtClinic;
         const pendingPatientCollection = Math.max(0, totalConsultationFees - totalPatientCollections);
 
+        // Per-appointment rows for the admin "Hospital appointment bookings" table
+        // (same records the hospital dashboard's payments screen uses).
+        const { records: appointmentRecords } = await fetchHospitalFinancialData(hospital._id, {
+            dateFilter: String(dateFilter),
+            customStart: customStart ? String(customStart) : undefined,
+            customEnd: customEnd ? String(customEnd) : undefined
+        });
+
         res.status(200).json({
             success: true,
+            appointments: appointmentRecords,
             hospital: {
                 _id: hospital._id,
                 name: hospital.name,
