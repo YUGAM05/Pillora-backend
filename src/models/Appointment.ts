@@ -39,6 +39,9 @@ export interface IAppointment extends Document {
     appointmentTime?: string;
     reminder24hSent?: boolean;
     reminder2hSent?: boolean;
+    // true while this appointment occupies one seat of its slot (slot.booked_count).
+    // Missing on older documents; see utils/slotBooking.ts releaseSeat for how those are treated.
+    slotSeatHeld?: boolean;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -96,7 +99,8 @@ const AppointmentSchema: Schema = new Schema({
     appointmentDate: { type: String },
     appointmentTime: { type: String },
     reminder24hSent: { type: Boolean, default: false },
-    reminder2hSent: { type: Boolean, default: false }
+    reminder2hSent: { type: Boolean, default: false },
+    slotSeatHeld: { type: Boolean }
 }, { timestamps: true });
 
 export default mongoose.model<IAppointment>('Appointment', AppointmentSchema);

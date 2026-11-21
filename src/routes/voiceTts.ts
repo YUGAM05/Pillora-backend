@@ -9,11 +9,10 @@ const sarvam = new SarvamAIClient({
 
 router.post('/api/voice/tts-gujarati', async (req: Request, res: Response): Promise<any> => {
   try {
-    console.log('[DEBUG] Incoming headers:', JSON.stringify(req.headers));
-    console.log('[DEBUG] Expected secret from env:', process.env.VAPI_TTS_SECRET);
-    
+    // (Never log request headers or the expected secret: Vercel logs are not a secret store.)
     const incomingSecret = req.headers['x-tts-proxy-key'];
-    if (!incomingSecret || incomingSecret !== process.env.VAPI_TTS_SECRET) {
+    const expectedSecret = process.env.VAPI_TTS_SECRET;
+    if (!expectedSecret || !incomingSecret || incomingSecret !== expectedSecret) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 

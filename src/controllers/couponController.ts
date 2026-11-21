@@ -62,8 +62,12 @@ export const deleteCoupon = async (req: Request, res: Response) => {
 // User: Validate Coupon
 export const validateCoupon = async (req: Request, res: Response) => {
     try {
-        const { code, orderAmount } = req.body;
-        const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
+        const { code } = req.body;
+        const orderAmount = Number(req.body.orderAmount);
+        if (typeof code !== 'string' || !code.trim() || !Number.isFinite(orderAmount) || orderAmount < 0) {
+            return res.status(400).json({ message: 'Coupon code and order amount are required' });
+        }
+        const coupon = await Coupon.findOne({ code: code.trim().toUpperCase(), isActive: true });
 
         if (!coupon) {
             return res.status(404).json({ message: 'Invalid coupon code' });

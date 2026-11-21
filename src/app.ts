@@ -19,14 +19,19 @@ import { initSubscriptionExpiryCron } from './cron/subscriptionExpiryCron';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import User from './models/User';
+import crypto from 'crypto';
+import { getMongoUri, getJwtSecret, applyCorsHeaders, isAllowedOrigin } from './config/security';
 
 const app = express();
+// Vercel sits in front of the app: trust its X-Forwarded-For so req.ip (used by
+// the rate limiters) is the real client IP, not one shared proxy address.
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
         origin: (origin, callback) => {
-            // Allow all origins dynamically
-            callback(null, true);
+            // Browsers: only our own frontends. No Origin = server-to-server client.
+            callback(null, !origin || isAllowedOrigin(origin));
         },
         methods: ['GET', 'POST'],
         credentials: true
@@ -51,83 +56,21 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigins = [
-    'https://pillora.in',
-    'https://www.pillora.in',
-    'https://pillora-admin.vercel.app',
-    'https://www.pillora-admin.vercel.app',
-    'https://pillora-hospital.vercel.app',
-    'https://www.pillora-hospital.vercel.app',
-    'https://pillora-seller.vercel.app',
-    'https://www.pillora-seller.vercel.app',
-    'https://pillorahospital.in',
-    'https://www.pillorahospital.in',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
-    'http://localhost:3003',
-    'http://localhost:5000',
-];
-
 // ─── CORS — registered FIRST, before DB middleware and all routes ─────────────
-// OPTIONS preflight is short-circuited here with 200 so the DB middleware
-// never runs on preflight requests (a DB error would send a 500 with no CORS
-// headers, causing the browser to report a CORS failure instead of the real error).
+// Only the real frontends (config/security.ts ALLOWED_ORIGINS) and localhost get
+// CORS headers. Reflecting any origin together with Allow-Credentials let any
+// website make authenticated calls on a visitor's behalf.
+// OPTIONS preflight is short-circuited here so the DB middleware never runs on it.
 app.use((req, res, next) => {
     console.log(`[Request] ${req.method} ${req.url}`);
-    const origin = req.headers.origin;
-
-    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else {
-        const isLocal = origin && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1'));
-        const isVercel = origin && origin.endsWith('.vercel.app');
-        const isPillora = origin && (
-            origin.includes('pillora.in') ||
-            origin.includes('pillora-admin') ||
-            origin.includes('pillora-hospital') ||
-            origin.includes('pillora-seller') ||
-            origin.includes('pillorahospital.in')
-        );
-
-        if (origin && (isLocal || isVercel || isPillora || allowedOrigins.includes(origin))) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else if (!origin) {
-            // Non-browser clients (curl, Postman, server-to-server)
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        } else {
-            // Fallback: set origin dynamically if it exists to allow successful handshake
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        }
+    applyCorsHeaders(req.headers.origin, res);
+    if (isAllowedOrigin(req.headers.origin)) {
+        res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24 h
     }
-
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24 h
-
-    // ✅ Return 200 immediately for OPTIONS — do NOT fall through to DB middleware
     if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+        return res.status(204).end();
     }
     next();
-});
-
-// Explicit OPTIONS handler for all routes to ensure preflight always succeeds
-app.options(/.*/, (req, res) => {
-    const origin = req.headers.origin;
-    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    return res.status(200).end();
 });
 
 
@@ -147,10 +90,11 @@ app.use(async (req, res, next) => {
 
 app.use(express.json({
     limit: '100mb',
-    // Keep the exact bytes of WhatsApp webhook calls: Meta's signature
-    // (X-Hub-Signature-256) is computed over the raw body.
+    // Keep the exact bytes of webhook calls whose signature is computed over the raw body:
+    // WhatsApp (X-Hub-Signature-256) and Razorpay (X-Razorpay-Signature on /api/payments/verify).
     verify: (req: any, _res, buf) => {
-        if (req.originalUrl?.startsWith('/api/webhook/whatsapp')) req.rawBody = buf;
+        const url: string = req.originalUrl || '';
+        if (url.startsWith('/api/webhook/whatsapp') || url.startsWith('/api/payments/verify')) req.rawBody = buf;
     },
 }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -162,11 +106,12 @@ app.use(helmet({
 app.use(morgan('dev'));
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'fallback_secret',
+    // No hard-coded fallback: derive one from JWT_SECRET when SESSION_SECRET is unset.
+    secret: process.env.SESSION_SECRET || crypto.createHmac('sha256', getJwtSecret()).update('express-session').digest('hex'),
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({
-        mongoUrl: process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster',
+        mongoUrl: getMongoUri(),
         collectionName: 'sessions',
     }),
     cookie: {
@@ -358,7 +303,7 @@ export const connectDB = async () => {
     }
     
     try {
-        const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb+srv://ApexCareAdmin:Admin123@apexcarecluster.vytzhzk.mongodb.net/e-pharmacy?retryWrites=true&w=majority&appName=ApexCareCluster';
+        const uri = getMongoUri();
         await mongoose.connect(uri, {
             dbName: 'e-pharmacy',
             serverSelectionTimeoutMS: 4000,

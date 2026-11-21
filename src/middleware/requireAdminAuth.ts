@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import Session from '../models/Session';
 import AuditLog from '../models/AuditLog';
+import { getJwtSecret } from '../config/security';
 
 /**
  * Express middleware: Verify JWT + check session in database.
@@ -21,7 +22,7 @@ export const requireAdminAuth = async (req: Request, res: Response, next: NextFu
         // 2. Verify JWT signature and decode
         let decoded: any;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024');
+            decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
 
         } catch (err: any) {
             if (err.name === 'TokenExpiredError') {
@@ -38,8 +39,12 @@ export const requireAdminAuth = async (req: Request, res: Response, next: NextFu
             return;
         }
 
-        // 4. If JWT contains a sessionId, verify it in the database
-        if (decoded.sessionId) {
+        // 4. Admin tokens must carry a sessionId that is live in the database
+        if (!decoded.sessionId) {
+            res.status(401).json({ message: 'Session not found' });
+            return;
+        }
+        {
             const session = await Session.findOne({ sessionId: decoded.sessionId });
 
             if (!session) {

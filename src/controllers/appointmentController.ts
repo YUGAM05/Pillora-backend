@@ -1,230 +1,216 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Appointment from '../models/Appointment';
-import Payment from '../models/Payment';
-import Settlement from '../models/Settlement';
-import Razorpay from 'razorpay';
 import Slot from '../models/Slot';
 import Doctor from '../models/Doctor';
 import Hospital from '../models/Hospital';
 import { createHold } from '../utils/holdManager';
+import { holdFailureResponse, HoldFailure } from '../utils/slotBooking';
+import { cancelAppointmentWithPolicy, CancelActor } from '../utils/bookingCancellation';
 
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
-});
+const ADVANCE_RATE = 0.20;
+
+const userIdOf = (req: AuthRequest): string => String(req.user?._id || req.user?.id || '');
+
+/**
+ * Who may act on an appointment: its patient, the hospital that owns it, or an admin.
+ * Returns the actor type, or null when the caller has no right to it.
+ */
+const resolveActor = async (req: AuthRequest, appointment: any): Promise<CancelActor | null> => {
+    const uid = userIdOf(req);
+    if (!uid) return null;
+    if (req.user?.role === 'admin') return 'admin';
+    if (req.user?.role === 'hospital') {
+        const owns = await Hospital.exists({
+            _id: appointment.hospital,
+            $or: [{ user: uid }, ...(req.user?.hospitalId ? [{ _id: req.user.hospitalId }] : [])]
+        });
+        return owns ? 'hospital' : null;
+    }
+    return String(appointment.patient) === uid ? 'patient' : null;
+};
 
 /**
  * @desc    Cancel appointment (initiator-dependent refund/retention rules)
  * @route   POST /api/appointments/:appointmentId/cancel
- * @access  Private
+ * @access  Private — the appointment's patient, its hospital, or an admin
  */
 export const cancelAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { appointmentId } = req.params;
-        const { reason } = req.body;
-        const userId = req.user?._id || req.user?.id;
+        const { reason } = req.body || {};
 
-        if (!appointmentId) {
-            res.status(400).json({ success: false, message: 'Appointment ID is required' });
+        if (!appointmentId || !mongoose.Types.ObjectId.isValid(String(appointmentId))) {
+            res.status(400).json({ success: false, message: 'Valid appointment ID is required' });
             return;
         }
 
-        const appointment = await Appointment.findById(appointmentId);
+        const appointment = await Appointment.findById(appointmentId).select('patient hospital status');
         if (!appointment) {
             res.status(404).json({ success: false, message: 'Appointment not found' });
             return;
         }
 
-        if (appointment.status === 'cancelled') {
-            res.status(400).json({ success: false, message: 'Appointment is already cancelled' });
+        const actor = await resolveActor(req, appointment);
+        if (!actor) {
+            // Same answer as "not found" so appointment ids cannot be probed
+            res.status(404).json({ success: false, message: 'Appointment not found' });
             return;
         }
 
-        // Identify if initiator is Hospital or Admin vs User
-        // If hospital role / admin role, or if user is hospital staff
-        const isHospitalOrAdmin = req.user.role === 'hospital' || req.user.role === 'admin';
-
-        // 1. Update Appointment Status
-        appointment.status = 'cancelled';
-        if (reason) {
-            appointment.notes = appointment.notes ? `${appointment.notes}\nCancellation reason: ${reason}` : `Cancellation reason: ${reason}`;
-        }
-        await appointment.save();
-
-        // 2. Load Payment Record
-        const payment = await Payment.findOne({ appointmentId });
-
-        if (payment && payment.status === 'completed') {
-            if (isHospitalOrAdmin) {
-                // Hospital Initiates Cancellation: FULL REFUND
-                payment.status = 'refund_initiated';
-                payment.settlementStatus = 'refunded';
-                await payment.save();
-
-                // Trigger Razorpay Refund
-                if (payment.razorpayPaymentId) {
-                    try {
-                        const refundAmount = Math.round(payment.amount * 100); // Amount in paise
-                        await razorpay.payments.refund(payment.razorpayPaymentId, {
-                            amount: refundAmount,
-                            notes: {
-                                reason: reason || 'Hospital cancelled appointment',
-                                appointmentId: appointmentId.toString()
-                            }
-                        });
-                    } catch (refundError: any) {
-                        console.error('[RazorpayRefundError]', refundError.message);
-                        // We do not throw or revert, as handle webhook refund verification or manual check covers this
-                    }
-                }
-            } else {
-                // User Initiates Cancellation: NO REFUND
-                // Payment remains status = "completed" (or we can tag as "completed" to signify retained)
-                payment.status = 'completed';
-                payment.settlementStatus = 'retained_by_pillora';
-                await payment.save();
-            }
-        } else if (payment && payment.status === 'pending') {
-            // Unpaid pending appointments being cancelled
-            payment.status = 'failed';
-            payment.settlementStatus = 'refunded';
-            await payment.save();
+        const result = await cancelAppointmentWithPolicy(appointment._id, actor, typeof reason === 'string' ? reason.slice(0, 500) : undefined);
+        if (!result.ok) {
+            res.status(result.status).json({ success: false, message: result.message });
+            return;
         }
 
-        res.status(200).json({
-            success: true,
-            message: `Appointment cancelled successfully (${isHospitalOrAdmin ? 'Hospital refund initiated' : 'User cancellation retained'})`,
-            appointment
-        });
+        const io = req.app.get('io');
+        if (io) io.emit('appointmentsUpdated', { hospitalId: result.appointment.hospital });
+
+        res.status(200).json({ success: true, message: result.message, refund: result.refund, appointment: result.appointment });
     } catch (error: any) {
         console.error('[AppointmentCancelError]', error.message);
-        res.status(500).json({ success: false, message: 'Failed to cancel appointment', error: error.message });
+        res.status(500).json({ success: false, message: 'Failed to cancel appointment' });
     }
 };
 
 /**
- * @desc    Create appointment dynamically (supports simplified React Router template)
- * @route   POST /api/appointments/create
- * @access  Public/Private
+ * Hold an EXISTING slot for the patient and create (or reuse) their pending appointment.
+ * Patients can never create slots; capacity is enforced atomically by the hold.
  */
-export const createAppointment = async (req: any, res: Response): Promise<void> => {
-    try {
-        const { userId, doctorId, hospitalId, appointmentDate, appointmentTime, consultationFee, status } = req.body;
+const holdExistingSlot = async (req: AuthRequest, res: Response, slot: any, doctor: any, patientId: string, respond: (appointmentId: string) => void): Promise<void> => {
+    // Already booked (paid / confirmed) for this slot?
+    const existingBooked = await Appointment.findOne({
+        patient: patientId,
+        slot: slot._id,
+        status: { $nin: ['cancelled', 'pending'] }
+    }).select('_id');
+    if (existingBooked) {
+        res.status(400).json({ success: false, code: 'ALREADY_BOOKED', message: 'You already have an appointment for this slot.' });
+        return;
+    }
 
-        if (!doctorId || !hospitalId || !appointmentDate || !appointmentTime) {
+    const io = req.app.get('io');
+    const holdResult = await createHold(slot._id.toString(), patientId, io);
+    if (!holdResult.success) {
+        const r = holdFailureResponse((holdResult.reason || 'UNAVAILABLE') as HoldFailure);
+        res.status(r.status).json({ success: false, code: r.code, message: r.message });
+        return;
+    }
+
+    let appointment = await Appointment.findOne({ patient: patientId, slot: slot._id, status: 'pending' });
+
+    if (!appointment) {
+        const activeAppointmentsCount = await Appointment.countDocuments({ slot: slot._id, status: { $ne: 'cancelled' } });
+        const hospitalObj = await Hospital.findById(slot.hospital).select('name');
+
+        appointment = new Appointment({
+            patient: patientId,
+            doctor: slot.doctor,
+            hospital: slot.hospital,
+            slot: slot._id,
+            slotTime: slot.startTime,
+            status: 'pending',
+            paymentStatus: 'unpaid',
+            paymentSource: 'gateway',
+            bookingSource: 'online',
+            tokenNumber: activeAppointmentsCount + 1,
+            doctorName: `Dr. ${doctor.name}`,
+            hospitalName: hospitalObj ? hospitalObj.name : 'Hospital',
+            consultationFee: doctor.fee || 500,
+            appointmentDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(slot.startTime),
+            appointmentTime: new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(slot.startTime)
+        });
+        await appointment.save();
+    }
+
+    respond(appointment._id.toString());
+};
+
+/** Parse a client slot time: full ISO timestamps are exact; bare "HH:MM" is IST on `date`. */
+const parseSlotStart = (value: any, date?: any): Date | null => {
+    if (!value || typeof value !== 'string') return null;
+    let d: Date;
+    if (value.includes('T')) {
+        d = new Date(value);
+    } else if (/^\d{2}:\d{2}$/.test(value) && typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        d = new Date(`${date}T${value}:00+05:30`);
+    } else {
+        return null;
+    }
+    return isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * @desc    Book an existing slot (legacy endpoint; same rules as /hold)
+ * @route   POST /api/appointments/create
+ * @access  Private
+ * Body: { doctorId, appointmentDate: 'YYYY-MM-DD', appointmentTime: 'HH:MM' (IST) } or { slotId }.
+ * userId / consultationFee / hospitalId from the body are ignored.
+ */
+export const createAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const patientId = userIdOf(req);
+        if (!patientId) {
+            res.status(401).json({ error: 'User not authenticated' });
+            return;
+        }
+
+        const { slotId, doctorId, appointmentDate, appointmentTime } = req.body || {};
+        let slot: any = null;
+        if (slotId && mongoose.Types.ObjectId.isValid(String(slotId))) {
+            slot = await Slot.findById(slotId);
+        } else if (doctorId && mongoose.Types.ObjectId.isValid(String(doctorId))) {
+            const start = parseSlotStart(appointmentTime, appointmentDate);
+            if (!start) {
+                res.status(400).json({ error: 'Missing or invalid appointmentDate / appointmentTime' });
+                return;
+            }
+            slot = await Slot.findOne({ doctor: doctorId, startTime: start });
+        } else {
             res.status(400).json({ error: 'Missing required fields' });
             return;
         }
 
-        // Parse Date & Time
-        // Combine date ("YYYY-MM-DD") and time ("HH:MM")
-        const dateTimeStr = `${appointmentDate}T${appointmentTime}:00`;
-        const startTime = new Date(dateTimeStr);
-
-        // Find or create a Slot dynamically for this slot time
-        let slot = await Slot.findOne({
-            doctor: doctorId,
-            hospital: hospitalId,
-            startTime: startTime
-        });
-
         if (!slot) {
-            const endTime = new Date(startTime.getTime() + 60 * 60000); // 1 hour duration
-            slot = new Slot({
-                doctor: doctorId,
-                hospital: hospitalId,
-                startTime: startTime,
-                endTime: endTime,
-                status: 'booked',
-                booked_count: 1,
-                max_appointments: 1
-            });
-            await slot.save();
-        } else {
-            slot.booked_count += 1;
-            slot.status = 'booked';
-            await slot.save();
+            res.status(404).json({ error: 'No open slot exists at this time. Please pick one of the listed slots.' });
+            return;
         }
-
-        // Generate token number
-        const activeAppointmentsCount = await Appointment.countDocuments({
-            slot: slot._id,
-            status: { $ne: 'cancelled' }
-        });
-        const tokenNumber = activeAppointmentsCount + 1;
-
-        // Resolve patient ID
-        const patientId = userId || req.user?._id || req.user?.id;
-        if (!patientId) {
-            res.status(400).json({ error: 'User ID is required' });
+        const doctor = await Doctor.findOne({ _id: slot.doctor, hospital: slot.hospital });
+        if (!doctor) {
+            res.status(404).json({ error: 'Doctor not found' });
             return;
         }
 
-        // Query Doctor and Hospital to get names and fees
-        const doctorObj = await Doctor.findById(doctorId);
-        const hospitalObj = await Hospital.findById(hospitalId);
-
-        const finalDocName = doctorObj ? `Dr. ${doctorObj.name}` : "Dr. test";
-        const finalHospName = hospitalObj ? hospitalObj.name : "Test";
-        const finalFee = Number(consultationFee) || (doctorObj ? doctorObj.fee : 500);
-
-        // Create Appointment
-        const appointment = new Appointment({
-            patient: patientId,
-            doctor: doctorId,
-            hospital: hospitalId,
-            slot: slot._id,
-            slotTime: startTime,
-            status: 'pending', // Pending payment
-            paymentStatus: 'unpaid',
-            paymentSource: 'gateway',
-            tokenNumber,
-            doctorName: finalDocName,
-            hospitalName: finalHospName,
-            consultationFee: finalFee,
-            appointmentDate: appointmentDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
-            appointmentTime: appointmentTime || new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
-        });
-
-        await appointment.save();
-
-        // Update slot with appointment id if single slot
-        if (slot.max_appointments === 1) {
-            slot.appointment = appointment._id;
-            await slot.save();
-        }
-
-        res.status(201).json({
-            success: true,
-            appointmentId: appointment._id
+        await holdExistingSlot(req, res, slot, doctor, patientId, (appointmentId) => {
+            res.status(201).json({ success: true, appointmentId });
         });
     } catch (error: any) {
         console.error('[AppointmentCreateError]', error.message);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to create appointment' });
     }
 };
 
 /**
- * @desc    Get appointment details by ID
+ * @desc    Get appointment details by ID (checkout page)
  * @route   GET /api/appointments/:appointmentId
- * @access  Public
+ * @access  Private — the appointment's patient, its hospital, or an admin
  */
-export const getAppointmentDetails = async (req: any, res: Response): Promise<void> => {
+export const getAppointmentDetails = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { appointmentId } = req.params;
 
-        if (!appointmentId) {
+        if (!appointmentId || !mongoose.Types.ObjectId.isValid(String(appointmentId))) {
             res.status(400).json({ error: "Appointment ID is required" });
             return;
         }
 
-        // Populate doctor and hospital references in case flat document fields are missing
         const appointment = await Appointment.findById(appointmentId)
             .populate('doctor')
             .populate('hospital');
 
-        if (!appointment) {
+        if (!appointment || !(await resolveActor(req, { patient: appointment.patient, hospital: (appointment.hospital as any)?._id || appointment.hospital }))) {
             res.status(404).json({ error: "Appointment not found" });
             return;
         }
@@ -232,157 +218,93 @@ export const getAppointmentDetails = async (req: any, res: Response): Promise<vo
         const docObj = appointment.doctor as any;
         const hospObj = appointment.hospital as any;
 
-        const doctorName = appointment.doctorName || (docObj ? `Dr. ${docObj.name}` : "") || "Dr. test";
-        const hospitalName = appointment.hospitalName || (hospObj ? hospObj.name : "") || "Test";
-        const consultationFee = appointment.consultationFee || (docObj ? docObj.fee : null) || 500;
+        const doctorName = appointment.doctorName || (docObj ? `Dr. ${docObj.name}` : "") || "Doctor";
+        const hospitalName = appointment.hospitalName || (hospObj ? hospObj.name : "") || "Hospital";
+        const consultationFee = Number(docObj?.fee) > 0 ? Number(docObj.fee) : Number(appointment.consultationFee);
 
         let appointmentDate = appointment.appointmentDate;
         let appointmentTime = appointment.appointmentTime;
 
         if (appointment.slotTime) {
             const d = new Date(appointment.slotTime);
-            appointmentDate = new Intl.DateTimeFormat('en-CA', {
-                timeZone: 'Asia/Kolkata',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit'
-            }).format(d);
-            
-            appointmentTime = new Intl.DateTimeFormat('en-US', {
-                timeZone: 'Asia/Kolkata',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            }).format(d);
+            appointmentDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+            appointmentTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
         }
 
-        if (consultationFee === 0 || consultationFee === null || consultationFee === undefined) {
+        if (!(consultationFee > 0)) {
             res.status(400).json({ error: "Invalid appointment fee" });
             return;
         }
 
         res.status(200).json({
             appointmentId: appointment._id.toString(),
-            doctorName: doctorName,
-            hospitalName: hospitalName,
-            consultationFee: consultationFee,
-            appointmentDate: appointmentDate || "2026-06-24",
-            appointmentTime: appointmentTime || "06:30",
+            doctorName,
+            hospitalName,
+            consultationFee,
+            // Same amount /payments/create-order will charge (computed on the server)
+            advanceFee: Math.round(consultationFee * ADVANCE_RATE * 100) / 100,
+            status: appointment.status,
+            paymentStatus: appointment.paymentStatus,
+            appointmentDate: appointmentDate || "",
+            appointmentTime: appointmentTime || "",
             doctorId: docObj ? docObj._id.toString() : (appointment.doctor ? appointment.doctor.toString() : ""),
             hospitalId: hospObj ? hospObj._id.toString() : (appointment.hospital ? appointment.hospital.toString() : "")
         });
     } catch (error: any) {
         console.error('[GetAppointmentDetailsError]', error.message);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Failed to load appointment' });
     }
 };
 
 /**
- * @desc    Hold an appointment slot temporarily (acts as placeholder before payment completion)
+ * @desc    Hold an existing appointment slot temporarily before payment
  * @route   POST /api/appointments/hold
  * @access  Private
+ * Body: { slotId } or { doctorId, slotStart (ISO, or 'HH:MM' IST with date), date }.
+ * Only slots the hospital opened can be held; a missing slot is a 404 (patients never create slots).
  */
 export const holdAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { doctorId, slotStart, slotEnd, date } = req.body;
-        const patientId = req.user?.id || req.user?._id;
+        const { slotId, doctorId, slotStart, date } = req.body || {};
+        const patientId = userIdOf(req);
 
         if (!patientId) {
             res.status(401).json({ success: false, message: 'User not authenticated' });
             return;
         }
 
-        if (!doctorId || !slotStart || !slotEnd || !date) {
-            res.status(400).json({ success: false, message: 'Missing required fields' });
+        let slot: any = null;
+        if (slotId && mongoose.Types.ObjectId.isValid(String(slotId))) {
+            slot = await Slot.findById(slotId);
+        } else {
+            if (!doctorId || !mongoose.Types.ObjectId.isValid(String(doctorId)) || !slotStart) {
+                res.status(400).json({ success: false, message: 'Missing required fields' });
+                return;
+            }
+            const start = parseSlotStart(slotStart, date);
+            if (!start) {
+                res.status(400).json({ success: false, message: 'Invalid slot time' });
+                return;
+            }
+            slot = await Slot.findOne({ doctor: doctorId, startTime: start });
+        }
+
+        if (!slot || (doctorId && String(slot.doctor) !== String(doctorId))) {
+            res.status(404).json({ success: false, code: 'NOT_FOUND', message: 'This slot is not open for booking. Please choose one of the listed slots.' });
             return;
         }
 
-        const doctorObj = await Doctor.findById(doctorId);
-        if (!doctorObj) {
+        const doctor = await Doctor.findOne({ _id: slot.doctor, hospital: slot.hospital });
+        if (!doctor) {
             res.status(404).json({ success: false, message: 'Doctor not found' });
             return;
         }
-        const hospitalId = doctorObj.hospital;
 
-        let startTime = slotStart.includes('T') ? new Date(slotStart) : new Date(`${date}T${slotStart}`);
-        let endTime = slotEnd.includes('T') ? new Date(slotEnd) : new Date(`${date}T${slotEnd}`);
-
-        // Find or create slot
-        let slot = await Slot.findOne({
-            doctor: doctorId,
-            hospital: hospitalId,
-            startTime: startTime
-        });
-
-        if (!slot) {
-            slot = new Slot({
-                doctor: doctorId,
-                hospital: hospitalId,
-                startTime: startTime,
-                endTime: endTime,
-                status: 'available',
-                booked_count: 0,
-                max_appointments: 1,
-                hold_count: 0
-            });
-            await slot.save();
-        }
-
-        // Create temporary hold via holdManager
-        const io = req.app.get('io');
-        const holdResult = await createHold(slot._id.toString(), patientId.toString(), io);
-
-        if (!holdResult.success && holdResult.message !== 'Slot already held by you') {
-            res.status(400).json({ success: false, message: holdResult.message });
-            return;
-        }
-
-        // Create Appointment record if not already exists for this slot and patient
-        let appointment = await Appointment.findOne({
-            patient: patientId,
-            slot: slot._id,
-            status: 'pending'
-        });
-
-        if (!appointment) {
-            const activeAppointmentsCount = await Appointment.countDocuments({
-                slot: slot._id,
-                status: { $ne: 'cancelled' }
-            });
-            const tokenNumber = activeAppointmentsCount + 1;
-
-            const hospitalObj = await Hospital.findById(hospitalId);
-            const finalDocName = `Dr. ${doctorObj.name}`;
-            const finalHospName = hospitalObj ? hospitalObj.name : "Hospital";
-            const finalFee = doctorObj.fee || 500;
-
-            appointment = new Appointment({
-                patient: patientId,
-                doctor: doctorId,
-                hospital: hospitalId,
-                slot: slot._id,
-                slotTime: startTime,
-                status: 'pending',
-                paymentStatus: 'unpaid',
-                paymentSource: 'gateway',
-                tokenNumber,
-                doctorName: finalDocName,
-                hospitalName: finalHospName,
-                consultationFee: finalFee,
-                appointmentDate: date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(startTime),
-                appointmentTime: new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(startTime)
-            });
-
-            await appointment.save();
-        }
-
-        res.status(200).json({
-            success: true,
-            appointmentId: appointment._id.toString()
+        await holdExistingSlot(req, res, slot, doctor, patientId, (appointmentId) => {
+            res.status(200).json({ success: true, appointmentId });
         });
     } catch (error: any) {
         console.error('[HoldAppointmentError]', error.message);
-        res.status(500).json({ success: false, message: 'Failed to hold appointment', error: error.message });
+        res.status(500).json({ success: false, message: 'Failed to hold appointment' });
     }
 };
-

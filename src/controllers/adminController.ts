@@ -75,8 +75,10 @@ export const getSystemStats = async (req: Request, res: Response): Promise<void>
         ]);
         const totalProfit = profitResult.length > 0 ? profitResult[0].totalProfit : 0;
 
-        const recentUsers = await User.find().sort({ createdAt: -1 }).limit(10).select('-passwordHash');
-        const activeSellers = await User.find({ role: 'seller', status: 'approved' }).sort({ createdAt: -1 }).limit(5).select('-passwordHash');
+        // Summary fields only: no KYC/ID numbers, bank details or secrets on the dashboard (ADM-30)
+        const USER_SUMMARY = 'name email role status phone pharmacy_name createdAt';
+        const recentUsers = await User.find().sort({ createdAt: -1 }).limit(10).select(USER_SUMMARY);
+        const activeSellers = await User.find({ role: 'seller', status: 'approved' }).sort({ createdAt: -1 }).limit(5).select(USER_SUMMARY);
 
         res.json({
             counts: {
@@ -104,10 +106,13 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
         const { role, status } = req.query;
         let query: any = {};
 
-        if (role) query.role = role;
-        if (status) query.status = status;
+        // String() blocks operator injection like ?status[$ne]=x (ADM-32)
+        if (role) query.role = String(role);
+        if (status) query.status = String(status);
 
-        const users = await User.find(query).select('-passwordHash').sort({ createdAt: -1 });
+        // Approvals need the KYC documents; secrets stay out (passwordHash, mfaSecret, otp are
+        // also select:false in the User schema).
+        const users = await User.find(query).select('-passwordHash -mfaSecret -otp -otpExpiresAt').sort({ createdAt: -1 });
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -504,7 +509,8 @@ export const registerHospital = async (req: Request, res: Response): Promise<voi
             isOnlinePaymentAvailable: Boolean(isOnlinePaymentAvailable),
             doctors: Array.isArray(doctors) ? doctors : [],
             rating: 4.0,
-            tempPassword: tempPassword,
+            // The temporary password is no longer stored in plaintext on the hospital (ADM-11):
+            // it is emailed to the hospital and shown once in this response.
             joiningDate: initialJoiningDate,
             subscriptionDurationDays: 30,
             paymentStatus: initialPaymentStatus,
@@ -588,7 +594,8 @@ export const getAdminSubscriptionsList = async (req: Request, res: Response): Pr
 
         let query: any = {};
         if (search) {
-            const searchRegex = new RegExp(search.toString().trim(), 'i');
+            const escaped = search.toString().trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const searchRegex = new RegExp(escaped, 'i');
             query.$or = [
                 { name: searchRegex },
                 { city: searchRegex },
@@ -822,28 +829,68 @@ export const adminBulkGenerateSlots = async (req: Request, res: Response): Promi
             return;
         }
 
-        const start = new Date(`${date}T${startTime}:00`);
-        const end = new Date(`${date}T${endTime}:00`);
+        if (!mongoose.Types.ObjectId.isValid(String(doctorId)) || !mongoose.Types.ObjectId.isValid(String(hospitalId))) {
+            res.status(400).json({ message: 'Invalid doctor or hospital ID' });
+            return;
+        }
+
+        // Times are IST wall-clock times (same as the hospital-side generator); the server runs in UTC.
+        const start = new Date(`${date}T${startTime}:00+05:30`);
+        const end = new Date(`${date}T${endTime}:00+05:30`);
 
         if (isNaN(start.getTime()) || isNaN(end.getTime())) {
             res.status(400).json({ message: 'Invalid date or time format' });
             return;
         }
+        if (end <= start) {
+            res.status(400).json({ message: 'End time must be after start time' });
+            return;
+        }
+
+        const durationMinutes = Number(duration);
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 5 || durationMinutes > 240) {
+            res.status(400).json({ message: 'Slot duration must be between 5 and 240 minutes' });
+            return;
+        }
+
+        const doctor = await Doctor.findOne({ _id: doctorId, hospital: hospitalId });
+        if (!doctor) {
+            res.status(404).json({ message: 'Doctor not found for this hospital' });
+            return;
+        }
+        const maxAppts = (doctor as any).maxAppointmentsPerSlot || 1;
+
+        // Existing (non-cancelled) slots of this doctor in the window: new slots that overlap them are skipped
+        const existing = await Slot.find({
+            doctor: doctor._id,
+            status: { $ne: 'cancelled' },
+            startTime: { $lt: end },
+            endTime: { $gt: start }
+        }).select('startTime endTime').lean();
 
         const slots = [];
+        let skipped = 0;
         let current = new Date(start);
 
         while (current < end) {
-            const next = new Date(current.getTime() + Number(duration) * 60000);
+            const next = new Date(current.getTime() + durationMinutes * 60000);
             if (next > end) break;
 
-            slots.push({
-                doctor: doctorId,
-                hospital: hospitalId,
-                startTime: new Date(current),
-                endTime: new Date(next),
-                status: 'available'
-            });
+            const overlaps = existing.some((s: any) => new Date(s.startTime) < next && new Date(s.endTime) > current);
+            if (overlaps) {
+                skipped++;
+            } else {
+                slots.push({
+                    doctor: doctor._id,
+                    hospital: doctor.hospital,
+                    startTime: new Date(current),
+                    endTime: new Date(next),
+                    status: 'available',
+                    max_appointments: maxAppts,
+                    booked_count: 0,
+                    hold_count: 0
+                });
+            }
 
             current = next;
         }
@@ -852,7 +899,11 @@ export const adminBulkGenerateSlots = async (req: Request, res: Response): Promi
             await Slot.insertMany(slots);
         }
 
-        res.status(201).json({ message: `Successfully generated ${slots.length} slots`, count: slots.length });
+        res.status(201).json({
+            message: `Successfully generated ${slots.length} slots${skipped ? ` (${skipped} skipped: already exist)` : ''}`,
+            count: slots.length,
+            skipped
+        });
     } catch (error: any) {
         res.status(500).json({ message: 'Error generating slots', error: error.message });
     }
@@ -1044,18 +1095,9 @@ export const bulkImportDonors = async (req: Request, res: Response): Promise<voi
 
         console.log(`[Bulk Import] Received file: ${req.file.originalname}, Size: ${req.file.size} bytes`);
 
-        // Drop the index 'phone_1' if it exists so Mongoose can rebuild it as sparse and optional
-        try {
-            await BloodDonor.collection.dropIndex('phone_1');
-        } catch (idxError) {
-            console.log('[Bulk Import] phone_1 index drop skipped (might not exist)');
-        }
-        
-        try {
-            await BloodDonor.ensureIndexes();
-        } catch (ensureErr: any) {
-            console.warn('[Bulk Import] Rebuilding indexes warning:', ensureErr.message);
-        }
+        // NOTE: this used to drop and rebuild the unique `phone_1` index on every import, which
+        // briefly removed duplicate-phone protection and could leave it unbuildable. The schema
+        // already declares phone as unique + sparse; any index migration is a one-off job.
 
         // Read workbook using sheetjs
         const workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
@@ -1108,6 +1150,18 @@ export const bulkImportDonors = async (req: Request, res: Response): Promise<voi
         };
 
         const validBloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+        // One query for every phone already in the DB (instead of one findOne per row),
+        // plus the phones seen earlier in this sheet.
+        const sheetPhones = rawRows
+            .map(r => getRowValue(r, 'Phone Number'))
+            .filter(v => v !== undefined && v !== null && String(v).trim() !== '')
+            .map(v => String(v).trim());
+        const takenPhones = new Set<string>(
+            sheetPhones.length > 0
+                ? (await BloodDonor.find({ phone: { $in: sheetPhones } }).select('phone').lean()).map((d: any) => String(d.phone))
+                : []
+        );
 
         for (let i = 0; i < rawRows.length; i++) {
             const row = rawRows[i];
@@ -1198,8 +1252,7 @@ export const bulkImportDonors = async (req: Request, res: Response): Promise<voi
 
             try {
                 // 5. Check if phone number is already registered by another donor
-                const existingByPhone = await BloodDonor.findOne({ phone: trimmedPhone });
-                if (existingByPhone) {
+                if (takenPhones.has(trimmedPhone)) {
                     errors.push({
                         row: excelRowNum,
                         reason: `Phone number "${phoneVal}" is already registered by another donor`
@@ -1241,6 +1294,7 @@ export const bulkImportDonors = async (req: Request, res: Response): Promise<voi
                 });
 
                 await newDonor.save();
+                takenPhones.add(trimmedPhone);
                 inserted++;
             } catch (dbError: any) {
                 console.error(`[Bulk Import] Error saving row ${excelRowNum}:`, dbError);

@@ -9,6 +9,7 @@ import User from '../models/User';
 import AuditLog from '../models/AuditLog';
 import mongoose from 'mongoose';
 import { encrypt, decrypt } from '../utils/cryptoHelper';
+const escapeRegex = (value: string): string => value.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // escape user text used in $regex
 import {
     calculateAdvanceGatewaySplit,
     isOnlineAdvancePayment,
@@ -32,7 +33,7 @@ export const getAdminSettlementsDashboard = async (req: AuthRequest, res: Respon
         // Find hospitals
         let query: any = {};
         if (searchQuery) {
-            query.name = { $regex: String(searchQuery), $options: 'i' };
+            query.name = { $regex: escapeRegex(String(searchQuery)), $options: 'i' };
         }
         const hospitals = await Hospital.find(query).select('name bedCapacity trialEndDate createdAt user');
 
@@ -381,18 +382,27 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
             return;
         }
 
-        // Prevent duplicate settlements
-        const activeCount = await Payment.countDocuments({
-            _id: { $in: paymentIds },
-            settlementStatus: { $in: ['Awaiting Hospital Confirmation', 'Settlement Completed'] }
-        });
-        if (activeCount > 0) {
-            res.status(400).json({ success: false, message: 'One or more of the selected payments have already been settled or are pending confirmation.' });
+        if (!Array.isArray(paymentIds) || paymentIds.some((id: any) => !mongoose.Types.ObjectId.isValid(String(id)))) {
+            res.status(400).json({ success: false, message: 'paymentIds must be a list of valid payment IDs' });
             return;
         }
+        const uniqueIds = Array.from(new Set(paymentIds.map((id: any) => String(id))));
 
-        // Fetch payments
-        const payments = await Payment.find({ _id: { $in: paymentIds } });
+        // Only this hospital's completed online advances that are not yet settled / refunded / retained / in another
+        // settlement can be paid out. Anything else in the list rejects the whole request (prevents double payouts,
+        // e.g. a payment already 'Settled' through the payout-recording path).
+        const payments = await Payment.find({
+            _id: { $in: uniqueIds },
+            hospitalId: hospital._id,
+            status: { $in: ['completed', 'paid'] },
+            paymentSource: 'pillora_online',
+            settlementStatus: { $in: ['Pending', 'Ready for Settlement', 'Waiting for Razorpay Settlement'] }
+        });
+        if (payments.length !== uniqueIds.length) {
+            res.status(400).json({ success: false, message: 'One or more selected payments are not eligible: they belong to another hospital, are refunded/retained/unpaid, or have already been settled or are pending confirmation.' });
+            return;
+        }
+        const eligibleIds = payments.map((p) => p._id);
         let grossCollection = 0;
         let razorpayCharges = 0;
         let gstCharges = 0;
@@ -422,10 +432,7 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
 
         // Timeline array
         const timeline = [
-            { status: 'Payment Successful', timestamp: new Date(Date.now() - 48*60*60*1000), note: 'Patient advance payment captured' },
-            { status: 'Waiting for Razorpay Settlement', timestamp: new Date(Date.now() - 24*60*60*1000), note: 'Funds pending settlement (T+2)' },
-            { status: 'Funds Received in Pillora', timestamp: new Date(Date.now() - 12*60*60*1000), note: 'Razorpay settled funds to Pillora Bank' },
-            { status: 'Ready for Settlement', timestamp: new Date(), note: 'Payments eligible for payout' },
+            { status: 'Ready for Settlement', timestamp: new Date(), note: `${payments.length} online advance payment(s) selected for payout` },
             { status: 'Payment Transferred', timestamp: new Date(), note: `Payout initiated via ${transferMethod}` },
             { status: 'Awaiting Hospital Confirmation', timestamp: new Date(), note: `UTR Reference: ${utrNumber}` }
         ];
@@ -453,7 +460,7 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
             utrNumber,
             notes: notes || '',
             eligibleDate: new Date(),
-            paymentIds,
+            paymentIds: eligibleIds,
             appointmentIds,
             timeline,
             auditLogs: [auditLogEntry]
@@ -461,7 +468,7 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
 
         // Update Payment settlement statuses
         await Payment.updateMany(
-            { _id: { $in: paymentIds } },
+            { _id: { $in: eligibleIds } },
             { 
                 settlementStatus: 'Awaiting Hospital Confirmation',
                 settlementId: settlement._id 
@@ -509,8 +516,8 @@ export const getAdminSettlementHistory = async (req: AuthRequest, res: Response)
 
         if (searchQuery) {
             query.$or = [
-                { settlementId: { $regex: String(searchQuery), $options: 'i' } },
-                { utrNumber: { $regex: String(searchQuery), $options: 'i' } }
+                { settlementId: { $regex: escapeRegex(String(searchQuery)), $options: 'i' } },
+                { utrNumber: { $regex: escapeRegex(String(searchQuery)), $options: 'i' } }
             ];
         }
 

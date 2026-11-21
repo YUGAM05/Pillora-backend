@@ -1,5 +1,5 @@
 import express from 'express';
-import { getHospitals, getHospitalById, seedHospitals, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities, getHospitalSettlements } from '../controllers/hospitalController';
+import { getHospitals, getHospitalById, createHospital, updateHospital, deleteHospital, uploadHospitalImages, searchHospitals, getCities, getHospitalSettlements } from '../controllers/hospitalController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import multer from 'multer';
 
@@ -8,9 +8,11 @@ const router = express.Router();
 router.get('/', getHospitals);
 router.get('/cities', getCities);
 router.get('/search', searchHospitals);
+// Admin or the owning hospital account only (checked in the controller)
 router.get('/:hospitalId/settlements', protect, getHospitalSettlements);
 router.get('/:id', getHospitalById);
-router.post('/seed', seedHospitals);
+// POST /seed removed (audit B-07): it was public and deleted every hospital and doctor.
+// Local seeding: src/scripts/seedHospitalsRunner.ts (refuses to run in production).
 router.post('/', protect, adminOnly, createHospital);
 router.put('/:id', protect, adminOnly, updateHospital);
 router.delete('/:id', protect, adminOnly, deleteHospital);

@@ -9,17 +9,23 @@ import { downloadDonorTemplate } from '../controllers/bloodBankTemplateControlle
 const router = express.Router();
 
 // Configure multer for file uploads
-const upload = multer({ storage: multer.memoryStorage() });
+// Excel/CSV donor sheets only, max 10 MB
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 
 router.post('/donors', protect, registerDonor);
+// Public donor list returns only masked name, blood group, city/area, availability and
+// last donation month (no phone/address/location/email). Contact details reach a requester
+// only through the admin-approved request flow (max 5 donors, once per request).
 router.get('/donors', findDonors);
-router.get('/matches', findMatches);
+// Returns donor names + phone numbers: admin only.
+router.get('/matches', protect, adminOnly, findMatches);
 router.get('/admin/donors', protect, adminOnly, getAllDonors);
 router.post('/admin/donors/delete-many', protect, adminOnly, deleteManyDonors);
 router.patch('/admin/donors/:id', protect, adminOnly, updateDonorAdmin);
 router.delete('/admin/donors/:id', protect, adminOnly, deleteDonor);
 
 router.post('/requests', protect, createRequest);
+// Public request list is reduced (no KYC, contact number, email or age).
 router.get('/requests', getRequests);
 router.get('/my-requests', protect, getMyRequests);
 router.delete('/requests/:id', protect, deleteMyRequest);

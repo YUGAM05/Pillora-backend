@@ -1,192 +1,89 @@
-import redis from './redisMock';
 import Slot from '../models/Slot';
 import Doctor from '../models/Doctor';
-import mongoose from 'mongoose';
+import { acquireHold, releaseHold as releaseSlotHold, hasActiveHold, HOLD_MS, liveSlotView } from './slotBooking';
 
-// Listen for TTL expiration in redis mock to automatically release database holds
-redis.on('expired', async (key: string) => {
-    if (key.startsWith('hold:')) {
-        const parts = key.split(':');
-        if (parts.length === 3) {
-            const slotId = parts[1];
-            const userId = parts[2];
-            try {
-                // Atomically release hold: set status to 'available' if it was 'locked'
-                const slot = await Slot.findOneAndUpdate(
-                    { _id: slotId, status: 'locked', hold_count: { $gt: 0 } },
-                    { 
-                        $set: { status: 'available' },
-                        $inc: { hold_count: -1 } 
-                    },
-                    { new: true }
-                );
-                
-                if (slot) {
-                    // Emit real-time updates via socket.io
-                    const io = (global as any).socketIO;
-                    if (io) {
-                        io.emit('slotHoldReleased', {
-                            slotId,
-                            doctorId: slot.doctor,
-                            date: new Date(slot.startTime).toISOString().split('T')[0],
-                            bookedCount: slot.booked_count,
-                            holdCount: slot.hold_count,
-                            maxAppointments: slot.max_appointments,
-                            status: 'available'
-                        });
-                    }
-                }
-            } catch (err) {
-                console.error(`Error handling expired hold for slot ${slotId}:`, err);
-            }
-        }
+/**
+ * Slot holds — thin wrapper over utils/slotBooking.ts.
+ * Holds used to live in an in-memory "redis mock", which does not work on Vercel serverless
+ * (each instance had its own memory, TTL events never fired, slots stayed 'locked').
+ * They are now stored on the Slot document with an expiry; see slotBooking.ts.
+ */
+
+const ISO_DATE = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(d));
+
+const emitSlot = (io: any, event: string, slot: any) => {
+    if (!io || !slot) return;
+    const view = liveSlotView(slot);
+    io.emit(event, {
+        slotId: String(slot._id),
+        doctorId: (slot.doctor as any)?._id || slot.doctor,
+        date: ISO_DATE(slot.startTime),
+        bookedCount: view.booked_count,
+        holdCount: view.hold_count,
+        maxAppointments: view.max_appointments,
+        status: view.status
+    });
+};
+
+const FAILURE_MESSAGES: Record<string, string> = {
+    NOT_FOUND: 'Slot not found',
+    CANCELLED: 'Slot cancelled by admin',
+    PAST: 'Slot time has passed',
+    FULL: 'Slot just became full',
+    ON_HOLD: 'Slot on temporary hold',
+    UNAVAILABLE: 'Slot not available'
+};
+
+export const createHold = async (slotId: string, userId: string, io: any, holdMs: number = HOLD_MS): Promise<{ success: boolean; message: string; reason?: string; expiryMs?: number }> => {
+    const slotDoc: any = await Slot.findById(slotId).select('doctor').lean();
+    if (!slotDoc) return { success: false, message: FAILURE_MESSAGES.NOT_FOUND, reason: 'NOT_FOUND' };
+    const doctor: any = await Doctor.findById(slotDoc.doctor).select('maxAppointmentsPerSlot').lean();
+
+    const result = await acquireHold(slotId, userId, { fallbackCap: doctor?.maxAppointmentsPerSlot || 1, holdMs });
+    if (!result.ok) {
+        return { success: false, message: FAILURE_MESSAGES[result.reason] || 'Slot not available', reason: result.reason };
     }
-});
-
-export const createHold = async (slotId: string, userId: string, io: any): Promise<{ success: boolean; message: string; expiryMs?: number }> => {
-    const holdKey = `hold:${slotId}:${userId}`;
-    
-    // Check if user already holds it
-    const existingHold = await redis.get(holdKey);
-    if (existingHold) {
-        return { success: true, message: 'Slot already held by you', expiryMs: 120 * 1000 };
-    }
-
-    // Resolve doctor and slot to check config
-    const tempSlot = await Slot.findById(slotId).populate('doctor');
-    if (!tempSlot) {
-        return { success: false, message: 'Slot not found' };
-    }
-
-    if (tempSlot.status === 'cancelled') {
-        return { success: false, message: 'Slot cancelled by admin' };
-    }
-
-    let maxAppts = tempSlot.max_appointments || 1;
-    if (tempSlot.doctor && (tempSlot.doctor as any).maxAppointmentsPerSlot) {
-        maxAppts = (tempSlot.doctor as any).maxAppointmentsPerSlot;
-    }
-
-    // Atomically find and update the slot to 'locked' if it's currently 'available'
-    // This atomic query acts as a row-level lock equivalent to prevent two users from claiming it at the same moment.
-    const slot = await Slot.findOneAndUpdate(
-        { 
-            _id: slotId, 
-            status: 'available',
-            booked_count: { $lt: maxAppts },
-            hold_count: 0
-        },
-        { 
-            $set: { status: 'locked', max_appointments: maxAppts },
-            $inc: { hold_count: 1 }
-        },
-        { new: true }
-    ).populate('doctor');
-
-    if (!slot) {
-        // Find slot to see why it failed and report accurate error
-        const existingSlot = await Slot.findById(slotId);
-        if (!existingSlot) {
-            return { success: false, message: 'Slot not found' };
-        }
-        if (existingSlot.status === 'cancelled') {
-            return { success: false, message: 'Slot cancelled by admin' };
-        }
-        if (existingSlot.status === 'booked' || existingSlot.booked_count >= maxAppts) {
-            return { success: false, message: 'Slot just became full' };
-        }
-        if (existingSlot.status === 'locked' || existingSlot.hold_count > 0) {
-            return { success: false, message: 'Slot on temporary hold' };
-        }
-        return { success: false, message: 'Slot not available' };
-    }
-
-    // Set in Redis with 2 minutes (120 seconds) TTL
-    await redis.setex(holdKey, 120, 'active');
-
-    // Store global socket handle
-    if (io) {
-        (global as any).socketIO = io;
-        io.emit('slotHeld', {
-            slotId,
-            doctorId: slot.doctor._id,
-            date: new Date(slot.startTime).toISOString().split('T')[0],
-            bookedCount: slot.booked_count,
-            holdCount: slot.hold_count,
-            maxAppointments: maxAppts,
-            status: 'locked'
-        });
-    }
-
-    return { success: true, message: 'Slot successfully held', expiryMs: 120 * 1000 };
+    emitSlot(io, 'slotHeld', result.slot);
+    return { success: true, message: 'Slot successfully held', expiryMs: holdMs };
 };
 
 export const releaseHold = async (slotId: string, userId: string, io: any): Promise<boolean> => {
-    const holdKey = `hold:${slotId}:${userId}`;
-    const deleted = await redis.del(holdKey);
-    
-    if (deleted > 0) {
-        const slot = await Slot.findOneAndUpdate(
-            { _id: slotId, status: 'locked', hold_count: { $gt: 0 } },
-            { 
-                $set: { status: 'available' },
-                $inc: { hold_count: -1 } 
-            },
-            { new: true }
-        );
-        if (slot && io) {
-            io.emit('slotHoldReleased', {
-                slotId,
-                doctorId: slot.doctor,
-                date: new Date(slot.startTime).toISOString().split('T')[0],
-                bookedCount: slot.booked_count,
-                holdCount: slot.hold_count,
-                maxAppointments: slot.max_appointments,
-                status: 'available'
-            });
-        }
-        return true;
-    }
-    return false;
+    const slot = await releaseSlotHold(slotId, userId);
+    if (slot) emitSlot(io, 'slotHoldReleased', slot);
+    return !!slot;
 };
 
 export const isHeldByUser = async (slotId: string, userId: string): Promise<boolean> => {
-    const holdKey = `hold:${slotId}:${userId}`;
-    const result = await redis.get(holdKey);
-    return result !== null;
+    const slot = await Slot.findById(slotId).select('holds').lean();
+    return hasActiveHold(slot, userId);
 };
 
-// Fallback Cron Job logic (Run every 60 seconds)
-export const runHoldCleanup = async (io: any): Promise<void> => {
+/**
+ * Kept for app.ts (runs on a timer outside serverless). Expired holds no longer need cleanup to stop
+ * counting; this only tidies stale `locked` statuses and hold arrays so stored data stays readable.
+ */
+export const runHoldCleanup = async (_io: any): Promise<void> => {
     try {
-        const slotsWithHolds = await Slot.find({ hold_count: { $gt: 0 } });
-        for (const slot of slotsWithHolds) {
-            const redisKeys = await redis.keys(`hold:${slot._id}:*`);
-            const actualHoldCount = redisKeys.length;
-            
-            if (slot.hold_count !== actualHoldCount) {
-                console.log(`[HoldCleanup] Correcting hold_count for slot ${slot._id} from ${slot.hold_count} to ${actualHoldCount}`);
-                
-                slot.hold_count = actualHoldCount;
-                if (actualHoldCount === 0 && slot.status === 'locked') {
-                    slot.status = 'available';
+        const now = new Date();
+        await Slot.updateMany(
+            { $or: [{ status: 'locked' }, { hold_count: { $gt: 0 } }], holds: { $not: { $elemMatch: { expiresAt: { $gt: now } } } } },
+            [
+                {
+                    $set: {
+                        holds: [],
+                        hold_count: 0,
+                        status: {
+                            $cond: [
+                                { $eq: ['$status', 'locked'] },
+                                { $cond: [{ $gte: [{ $ifNull: ['$booked_count', 0] }, { $ifNull: ['$max_appointments', 1] }] }, 'booked', 'available'] },
+                                '$status'
+                            ]
+                        }
+                    }
                 }
-                
-                await slot.save();
-                
-                if (io) {
-                    io.emit('slotHoldReleased', {
-                        slotId: slot._id,
-                        doctorId: slot.doctor,
-                        date: new Date(slot.startTime).toISOString().split('T')[0],
-                        bookedCount: slot.booked_count,
-                        holdCount: slot.hold_count,
-                        maxAppointments: slot.max_appointments,
-                        status: slot.status
-                    });
-                }
-            }
-        }
+            ],
+            { updatePipeline: true }
+        );
     } catch (err) {
         console.error('[HoldCleanup] Error in background hold cleanup:', err);
     }

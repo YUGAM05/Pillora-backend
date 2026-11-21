@@ -11,7 +11,11 @@ import Notification from '../models/Notification';
 import AuditLog from '../models/AuditLog';
 import PaymentModificationLog from '../models/PaymentModificationLog';
 import { decrypt, encrypt } from '../utils/cryptoHelper';
-import Razorpay from 'razorpay';
+import { refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
+import { releaseSeat } from '../utils/slotBooking';
+
+/** Escape user text before using it in a RegExp (prevents regex injection / ReDoS). */
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 import crypto from 'crypto';
 import { AuthRequest } from '../middleware/authMiddleware';
 import {
@@ -39,10 +43,6 @@ export const safeDecryptBankDetails = (bank: any) => {
     };
 };
 
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
-});
 
 /**
  * Robust date-range resolution helper with Asia/Kolkata (IST) day bounds
@@ -95,7 +95,7 @@ export const fetchHospitalFinancialData = async (hospitalId: any, filters: {
     }
 
     if (filters.search) {
-        const searchRegex = new RegExp(String(filters.search).trim(), 'i');
+        const searchRegex = new RegExp(escapeRegex(String(filters.search).trim()), 'i');
         const searchCond: any = {
             $or: [
                 { patientName: searchRegex },
@@ -109,7 +109,7 @@ export const fetchHospitalFinancialData = async (hospitalId: any, filters: {
         if (!query.$and) query.$and = [];
         query.$and.push(searchCond);
     } else if (filters.patientName) {
-        query.patientName = new RegExp(String(filters.patientName).trim(), 'i');
+        query.patientName = new RegExp(escapeRegex(String(filters.patientName).trim()), 'i');
     }
 
     // Fetch appointments
@@ -246,8 +246,8 @@ export const getHospitalPaymentRecords = async (req: AuthRequest, res: Response)
             settlementStatus: settlementStatus ? String(settlementStatus) : undefined
         });
 
-        // CSV Export handling
-        if (exportFormat === 'csv') {
+        // CSV Export handling (hospital dashboard sends `export=csv`; `exportFormat=csv` kept for older clients)
+        if (exportFormat === 'csv' || req.query.export === 'csv') {
             const headers = [
                 'Appointment ID',
                 'Patient Name',
@@ -1243,14 +1243,13 @@ export const getAdminSettlementManagement = async (req: AuthRequest, res: Respon
  */
 export const recordAdminSettlementPayout = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const {
-            hospitalId,
-            transferMethod = 'NEFT',
-            utrNumber,
-            transferDate = new Date(),
-            notes,
-            amount
-        } = req.body;
+        const { hospitalId, transferDate = new Date(), notes, amount } = req.body;
+        // The admin UI sends `paymentMethod` / `utrReference`; older callers send `transferMethod` / `utrNumber`.
+        const rawMethod = String(req.body.transferMethod || req.body.paymentMethod || 'NEFT').trim();
+        // Settlement.transferMethod only allows these; anything else ("Other bank transfer") is kept in the notes instead
+        const transferMethod = ['NEFT', 'RTGS', 'IMPS', 'UPI'].includes(rawMethod.toUpperCase()) ? rawMethod.toUpperCase() : undefined;
+        const methodLabel = transferMethod || rawMethod || 'bank transfer';
+        const utrNumber = String(req.body.utrNumber || req.body.utrReference || '').trim();
 
         if (!hospitalId || !utrNumber) {
             res.status(400).json({ error: 'Hospital ID and UTR/Bank Reference number are required' });
@@ -1308,7 +1307,7 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
             transferDate: new Date(transferDate),
             transferMethod,
             utrNumber,
-            notes: notes || `Settled via ${transferMethod} UTR: ${utrNumber}`,
+            notes: notes || `Settled via ${methodLabel} UTR: ${utrNumber}`,
             eligibleDate: new Date(),
             confirmationDate: new Date(),
             paymentIds: pendingPayments.map(p => p._id),
@@ -1323,7 +1322,7 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
                 action: 'MANUAL_SETTLEMENT_RECORDED',
                 previousStatus: 'Pending',
                 newStatus: 'Settled',
-                notes: `Transferred ₹${payoutAmount} via ${transferMethod} UTR: ${utrNumber}`,
+                notes: `Transferred ₹${payoutAmount} via ${methodLabel} UTR: ${utrNumber}`,
                 timestamp: new Date()
             }]
         });
@@ -1751,7 +1750,7 @@ export const getAdminTransactionsLedger = async (req: AuthRequest, res: Response
         }
 
         if (search) {
-            const regex = new RegExp(String(search).trim(), 'i');
+            const regex = new RegExp(escapeRegex(String(search).trim()), 'i');
             query.$or = [
                 { transactionId: regex },
                 { razorpayPaymentId: regex },
@@ -1885,34 +1884,45 @@ export const processAdminRefund = async (req: AuthRequest, res: Response): Promi
             return;
         }
 
-        const refundAmt = amount ? Number(amount) : (payment.advanceFee || payment.amount);
-        const refundPaise = Math.round(refundAmt * 100);
-
-        let gatewayRefundId = 'REFUND_MANUAL_SIMULATED';
-
-        // Trigger Razorpay refund if real payment ID is present
-        if (payment.razorpayPaymentId && !payment.razorpayPaymentId.startsWith('simulated_')) {
-            try {
-                const rzpRefund = await razorpay.payments.refund(payment.razorpayPaymentId, {
-                    amount: refundPaise,
-                    notes: {
-                        reason,
-                        appointmentId: appointment._id.toString()
-                    }
-                });
-                gatewayRefundId = rzpRefund.id;
-            } catch (rzpErr: any) {
-                console.warn('[RazorpayRefundNotice]', rzpErr.message || rzpErr);
-                gatewayRefundId = `RZP_REF_${Date.now()}`;
-            }
+        if (Number(payment.refundDetails?.amount) > 0) {
+            res.status(400).json({ error: `A refund of ₹${payment.refundDetails?.amount} was already made for this payment. Any further refund must be handled from the Razorpay dashboard.` });
+            return;
         }
+        const paidAmt = Number(payment.amount) || 0;
+        const refundAmt = amount !== undefined && amount !== null && amount !== '' ? Number(amount) : paidAmt;
+        if (!(refundAmt > 0) || refundAmt > paidAmt + 0.001) {
+            res.status(400).json({ error: `Refund amount must be more than 0 and at most the paid advance (₹${paidAmt}).` });
+            return;
+        }
+        const refundPaise = Math.round(refundAmt * 100);
 
         // Generate Unique Refund ID
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const randomStr = crypto.randomBytes(2).toString('hex').toUpperCase();
         const refundId = `REF-${dateStr}-${randomStr}`;
+        const alreadySettled = ['Settled', 'Settlement Completed'].includes(String(payment.settlementStatus));
 
-        // Create Refund record
+        // Razorpay first. If it fails, record a FAILED refund for audit and change nothing else.
+        const gateway = await refundRazorpayPayment(payment, refundAmt, { reason: String(reason).slice(0, 200), appointmentId: appointment._id.toString() });
+        if (!gateway.ok) {
+            console.error('[ProcessAdminRefund] Razorpay refund failed:', gateway.error);
+            await new Refund({
+                refundId,
+                appointmentId: appointment._id,
+                paymentId: payment._id,
+                hospitalId: payment.hospitalId,
+                patientId: appointment.patient,
+                amount: refundAmt,
+                amountInPaise: refundPaise,
+                reason,
+                status: 'failed',
+                initiatedBy: req.user?._id,
+                notes: `Gateway error: ${gateway.error}`
+            }).save();
+            res.status(502).json({ error: `Razorpay refund failed: ${gateway.error}. Nothing was marked as refunded.` });
+            return;
+        }
+
         const refundRecord = new Refund({
             refundId,
             appointmentId: appointment._id,
@@ -1922,39 +1932,42 @@ export const processAdminRefund = async (req: AuthRequest, res: Response): Promi
             amount: refundAmt,
             amountInPaise: refundPaise,
             reason,
-            gatewayRefundId,
-            status: 'processed',
+            gatewayRefundId: gateway.gatewayRefundId,
+            // Razorpay reports 'processed' or 'pending' (money on its way)
+            status: gateway.gatewayStatus === 'processed' ? 'processed' : 'pending',
             initiatedBy: req.user?._id,
             processedAt: new Date(),
-            notes: reason
+            notes: alreadySettled
+                ? `${reason} | NOTE: this advance was already settled to the hospital — recover ₹${refundAmt} from the next settlement.`
+                : reason
         });
-
         await refundRecord.save();
 
-        // Update Payment record
-        payment.status = 'refunded';
-        payment.settlementStatus = 'refunded';
-        payment.refundDetails = {
-            refundId,
-            reason,
-            amount: refundAmt,
-            refundedAt: new Date()
-        };
+        applyRefundToRecords(payment, appointment, gateway, reason);
+        if (alreadySettled) {
+            // Keep the settled status (money did go to the hospital); the Refund note flags the recovery.
+            payment.settlementStatus = 'Settled';
+        }
         await payment.save();
 
-        // Update Appointment
-        appointment.status = 'cancelled';
-        appointment.paymentStatus = 'waived';
+        const priorStatus = appointment.status;
+        if (priorStatus !== 'cancelled') {
+            appointment.status = 'cancelled';
+            appointment.notes = appointment.notes ? `${appointment.notes}\nCancellation reason: ${reason}` : `Cancellation reason: ${reason}`;
+        }
         await appointment.save();
+        if (priorStatus !== 'cancelled') {
+            await releaseSeat(appointment, priorStatus);
+        }
 
         res.status(200).json({
             success: true,
-            message: `Refund of ₹${refundAmt} processed successfully`,
+            message: `Refund of ₹${refundAmt} ${refundRecord.status === 'processed' ? 'processed' : 'initiated'} successfully${alreadySettled ? ' (advance was already settled to the hospital — recover it from the next settlement)' : ''}`,
             refund: {
                 refundId,
-                gatewayRefundId,
+                gatewayRefundId: gateway.gatewayRefundId,
                 amount: refundAmt,
-                status: 'processed'
+                status: refundRecord.status
             }
         });
     } catch (error: any) {

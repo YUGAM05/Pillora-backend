@@ -44,6 +44,8 @@ export interface IHospital extends Document {
     priority_support: boolean;
     user?: mongoose.Types.ObjectId;
     tempPassword?: string;
+    /** Internal/test hospital (e.g. the voice demo): hidden from public listings and pages. */
+    isTest?: boolean;
     hospitalType?: 'Government' | 'Private' | 'Trust' | 'Charitable';
     bedCapacity?: number;
     specialities?: string[];
@@ -120,7 +122,9 @@ const HospitalSchema: Schema = new Schema({
     is_spotlight: { type: Boolean, default: false }, // For "Homepage banner & spotlight"
     priority_support: { type: Boolean, default: false },
     user: { type: Schema.Types.ObjectId, ref: 'User' },
-    tempPassword: { type: String },
+    // Never returned unless a query asks for it with .select('+tempPassword') (audit B-08/ADM-11)
+    tempPassword: { type: String, select: false },
+    isTest: { type: Boolean, default: false },
     hospitalType: { type: String, enum: ['Government', 'Private', 'Trust', 'Charitable'], default: 'Private' },
     bedCapacity: { type: Number, default: 50 },
     specialities: [{ type: String }],

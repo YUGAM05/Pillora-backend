@@ -94,10 +94,12 @@ export const getUserPrescriptions = async (req: AuthRequest, res: Response) => {
     }
 };
 
-export const getPrescriptionById = async (req: Request, res: Response) => {
+export const getPrescriptionById = async (req: AuthRequest, res: Response) => {
     try {
         const prescription = await Prescription.findById(req.params.id);
-        if (!prescription) {
+        // Only the patient who uploaded it, or an admin (audit B-28). Others get 404.
+        const isOwner = prescription && String(prescription.user_id) === String(req.user?._id || '');
+        if (!prescription || !(isOwner || req.user?.role === 'admin')) {
             return res.status(404).json({ message: 'Prescription not found' });
         }
         res.status(200).json(prescription);

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import SupportTicket from '../models/SupportTicket';
-import { sendTelegramMessage } from '../utils/telegram';
+import { sendTelegramMessage, escapeTelegramHtml as esc } from '../utils/telegram';
 
 export const createTicket = async (req: any, res: Response) => {
     try {
@@ -23,17 +23,16 @@ export const createTicket = async (req: any, res: Response) => {
 
         // Format and send Telegram Alert
         const telegramMsg = `🎫 <b>New Support Ticket</b>\n\n` +
-                            `👤 <b>Name:</b> ${userName}\n` +
-                            `📧 <b>Email:</b> ${userEmail}\n` +
-                            `📱 <b>Phone:</b> ${userPhone}\n` +
-                            `📋 <b>Type:</b> ${type || 'Refund Inquiry'}\n` +
-                            `📌 <b>Subject:</b> ${subject}\n\n` +
-                            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+                            `👤 <b>Name:</b> ${esc(userName)}\n` +
+                            `📧 <b>Email:</b> ${esc(userEmail)}\n` +
+                            `📱 <b>Phone:</b> ${esc(userPhone)}\n` +
+                            `📋 <b>Type:</b> ${esc(type || 'Refund Inquiry')}\n` +
+                            `📌 <b>Subject:</b> ${esc(subject)}\n\n` +
+                            `✉️ <b>Message:</b>\n<i>"${esc(message)}"</i>\n\n` +
                             `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
 
-        sendTelegramMessage(telegramMsg).catch(err => {
-            console.error('[Telegram] Ticket notification dispatch failed:', err);
-        });
+        // awaited: on serverless a fire-and-forget request can be cut off when the response is sent
+        await sendTelegramMessage(telegramMsg);
 
         res.status(201).json({ message: "Support ticket created successfully", ticket });
     } catch (error: any) {
@@ -106,17 +105,16 @@ export const createGuestTicket = async (req: Request, res: Response) => {
 
         // Format and send Telegram Alert
         const telegramMsg = `🎫 <b>New Support Ticket (GUEST)</b>\n\n` +
-                            `👤 <b>Name:</b> ${name || 'Anonymous'}\n` +
-                            `📧 <b>Email:</b> ${email || 'N/A'}\n` +
-                            `📱 <b>Phone:</b> ${phone || 'N/A'}\n` +
+                            `👤 <b>Name:</b> ${esc(name || 'Anonymous')}\n` +
+                            `📧 <b>Email:</b> ${esc(email || 'N/A')}\n` +
+                            `📱 <b>Phone:</b> ${esc(phone || 'N/A')}\n` +
                             `📋 <b>Type:</b> ${type}\n` +
-                            `📌 <b>Subject:</b> ${subject || 'General Query'}\n\n` +
-                            `✉️ <b>Message:</b>\n<i>"${message}"</i>\n\n` +
+                            `📌 <b>Subject:</b> ${esc(subject || 'General Query')}\n\n` +
+                            `✉️ <b>Message:</b>\n<i>"${esc(message)}"</i>\n\n` +
                             `🕐 <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
 
-        sendTelegramMessage(telegramMsg).catch(err => {
-            console.error('[Telegram] Guest ticket notification dispatch failed:', err);
-        });
+        // awaited: on serverless a fire-and-forget request can be cut off when the response is sent
+        await sendTelegramMessage(telegramMsg);
 
         res.status(201).json({ message: "Guest ticket created successfully", ticket });
     } catch (error: any) {

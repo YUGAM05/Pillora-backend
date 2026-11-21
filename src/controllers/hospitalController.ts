@@ -16,12 +16,48 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET || 'JZ88aoet4iKXegIT19PKqDoL2nU',
 });
 
+// --- Public hospital data ------------------------------------------------------
+// Public endpoints (pillora.in /hospitals, /hospitals/[slug], sitemap) return ONLY these
+// fields. Never tempPassword, bankDetails, user, adminNotes, registrationNumber, email,
+// plan/subscription/payment fields or trial dates.
+export const PUBLIC_HOSPITAL_FIELDS = [
+    '_id', 'name', 'slug', 'address', 'city', 'state', 'pincode', 'image', 'images',
+    'isOpen24Hours', 'consultationFee', 'governmentSchemes', 'isOnlinePaymentAvailable',
+    'ambulanceContact', 'contactNumber', 'phoneNumbers', 'description', 'rating', 'website',
+    'operatingHours', 'location', 'doctors', 'management_type', 'is_verified', 'is_featured',
+    'is_spotlight', 'has_govt_schemes', 'hospitalType', 'bedCapacity', 'specialities',
+] as const;
+const PUBLIC_HOSPITAL_SELECT = PUBLIC_HOSPITAL_FIELDS.join(' ');
+
+const toPublicHospital = (h: any): Record<string, any> => {
+    const src = typeof h?.toObject === 'function' ? h.toObject() : h;
+    const out: Record<string, any> = {};
+    for (const f of PUBLIC_HOSPITAL_FIELDS) {
+        if (src[f] !== undefined) out[f] = src[f];
+    }
+    return out;
+};
+
+// Hospitals kept in the DB for internal use (the voice-agent demo uses "Pillora Test Hospital")
+// but never shown on public listings, search or profile pages. The voice endpoints query the
+// Hospital model directly and are not affected. Set `isTest: true` to hide any other hospital.
+const HIDDEN_HOSPITAL_SLUGS = ['pillora-test-hospital'];
+const HIDDEN_HOSPITAL_NAME = /^\s*pillora\s+test\s+hospital\s*$/i;
+const PUBLIC_HOSPITAL_FILTER = {
+    isTest: { $ne: true },
+    slug: { $nin: HIDDEN_HOSPITAL_SLUGS },
+    name: { $not: HIDDEN_HOSPITAL_NAME },
+};
+
+// Escape user input before putting it into a RegExp (prevents ReDoS / regex errors)
+const escapeRegex = (s: string): string => s.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // @desc    Get all unique cities
 // @route   GET /api/hospitals/cities
 // @access  Public
 export const getCities = async (req: Request, res: Response): Promise<void> => {
     try {
-        const cities = await Hospital.distinct('city');
+        const cities = await Hospital.distinct('city', PUBLIC_HOSPITAL_FILTER);
         res.json(cities);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error });
@@ -33,11 +69,6 @@ export const getCities = async (req: Request, res: Response): Promise<void> => {
 // @access  Public
 export const getHospitals = async (req: Request, res: Response): Promise<void> => {
     try {
-        const count = await Hospital.countDocuments({});
-        if (count === 0) {
-            await performSeeding();
-        }
-
         const { 
             city, 
             speciality, 
@@ -51,10 +82,10 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
             sortBy
         } = req.query;
         
-        let query: any = {};
+        const query: any = { ...PUBLIC_HOSPITAL_FILTER };
 
         if (city) {
-            query.city = { $regex: new RegExp(`^${String(city).trim()}$`, 'i') };
+            query.city = { $regex: new RegExp(`^${escapeRegex(String(city).trim())}$`, 'i') };
         }
         if (pmjay === 'true') {
             query.governmentSchemes = { $regex: 'PM-JAY|Ayushman Bharat', $options: 'i' };
@@ -62,13 +93,13 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
         if (govtSchemes) {
             const schemesArr = String(govtSchemes).split(',').map(s => s.trim()).filter(Boolean);
             if (schemesArr.length > 0) {
-                query.governmentSchemes = { $in: schemesArr.map(s => new RegExp(s, 'i')) };
+                query.governmentSchemes = { $in: schemesArr.map(s => new RegExp(escapeRegex(s), 'i')) };
             }
         }
         if (hospitalType) {
             const typesArr = String(hospitalType).split(',').map(t => t.trim()).filter(Boolean);
             if (typesArr.length > 0) {
-                query.hospitalType = { $in: typesArr.map(t => new RegExp(`^${t}$`, 'i')) };
+                query.hospitalType = { $in: typesArr.map(t => new RegExp(`^${escapeRegex(t)}$`, 'i')) };
             }
         }
         if (bedCapacity) {
@@ -94,16 +125,16 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
         if (emergency === 'true') {
             query.isOpen24Hours = true;
         }
-        if (minRating) {
+        if (minRating && !isNaN(Number(minRating))) {
             query.rating = { $gte: Number(minRating) };
         }
 
-        let hospitals = await Hospital.find(query);
+        let hospitals = await Hospital.find(query).select(PUBLIC_HOSPITAL_SELECT);
 
         if (speciality) {
             const specList = String(speciality).split(',').map(s => s.trim()).filter(Boolean);
             if (specList.length > 0) {
-                const specRegexes = specList.map(s => new RegExp(s, 'i'));
+                const specRegexes = specList.map(s => new RegExp(escapeRegex(s), 'i'));
                 const doctors = await Doctor.find({
                     $or: [
                         { specialty: { $in: specRegexes } },
@@ -135,9 +166,10 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
             }
         }
 
-        res.json(hospitals);
+        res.json(hospitals.map(toPublicHospital));
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+        console.error('[getHospitals]', (error as any)?.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
@@ -147,28 +179,31 @@ export const getHospitals = async (req: Request, res: Response): Promise<void> =
 export const getHospitalById = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
-        const querySlug = req.query.slug as string;
-        const queryId = req.query.id as string;
+        const querySlug = typeof req.query.slug === 'string' ? req.query.slug : undefined;
+        const queryId = typeof req.query.id === 'string' ? req.query.id : undefined;
 
-        let hospital;
+        let match: Record<string, any> | null = null;
         if (querySlug) {
-            hospital = await Hospital.findOne({ slug: querySlug });
+            match = { slug: querySlug };
         } else if (queryId) {
-            hospital = await Hospital.findById(queryId);
+            match = mongoose.isValidObjectId(queryId) ? { _id: queryId } : null;
         } else if (id) {
-            if (mongoose.isValidObjectId(id)) {
-                hospital = await Hospital.findById(id);
-            } else {
-                hospital = await Hospital.findOne({ slug: id });
-            }
+            match = mongoose.isValidObjectId(id) ? { _id: id } : { slug: String(id) };
         }
+
+        // Unknown slug/id, or a hidden (test) hospital -> 404.
+        // $and, not object spread: PUBLIC_HOSPITAL_FILTER has its own `slug` key, which would
+        // overwrite match.slug and return the first public hospital for ANY slug.
+        const hospital = match
+            ? await Hospital.findOne({ $and: [match, PUBLIC_HOSPITAL_FILTER] }).select(PUBLIC_HOSPITAL_SELECT)
+            : null;
 
         if (hospital) {
             // Fetch real doctors from Doctor model that are linked to this hospital
             const dbDoctors = await Doctor.find({ hospital: hospital._id, is_active: { $ne: false } });
             
-            // Convert Mongoose document to plain object to allow modifying
-            const hospitalObj = hospital.toObject();
+            // Public fields only (see PUBLIC_HOSPITAL_FIELDS)
+            const hospitalObj = toPublicHospital(hospital);
             
             // Map the Doctor collection fields to match the structure expected by the frontend
             hospitalObj.doctors = dbDoctors.map(doc => ({
@@ -192,14 +227,18 @@ export const getHospitalById = async (req: Request, res: Response): Promise<void
             res.status(404).json({ message: 'Hospital not found' });
         }
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+        console.error('[getHospitalById]', (error as any)?.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
-// @desc    Seed hospitals (Temporary for data population)
-// @route   POST /api/hospitals/seed
-// @access  Public (Should be private in prod)
+// @desc    Seed demo hospitals + doctors. DESTRUCTIVE: deletes ALL hospitals and doctors.
+// @access  CLI only (src/scripts/seedHospitalsRunner.ts). The public POST /api/hospitals/seed
+//          route and the auto-seed in GET /api/hospitals were removed (audit B-07).
 export const performSeeding = async (): Promise<void> => {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+        throw new Error('Refusing to run the destructive hospital seed in production.');
+    }
     try {
         // Clear both Hospital and Doctor collections for a clean, deterministic seeding state
         await Hospital.deleteMany({});
@@ -271,8 +310,7 @@ export const performSeeding = async (): Promise<void> => {
                 hospitalType: "Private" as const,
                 bedCapacity: 10,
                 specialities: ["General Medicine"],
-                user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c57879681f"),
-                tempPassword: "2cce11e57859be5b"
+                user: new mongoose.Types.ObjectId("6a0dd6a76d74f8c57879681f")
             },
             {
                 _id: new mongoose.Types.ObjectId("6a0dd6a76d74f8c578796833"),
@@ -552,12 +590,13 @@ export const performSeeding = async (): Promise<void> => {
     }
 };
 
+// Used only by src/scripts/seedHospitalsRunner.ts (not mounted on any route).
 export const seedHospitals = async (req: Request, res: Response): Promise<void> => {
     try {
         await performSeeding();
         res.json({ message: 'Hospitals and Doctors seeded successfully' });
-    } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+    } catch (error: any) {
+        res.status(500).json({ message: error?.message || 'Server Error' });
     }
 };
 
@@ -662,7 +701,24 @@ export const createHospital = async (req: AuthRequest, res: Response): Promise<v
 // @access  Private/Admin
 export const updateHospital = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const updateData = { ...req.body };
+        // Whitelist (audit ADM-16). The admin edit form re-sends its whole create payload, so
+        // anything not listed here is ignored on purpose:
+        //  - slug: kept stable so existing pillora.in URLs keep working after a rename
+        //  - doctors / adminNotes: the form sends [] / "" on edit and used to wipe them
+        //  - plan / paymentStatus / joiningDate / subscription*: use the subscription endpoint
+        //  - user / tempPassword / bankDetails / is_verified and other internal fields
+        const EDITABLE_FIELDS = [
+            'name', 'email', 'address', 'city', 'state', 'pincode', 'image', 'images',
+            'isOpen24Hours', 'consultationFee', 'governmentSchemes', 'isOnlinePaymentAvailable',
+            'ambulanceContact', 'contactNumber', 'phoneNumbers', 'description', 'rating',
+            'website', 'operatingHours', 'location', 'management_type', 'hospitalType',
+            'bedCapacity', 'specialities', 'registrationNumber',
+        ];
+        const updateData: Record<string, any> = {};
+        for (const f of EDITABLE_FIELDS) {
+            if (req.body[f] !== undefined) updateData[f] = req.body[f];
+        }
+        if (typeof updateData.name === 'string' && !updateData.name.trim()) delete updateData.name;
 
         if (updateData.consultationFee !== undefined) {
             updateData.consultationFee = Number(updateData.consultationFee);
@@ -686,7 +742,8 @@ export const updateHospital = async (req: AuthRequest, res: Response): Promise<v
             updateData.specialities = updateData.specialities.split(',').map((s: string) => s.trim()).filter(Boolean);
         }
 
-        const hospital = await Hospital.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        const hospital = await Hospital.findByIdAndUpdate(req.params.id, { $set: updateData }, { new: true, runValidators: true })
+            .select('-bankDetails');
         if (!hospital) {
             res.status(404).json({ message: 'Hospital not found' });
             return;
@@ -756,14 +813,16 @@ export const searchHospitals = async (req: Request, res: Response): Promise<void
             return;
         }
 
+        const safeQ = escapeRegex(q.trim());
         const hospitals = await Hospital.find({
+            ...PUBLIC_HOSPITAL_FILTER,
             $or: [
-                { name: { $regex: q, $options: 'i' } },
-                { city: { $regex: q, $options: 'i' } },
-                { address: { $regex: q, $options: 'i' } }
+                { name: { $regex: safeQ, $options: 'i' } },
+                { city: { $regex: safeQ, $options: 'i' } },
+                { address: { $regex: safeQ, $options: 'i' } }
             ]
         })
-            .select('name city address image images rating')
+            .select('name slug city address image images rating')
             .limit(5);
 
         res.json(hospitals);
@@ -775,13 +834,24 @@ export const searchHospitals = async (req: Request, res: Response): Promise<void
 // @desc    Get settlements for a specific hospital (Weekly view / history)
 // @route   GET /api/hospitals/:hospitalId/settlements
 // @access  Private (Hospital admin)
-export const getHospitalSettlements = async (req: Request, res: Response): Promise<void> => {
+export const getHospitalSettlements = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { hospitalId } = req.params;
 
         if (!mongoose.isValidObjectId(hospitalId)) {
             res.status(400).json({ success: false, message: 'Invalid hospital ID' });
             return;
+        }
+
+        // Only an admin, or the hospital account that owns this hospital (audit B-27).
+        const role = req.user?.role;
+        if (role !== 'admin') {
+            const owns = role === 'hospital'
+                && await Hospital.exists({ _id: hospitalId, user: req.user?._id });
+            if (!owns) {
+                res.status(403).json({ success: false, message: 'Not authorized to view these settlements' });
+                return;
+            }
         }
 
         // Fetch settlements for the hospital, populating appointment details

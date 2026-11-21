@@ -11,6 +11,8 @@ export interface IUser extends Document {
     role: 'customer' | 'seller' | 'delivery' | 'admin' | 'hospital';
     status: 'pending' | 'approved' | 'rejected';
     isPasswordResetRequired?: boolean;
+    // JWTs issued before this moment are rejected (password change / log out everywhere)
+    tokensRevokedAt?: Date;
     phone?: string;
     pharmacy_name?: string;
     address?: {
@@ -109,7 +111,8 @@ const UserSchema: Schema = new Schema({
     email: { type: String, unique: true, sparse: true },
     phoneNumber: { type: String, unique: true, sparse: true, index: true },
     phoneVerified: { type: Boolean, default: false },
-    passwordHash: { type: String }, // Not required for Google OAuth users
+    // select:false — never returned by queries unless asked for with .select('+passwordHash')
+    passwordHash: { type: String, select: false }, // Not required for Google OAuth users
     googleId: { type: String, unique: true, sparse: true }, // Google OAuth ID
     profilePicture: { type: String }, // Profile picture URL from Google
     role: { type: String, enum: ['customer', 'seller', 'delivery', 'admin', 'hospital'], default: 'customer' },
@@ -119,6 +122,7 @@ const UserSchema: Schema = new Schema({
     isActiveStaff: { type: Boolean, default: true },
     lastLogin: { type: Date },
     isPasswordResetRequired: { type: Boolean, default: false },
+    tokensRevokedAt: { type: Date },
     phone: { type: String },
     pharmacy_name: { type: String },
     address: {
@@ -127,8 +131,8 @@ const UserSchema: Schema = new Schema({
         state: String,
         zip: String
     },
-    otp: { type: String },
-    otpExpiresAt: { type: Date },
+    otp: { type: String, select: false },
+    otpExpiresAt: { type: Date, select: false },
     bankDetails: {
         accountNumber: String,
         ifsc: String
@@ -199,7 +203,7 @@ const UserSchema: Schema = new Schema({
     consentBackgroundCheck: { type: Boolean },
 
     // Admin MFA
-    mfaSecret: { type: String },
+    mfaSecret: { type: String, select: false },
     isMfaEnabled: { type: Boolean, default: false }
 }, { timestamps: true });
 

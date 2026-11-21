@@ -13,6 +13,9 @@ export interface ISlot extends Document {
     booked_count: number;
     max_appointments: number;
     hold_count: number;
+    // Temporary checkout holds, stored in the database so they work across serverless instances.
+    // A hold counts against capacity only while expiresAt is in the future (see utils/slotBooking.ts).
+    holds?: { user: mongoose.Types.ObjectId; expiresAt: Date }[];
 }
 
 const SlotSchema: Schema = new Schema({
@@ -28,6 +31,14 @@ const SlotSchema: Schema = new Schema({
     booked_count: { type: Number, default: 0 },
     max_appointments: { type: Number, default: 1 },
     hold_count: { type: Number, default: 0 },
+    holds: {
+        type: [{
+            _id: false,
+            user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            expiresAt: { type: Date, required: true }
+        }],
+        default: undefined
+    },
 }, { timestamps: true });
 
 // Index for quick availability lookups

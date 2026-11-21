@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
+import Session from '../models/Session';
+import { getJwtSecret } from '../config/security';
 
 export interface AuthRequest extends Request {
     user?: any;
@@ -20,34 +22,18 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
         return;
     }
 
-    // Try every known JWT secret in order — covers all deployment states
-    // (.env local key, Vercel dashboard key, and all historical fallbacks)
-    const secretsToTry: string[] = [
-        process.env.JWT_SECRET,                     // 1. Vercel dashboard / .env (primary)
-        'supersecretkey_dev_only',                   // 2. The actual local .env value
-        'pillora_jwt_secret_fallback_2024',          // 3. Our consistent fallback
-        'defaultSecret',                             // 4. Original hardcoded fallback
-        'p!ll0r4_Jw7$3cr3t_K3y_X9mQ2vR8nL5tY1wZ6bF4hC0dA7eG3jN_2026_Pr0d_S3cur3', // 5. If user set it in Vercel
-    ].filter((s): s is string => typeof s === 'string' && s.length > 0);
-
-
+    // Verify only with the configured secret. Hard-coded fallback secrets were
+    // removed: anything in source code is public and lets anyone forge tokens.
     let decoded: any = null;
     let verifyError: any = null;
-
-    for (const secret of secretsToTry) {
-        try {
-            decoded = jwt.verify(token, secret);
-            console.log(`[AuthMiddleware] Token verified with secret index ${secretsToTry.indexOf(secret)}`);
-            break;
-        } catch (err: any) {
-            verifyError = err;
-            // Try next secret
-        }
+    try {
+        decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+    } catch (err: any) {
+        verifyError = err;
     }
 
     if (!decoded) {
-        console.error('[AuthMiddleware] Token verification failed with ALL secrets:', verifyError?.message);
-        console.error('[AuthMiddleware] Token start:', token.substring(0, 20) + '...');
+        console.error('[AuthMiddleware] Token verification failed:', verifyError?.message);
         res.status(401).json({
             message: 'Not authorized, token failed',
             details: verifyError?.name === 'TokenExpiredError' ? 'session_expired' : 'invalid_token',
@@ -58,7 +44,6 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     try {
         // Support both 'id' and 'userId' payloads
         const userId = decoded.id || decoded.userId;
-        console.log(`[AuthMiddleware] Decoded: UserID=${userId}, Role=${decoded.role}`);
 
         if (!userId) {
             res.status(401).json({ message: 'Not authorized, malformed token payload' });
@@ -71,6 +56,25 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
             console.error(`[AuthMiddleware] User not found for ID: ${userId}`);
             res.status(401).json({ message: 'Not authorized, user not found' });
             return;
+        }
+
+        // Tokens issued before the last password change / "log out everywhere"
+        // are no longer valid. iat is in seconds; allow 1s for clock rounding.
+        const changedAt = req.user.tokensRevokedAt ? new Date(req.user.tokensRevokedAt).getTime() : 0;
+        if (changedAt && typeof decoded.iat === 'number' && decoded.iat * 1000 < changedAt - 1000) {
+            res.status(401).json({ message: 'Session expired, please log in again', details: 'session_expired' });
+            return;
+        }
+
+        // Admin tokens are only valid while their admin Session (created after
+        // MFA) is live, so logout / emergency lockdown actually end them.
+        if (req.user.role === 'admin') {
+            const session = decoded.sessionId ? await Session.findOne({ sessionId: decoded.sessionId }).lean() : null;
+            if (!session || session.isRevoked || new Date() > new Date(session.expiresAt)
+                || String(session.adminId) !== String(req.user._id)) {
+                res.status(401).json({ message: 'Admin session is no longer valid, please log in again', details: 'session_expired' });
+                return;
+            }
         }
 
         // Admin always passes status check

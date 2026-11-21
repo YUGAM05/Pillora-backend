@@ -69,7 +69,7 @@ export const getUserOrders = async (req: AuthRequest, res: Response) => {
     }
 };
 
-export const getOrderById = async (req: Request, res: Response) => {
+export const getOrderById = async (req: AuthRequest, res: Response) => {
     try {
         const order = await Order.findById(req.params.id)
             .populate('user_id', 'name phone email')
@@ -77,6 +77,18 @@ export const getOrderById = async (req: Request, res: Response) => {
             .populate('delivery_agent_id', 'name phone');
 
         if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
+
+        // Only the buyer, the order's seller, its delivery agent, or an admin (audit B-28/P-17).
+        // Others get 404 so order ids can't be probed.
+        const me = String(req.user?._id || '');
+        const refId = (v: any) => String(v?._id || v || '');
+        const allowed = req.user?.role === 'admin'
+            || [order.user_id, (order as any).user, order.seller_id, (order as any).seller,
+                order.delivery_agent_id, (order as any).assignedDelivery]
+                .some(v => v && refId(v) === me);
+        if (!me || !allowed) {
             return res.status(404).json({ message: 'Order not found' });
         }
         res.status(200).json(order);

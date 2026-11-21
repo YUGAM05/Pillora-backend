@@ -2,16 +2,32 @@ import express from 'express';
 import {
     registerUser, loginUser, sendOtp, verifyOtp,
     sendPhoneOtp, verifyPhoneOtp,
-    setupMfa, verifyMfa, setupAdmin,
+    setupMfa, verifyMfa,
     refreshToken, validateSession, logoutAdmin, emergencyLockdown,
     changePassword, forgotPassword, verifyResetToken, resetPassword
 } from '../controllers/authController';
 import { protect } from '../middleware/authMiddleware';
 import passport from '../config/passport';
 import jwt from 'jsonwebtoken';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { requireAdminAuth } from '../middleware/requireAdminAuth';
 import LoginHistory from '../models/LoginHistory';
+import { getJwtSecret, applyCorsHeaders } from '../config/security';
+
+// ─── Rate limiters for OTP / MFA / register (brute-force protection) ────────
+const simpleLimiter = (max: number, message: string) => rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req: express.Request, res: express.Response) => {
+        applyCorsHeaders(req.headers.origin, res);
+        res.status(429).json({ message });
+    },
+});
+const otpLimiter = simpleLimiter(10, 'Too many OTP attempts. Please try again in 15 minutes.');
+const mfaLimiter = simpleLimiter(10, 'Too many authenticator attempts. Please try again in 15 minutes.');
+const registerLimiter = simpleLimiter(10, 'Too many sign-up attempts. Please try again later.');
 
 // ─── Rate Limiter for login endpoint ────────────────────────────────────────
 const loginLimiter = rateLimit({
@@ -22,15 +38,7 @@ const loginLimiter = rateLimit({
     // IMPORTANT: Custom handler ensures CORS headers are always present on 429
     // Without this, the browser sees a CORS error instead of the rate limit error.
     handler: (req: express.Request, res: express.Response) => {
-        const origin = req.headers.origin;
-        if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        applyCorsHeaders(req.headers.origin, res);
         res.status(429).json({
             message: 'Too many login attempts from this IP, please try again after 15 minutes'
         });
@@ -43,17 +51,10 @@ const forgotPasswordIpLimiter = rateLimit({
     max: 5,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => req.ip || 'unknown-ip',
+    // ipKeyGenerator groups IPv6 addresses by /56 so a client can't dodge the limit by rotating addresses.
+    keyGenerator: (req) => ipKeyGenerator(req.ip || 'unknown-ip'),
     handler: (req: express.Request, res: express.Response) => {
-        const origin = req.headers.origin;
-        if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        applyCorsHeaders(req.headers.origin, res);
         res.status(429).json({
             message: 'Too many requests from this IP. Please try again after an hour.'
         });
@@ -67,15 +68,7 @@ const forgotPasswordEmailLimiter = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => (req.body.email || '').toString().trim().toLowerCase(),
     handler: (req: express.Request, res: express.Response) => {
-        const origin = req.headers.origin;
-        if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        applyCorsHeaders(req.headers.origin, res);
         res.status(429).json({
             message: 'Too many password reset requests for this email. Please try again after an hour.'
         });
@@ -88,15 +81,7 @@ const resetPasswordLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req: express.Request, res: express.Response) => {
-        const origin = req.headers.origin;
-        if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        applyCorsHeaders(req.headers.origin, res);
         res.status(429).json({
             message: 'Too many reset attempts. Please try again after 15 minutes.'
         });
@@ -105,42 +90,20 @@ const resetPasswordLimiter = rateLimit({
 
 const router = express.Router();
 
-// ── Explicit OPTIONS preflight handler for all auth routes ───────────────────
-// Belt-and-suspenders: handles any preflight that reaches the router layer.
+// ── OPTIONS preflight for auth routes: allowlisted origins only ─────────────
 router.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
-        const origin = req.headers.origin;
-        if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        return res.status(200).end();
+        applyCorsHeaders(req.headers.origin, res);
+        return res.status(204).end();
     }
     next();
 });
 
-// CORS middleware specifically for login route
+// CORS for the login route (same allowlist as app.ts)
 const loginCors = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const origin = req.headers.origin;
-    if (origin === 'https://pillora-admin.vercel.app' || origin === 'https://www.pillora-admin.vercel.app') {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    } else {
-        res.setHeader('Access-Control-Allow-Origin', 'https://pillora-admin.vercel.app');
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    
+    applyCorsHeaders(req.headers.origin, res);
     if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+        return res.status(204).end();
     }
     next();
 };
@@ -149,19 +112,19 @@ const loginCors = (req: express.Request, res: express.Response, next: express.Ne
 router.options('/login', loginCors);
 
 // ── Public routes ────────────────────────────────────────────────────────────
-router.post('/register', registerUser);
+router.post('/register', registerLimiter, registerUser);
 router.post('/login', loginCors, loginLimiter, loginUser);
-router.post('/send-otp', sendOtp);
-router.post('/verify-otp', verifyOtp);
-router.post('/phone/send-otp', sendPhoneOtp);
-router.post('/phone/verify-otp', verifyPhoneOtp);
+router.post('/send-otp', otpLimiter, sendOtp);
+router.post('/verify-otp', otpLimiter, verifyOtp);
+router.post('/phone/send-otp', otpLimiter, sendPhoneOtp);
+router.post('/phone/verify-otp', otpLimiter, verifyPhoneOtp);
 router.post('/forgot-password', forgotPasswordIpLimiter, forgotPasswordEmailLimiter, forgotPassword);
 router.get('/verify-reset-token', verifyResetToken);
 router.post('/reset-password', resetPasswordLimiter, resetPassword);
 
-// ── MFA routes (semi-public — user ID required but no full auth) ─────────────
-router.post('/setup-mfa', setupMfa);
-router.post('/verify-mfa', verifyMfa);
+// ── MFA routes: require the short-lived mfaToken issued by /login after a correct password
+router.post('/setup-mfa', mfaLimiter, setupMfa);
+router.post('/verify-mfa', mfaLimiter, verifyMfa);
 
 // ── Session management ───────────────────────────────────────────────────────
 router.post('/refresh', refreshToken);
@@ -171,8 +134,6 @@ router.post('/logout', logoutAdmin);
 // ── Protected admin-only routes ──────────────────────────────────────────────
 router.post('/emergency-lockdown', requireAdminAuth, emergencyLockdown);
 
-// ── Setup (remove in production) ─────────────────────────────────────────────
-router.get('/setup-admin', setupAdmin);
 router.post('/change-password', protect, changePassword);
 
 // ─────────────────────────────────────────────
@@ -211,7 +172,7 @@ router.get('/google/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );
@@ -281,7 +242,7 @@ router.get('/google/seller/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );
@@ -351,7 +312,7 @@ router.get('/google/delivery/callback',
 
             const token = jwt.sign(
                 { id: user._id.toString(), role: user.role },
-                process.env.JWT_SECRET || 'pillora_jwt_secret_fallback_2024',
+                getJwtSecret(),
 
                 { expiresIn: '30d' }
             );

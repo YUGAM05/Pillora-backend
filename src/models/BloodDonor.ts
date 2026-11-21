@@ -14,6 +14,15 @@ export interface IBloodDonor extends Document {
     lastDonationDate?: Date;
     isAvailable: boolean;
     source?: 'user_panel' | 'google_form';
+    /**
+     * When the donor agreed that Pillora may share their name and phone number with
+     * requesters whose ID has been checked. Donors without it are never matched.
+     */
+    sharingConsentAt?: Date;
+    /** Version of the consent text the donor agreed to (see DONOR_CONSENT_VERSION). */
+    sharingConsentVersion?: string;
+    /** How consent was recorded: the donor form, or an admin after confirming with the donor. */
+    sharingConsentSource?: 'donor_form' | 'admin_confirmed';
     location: {
         type: string;
         coordinates: number[]; // [longitude, latitude]
@@ -40,6 +49,9 @@ const BloodDonorSchema: Schema = new Schema({
     lastDonationDate: { type: Date },
     isAvailable: { type: Boolean, default: true },
     source: { type: String, enum: ['user_panel', 'google_form'], default: 'user_panel' },
+    sharingConsentAt: { type: Date },
+    sharingConsentVersion: { type: String },
+    sharingConsentSource: { type: String, enum: ['donor_form', 'admin_confirmed'] },
     location: {
         type: { type: String, default: 'Point' },
         coordinates: { type: [Number], index: '2dsphere' }

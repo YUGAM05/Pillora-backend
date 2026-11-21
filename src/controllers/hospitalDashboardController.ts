@@ -9,10 +9,10 @@ import User from '../models/User';
 import PatientNote from '../models/PatientNote';
 import Payment from '../models/Payment';
 import Settlement from '../models/Settlement';
-import Razorpay from 'razorpay';
 import mongoose from 'mongoose';
-import redis from '../utils/redisMock';
-import { createHold, releaseHold, isHeldByUser } from '../utils/holdManager';
+import { createHold, releaseHold } from '../utils/holdManager';
+import { claimSeat, releaseSeat, liveSlotView, slotCapacity, holdFailureResponse, HoldFailure } from '../utils/slotBooking';
+import { cancelAppointmentWithPolicy, refundRazorpayPayment, applyRefundToRecords } from '../utils/bookingCancellation';
 import PDFDocument from 'pdfkit';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendInvoiceEmail } from '../services/emailService';
@@ -28,6 +28,10 @@ import { sendCountedTemplate, doctorLimit } from '../services/usageService';
 import HospitalSubscriptionPayment from '../models/HospitalSubscriptionPayment';
 import { computeSubscriptionStatus } from '../services/subscriptionService';
 import { getHospitalFinancialOverview } from './financialController';
+import { getJwtSecret } from '../config/security';
+
+/** Escape user text before using it in a RegExp (prevents regex injection / ReDoS). */
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // @desc    Get hospital dashboard stats
 // @route   GET /api/hospital/dashboard/stats
@@ -182,10 +186,28 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
+        // The doctor must belong to this hospital
+        const doctorDoc = await Doctor.findOne({ _id: doctorId, hospital: hospital._id });
+        if (!doctorDoc) {
+            res.status(404).json({ message: 'Doctor not found for this hospital' });
+            return;
+        }
+
+        // Slots cannot be opened beyond the paid subscription period
+        if (sub.subscriptionExpiryDate && end > sub.subscriptionExpiryDate) {
+            res.status(403).json({
+                code: 'SUBSCRIPTION_REQUIRED',
+                message: `Your subscription ends on ${formatDateIST(sub.subscriptionExpiryDate)}. Slots can only be created up to that date — please renew to open later dates.`
+            });
+            return;
+        }
+
         // Check for existing slots for this doctor in the time range to prevent duplicate slots
         const existingSlots = await Slot.countDocuments({
-            doctor: doctorId,
-            startTime: { $gte: start, $lt: end }
+            doctor: doctorDoc._id,
+            status: { $ne: 'cancelled' },
+            startTime: { $lt: end },
+            endTime: { $gt: start }
         });
 
         if (existingSlots > 0) {
@@ -193,9 +215,7 @@ export const bulkGenerateSlots = async (req: AuthRequest, res: Response): Promis
             return;
         }
 
-        // Get maxAppointmentsPerSlot from Doctor model
-        const doctorDoc = await Doctor.findById(doctorId);
-        const maxAppts = doctorDoc?.maxAppointmentsPerSlot || 1;
+        const maxAppts = doctorDoc.maxAppointmentsPerSlot || 1;
 
         const slots = [];
         let current = new Date(start);
@@ -241,7 +261,7 @@ export const getHospitalAppointments = async (req: AuthRequest, res: Response): 
         const hospital = (req as any).hospital;
         const appointments = await Appointment.find({ hospital: hospital._id })
             .populate('patient', 'name email phone')
-            .populate('doctor', 'name specialty')
+            .populate('doctor', 'name specialty fee')
             .populate('slot', 'startTime endTime')
             .sort({ slotTime: 1 });
         
@@ -267,18 +287,61 @@ export const getHospitalAppointments = async (req: AuthRequest, res: Response): 
 export const updateAppointmentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
-        const { status } = req.body;
+        const { status, reason } = req.body || {};
 
-        const appointment = await Appointment.findOneAndUpdate(
-            { _id: req.params.id, hospital: hospital._id },
-            { status },
-            { new: true }
-        );
+        const ALLOWED = ['pending', 'confirmed', 'checked-in', 'in-consultation', 'completed', 'cancelled'];
+        if (!ALLOWED.includes(status)) {
+            res.status(400).json({ message: `Invalid status. Allowed values: ${ALLOWED.join(', ')}` });
+            return;
+        }
 
+        const appointment: any = await Appointment.findOne({ _id: req.params.id, hospital: hospital._id });
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
             return;
         }
+        const priorStatus = appointment.status;
+        if (priorStatus === status) {
+            res.json(appointment);
+            return;
+        }
+
+        // Cancelling goes through the shared logic: frees the slot seat and refunds a paid online advance.
+        if (status === 'cancelled') {
+            const result = await cancelAppointmentWithPolicy(appointment._id, 'hospital', typeof reason === 'string' ? reason.slice(0, 500) : undefined);
+            if (!result.ok) {
+                res.status(result.status || 400).json({ message: result.message });
+                return;
+            }
+            const io = req.app.get('io');
+            if (io) io.emit('slotsUpdated', { doctorId: appointment.doctor });
+            res.json(result.appointment);
+            return;
+        }
+
+        if (status === 'pending' && priorStatus !== 'pending') {
+            res.status(400).json({ message: 'An appointment cannot be moved back to pending.' });
+            return;
+        }
+
+        // A booking that did not occupy a seat yet (unpaid online hold, or reopened after cancelling) takes one now,
+        // with the same atomic capacity check as every other booking.
+        if (priorStatus === 'pending' || priorStatus === 'cancelled') {
+            const doctor: any = await Doctor.findById(appointment.doctor).select('maxAppointmentsPerSlot').lean();
+            const seat = await claimSeat(appointment.slot, {
+                holderUserId: appointment.patient,
+                fallbackCap: doctor?.maxAppointmentsPerSlot || 1,
+                appointmentId: appointment._id
+            });
+            if (!seat) {
+                res.status(409).json({ code: 'SLOT_FULL', message: 'This slot is already full (or cancelled), so the appointment cannot be confirmed.' });
+                return;
+            }
+            appointment.slotSeatHeld = true;
+        }
+
+        appointment.status = status;
+        await appointment.save();
 
         res.json(appointment);
     } catch (error: any) {
@@ -304,18 +367,23 @@ export const getDoctorSlots = async (req: AuthRequest, res: Response): Promise<v
         const slots = await Slot.find({
             doctor: id,
             startTime: { $gte: startOfDay, $lte: endOfDay }
-        }).sort({ startTime: 1 });
+        }).sort({ startTime: 1 }).lean();
 
-        res.json(slots);
+        // status/hold_count as of now (expired checkout holds no longer count); holder ids removed
+        const now = new Date();
+        res.json(slots.map((slot) => liveSlotView(slot, now)));
     } catch (error: any) {
         res.status(500).json({ message: 'Error fetching slots', error: error.message });
     }
 };
 
-// @desc    Create appointment (Book slot with Transaction & SELECT FOR UPDATE protection)
+// @desc    Create a pending online appointment for a slot (patient), to be paid at /checkout
 // @route   POST /api/hospital/dashboard/appointments
+// Hospital, doctor and time are taken from the slot (body values are ignored). The seat itself is
+// taken atomically when the advance payment is verified (paymentController.verifyPayment); until
+// then the patient's checkout hold reserves it, so abandoned checkouts never leave the slot full.
 export const createAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
-    const { doctorId, hospitalId, slotId, slotTime, bookingRequestId, patientName, patientPhone, patientEmail, patientAge } = req.body;
+    const { slotId, patientName, patientPhone, patientEmail, patientAge } = req.body || {};
     const patientId = req.user?.id || req.user?._id;
 
     if (!patientId) {
@@ -323,191 +391,75 @@ export const createAppointment = async (req: AuthRequest, res: Response): Promis
         return;
     }
 
-    if (!slotId || !doctorId || !hospitalId || !slotTime) {
+    if (!slotId || !mongoose.Types.ObjectId.isValid(String(slotId))) {
         res.status(400).json({ message: 'Missing required booking fields' });
         return;
     }
 
-    // 4. DUPLICATE BOOKING PREVENTION
     try {
-        const existingActiveBooking = await Appointment.findOne({
-            patient: patientId,
-            slot: slotId,
-            status: { $ne: 'cancelled' }
-        });
-
-        if (existingActiveBooking) {
-            res.status(400).json({ 
-                code: 'ALREADY_BOOKED',
-                message: 'You already have an appointment for this slot.' 
-            });
+        const slot: any = await Slot.findById(slotId);
+        if (!slot) {
+            res.status(404).json({ code: 'NOT_FOUND', message: 'Slot not found. Please choose another.' });
             return;
         }
 
-        // Idempotency check: prevent duplicate submissions from network retries
-        if (bookingRequestId) {
-            const idempotencyKey = `idempotency:${bookingRequestId}`;
-            const existingKey = await redis.get(idempotencyKey);
-            if (existingKey) {
-                res.status(409).json({ 
-                    code: 'DUPLICATE_SUBMISSION',
-                    message: 'Your booking is already being processed. Please wait.' 
-                });
-                return;
-            }
-            // Set idempotency lock for 10 seconds
-            await redis.setex(idempotencyKey, 10, 'processing');
+        const existingActiveBooking = await Appointment.findOne({
+            patient: patientId,
+            slot: slot._id,
+            status: { $nin: ['cancelled', 'pending'] }
+        });
+        if (existingActiveBooking) {
+            res.status(400).json({ code: 'ALREADY_BOOKED', message: 'You already have an appointment for this slot.' });
+            return;
         }
 
-        // Start MongoDB Session for Transaction
-        const session = await mongoose.startSession();
-        session.startTransaction();
+        const doctor: any = await Doctor.findOne({ _id: slot.doctor, hospital: slot.hospital });
+        if (!doctor) {
+            res.status(404).json({ code: 'NOT_FOUND', message: 'Doctor not found for this slot.' });
+            return;
+        }
 
-        try {
-            // Step 1: Lock the slot row (SELECT FOR UPDATE row-level locking equivalent)
-            const slot = await Slot.findById(slotId).session(session);
-            if (!slot) {
-                throw new Error('SLOT_NOT_FOUND');
-            }
+        // Reserve (or refresh) the patient's hold — atomic capacity check
+        const io = req.app.get('io');
+        const hold = await createHold(slot._id.toString(), patientId.toString(), io);
+        if (!hold.success) {
+            const r = holdFailureResponse((hold.reason || 'UNAVAILABLE') as HoldFailure);
+            res.status(r.status).json({ code: r.code, message: r.message });
+            return;
+        }
 
-            if (slot.status === 'cancelled') {
-                throw new Error('SLOT_CANCELLED');
-            }
-
-            // Resolve max appointments
-            const doctor = await Doctor.findById(doctorId).session(session);
-            const maxAppts = slot.max_appointments || (doctor?.maxAppointmentsPerSlot) || 1;
-
-            // Step 2: Check booked_count < max_appointments & active holds
-            const userHasHold = await isHeldByUser(slotId.toString(), patientId.toString());
-
-            if (slot.status === 'booked' || slot.booked_count >= maxAppts) {
-                throw new Error('SLOT_FULL');
-            }
-
-            if (slot.status === 'locked' && !userHasHold) {
-                throw new Error('SLOT_ON_HOLD');
-            }
-
-            // Step 3: Insert appointment record (Generate unique token number as Step 5)
-            const activeAppointmentsCount = await Appointment.countDocuments({
-                slot: slotId,
-                status: { $ne: 'cancelled' }
-            }).session(session);
-
-            // Step 5: Generate unique token number
-            const tokenNumber = activeAppointmentsCount + 1;
-
-            const appointment = new Appointment({
+        let appointment: any = await Appointment.findOne({ patient: patientId, slot: slot._id, status: 'pending' });
+        if (!appointment) {
+            const activeAppointmentsCount = await Appointment.countDocuments({ slot: slot._id, status: { $ne: 'cancelled' } });
+            appointment = new Appointment({
                 patient: patientId,
-                doctor: doctorId,
-                hospital: hospitalId,
-                slot: slotId,
-                slotTime: new Date(slotTime),
+                doctor: slot.doctor,
+                hospital: slot.hospital,
+                slot: slot._id,
+                slotTime: slot.startTime,
                 status: 'pending',
-                tokenNumber,
-                patientName,
-                patientPhone,
-                patientEmail,
-                patientAge: patientAge ? Number(patientAge) : undefined
+                paymentStatus: 'unpaid',
+                paymentSource: 'gateway',
+                bookingSource: 'online',
+                tokenNumber: activeAppointmentsCount + 1,
+                doctorName: `Dr. ${doctor.name}`,
+                consultationFee: doctor.fee || 500
             });
-
-            await appointment.save({ session });
-
-            // Step 4: Increment booked_count atomically only if booked_count < max_appointments and is available/locked
-            const updatedSlot = await Slot.findOneAndUpdate(
-                { 
-                    _id: slotId, 
-                    status: { $in: ['available', 'locked'] },
-                    booked_count: { $lt: maxAppts } 
-                },
-                { 
-                    $inc: { booked_count: 1, hold_count: userHasHold ? -1 : 0 },
-                    $set: { 
-                        status: 'booked',
-                        appointment: appointment._id
-                    }
-                },
-                { session, new: true }
-            );
-
-            if (!updatedSlot) {
-                throw new Error('SLOT_FULL'); // If 0 rows affected, reject with SLOT_FULL
-            }
-
-            // Step 6: Commit transaction
-            await session.commitTransaction();
-            session.endSession();
-
-            // Release the temporary hold
-            if (userHasHold) {
-                await redis.del(`hold:${slotId}:${patientId}`);
-            }
-
-            // Real-time socket updates for availability
-            const io = req.app.get('io');
-            if (io) {
-                io.emit('slotBooked', {
-                    slotId,
-                    doctorId,
-                    date: new Date(slotTime).toISOString().split('T')[0],
-                    bookedCount: updatedSlot.booked_count,
-                    holdCount: updatedSlot.hold_count,
-                    maxAppointments: maxAppts,
-                    status: 'booked'
-                });
-            }
-
-            res.status(201).json({
-                success: true,
-                message: 'Appointment booking initiated. Please proceed to payment.',
-                appointment: {
-                    ...appointment.toObject(),
-                    tokenNumber
-                }
-            });
-
-        } catch (error: any) {
-            await session.abortTransaction();
-            session.endSession();
-
-            if (bookingRequestId) {
-                await redis.del(`idempotency:${bookingRequestId}`);
-            }
-            throw error;
         }
+        if (typeof patientName === 'string' && patientName.trim()) appointment.patientName = patientName.trim().slice(0, 100);
+        if (typeof patientPhone === 'string' && patientPhone.trim()) appointment.patientPhone = patientPhone.trim().slice(0, 20);
+        if (typeof patientEmail === 'string' && patientEmail.trim()) appointment.patientEmail = patientEmail.trim().slice(0, 200);
+        if (Number(patientAge) > 0) appointment.patientAge = Number(patientAge);
+        await appointment.save();
 
+        res.status(201).json({
+            success: true,
+            message: 'Appointment booking initiated. Please proceed to payment.',
+            appointment: appointment.toObject()
+        });
     } catch (error: any) {
-        console.error('[BookingTransactionError]', error.message);
-
-        // 5. USER-FACING ERROR MESSAGES based on scenario
-        if (error.message === 'SLOT_FULL') {
-            res.status(400).json({
-                code: 'SLOT_FULL',
-                message: 'Sorry, this slot was just booked by someone else. Please choose another slot.'
-            });
-        } else if (error.message === 'SLOT_ON_HOLD') {
-            res.status(400).json({
-                code: 'SLOT_ON_HOLD',
-                message: 'This slot is temporarily held by another user. Please choose another slot.'
-            });
-        } else if (error.message === 'SLOT_CANCELLED') {
-            res.status(400).json({
-                code: 'SLOT_CANCELLED',
-                message: 'This slot has been cancelled by the hospital. Please choose another.'
-            });
-        } else if (error.message === 'SLOT_NOT_FOUND') {
-            res.status(404).json({
-                code: 'NOT_FOUND',
-                message: 'Slot not found. Please choose another.'
-            });
-        } else {
-            res.status(500).json({
-                code: 'SERVER_ERROR',
-                message: 'An unexpected booking error occurred. Please try again.',
-                error: error.message
-            });
-        }
+        console.error('[BookingError]', error.message);
+        res.status(500).json({ code: 'SERVER_ERROR', message: 'An unexpected booking error occurred. Please try again.' });
     }
 };
 
@@ -548,10 +500,11 @@ export const getHospitalSlots = async (req: AuthRequest, res: Response): Promise
         // Query active appointments to count booking occurrences per slot
         const appointments = await Appointment.find({ hospital: hospital._id, status: { $ne: 'cancelled' } });
         
+        const now = new Date();
         const slotsWithCount = slots.map(slot => {
             const bookingCount = appointments.filter(app => app.slot.toString() === slot._id.toString()).length;
             return {
-                ...slot.toObject(),
+                ...liveSlotView(slot, now),
                 bookingCount
             };
         });
@@ -618,8 +571,17 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
             return datesList;
         };
 
+        // The doctor must belong to this hospital
+        const doctorDoc = await Doctor.findOne({ _id: doctorId, hospital: hospital._id });
+        if (!doctorDoc) {
+            res.status(404).json({ message: 'Doctor not found for this hospital' });
+            return;
+        }
+        const maxAppts = doctorDoc.maxAppointmentsPerSlot || 1;
+
         const targetDates = generateDates(date, recurrence);
         const slotsToInsert = [];
+        let skippedAfterExpiry = 0;
 
         for (const targetDate of targetDates) {
             const dateStr = targetDate.toISOString().split('T')[0];
@@ -633,6 +595,19 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
                     return;
                 }
                 continue; // Skip past dates silently in batch recurrences
+            }
+
+            // Slots cannot be opened beyond the paid subscription period
+            if (sub.subscriptionExpiryDate && end > sub.subscriptionExpiryDate) {
+                if (targetDates.length === 1) {
+                    res.status(403).json({
+                        code: 'SUBSCRIPTION_REQUIRED',
+                        message: `Your subscription ends on ${formatDateIST(sub.subscriptionExpiryDate)}. Slots can only be created up to that date — please renew to open later dates.`
+                    });
+                    return;
+                }
+                skippedAfterExpiry++;
+                continue;
             }
 
             // Check overlap
@@ -651,9 +626,6 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
                 });
                 return;
             }
-
-            const doctorDoc = await Doctor.findById(doctorId);
-            const maxAppts = doctorDoc?.maxAppointmentsPerSlot || 1;
 
             slotsToInsert.push({
                 doctor: doctorId,
@@ -677,7 +649,10 @@ export const addSingleSlot = async (req: AuthRequest, res: Response): Promise<vo
             }
         }
 
-        res.status(201).json({ message: `Successfully created ${slotsToInsert.length} slots`, count: slotsToInsert.length });
+        res.status(201).json({
+            message: `Successfully created ${slotsToInsert.length} slots${skippedAfterExpiry ? ` (${skippedAfterExpiry} dates after your subscription end were skipped)` : ''}`,
+            count: slotsToInsert.length
+        });
     } catch (error: any) {
         res.status(500).json({ message: 'Error creating slot', error: error.message });
     }
@@ -718,46 +693,51 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
         slot.cancelledBy = (req.user?._id || req.user?.id) as any;
         await slot.save();
 
-        // Update affected bookings to cancelled and refund online payments (hospital initiated)
-        const affectedAppointments = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } });
-        const razorpay = new Razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_51Mz2wYSHB3q5Xn',
-            key_secret: process.env.RAZORPAY_KEY_SECRET || 'fallback_secret'
-        });
+        // Cancel affected bookings and refund online advances (hospital initiated).
+        // A failed Razorpay refund is NOT recorded as refunded: the payment stays 'completed' with
+        // settlement 'Under Review' and the booking keeps paymentStatus 'partial', so it appears in the
+        // admin refund queue. The failures are returned to the caller.
+        const affectedAppointments: any[] = await Appointment.find({ slot: slot._id, status: { $ne: 'cancelled' } });
+        const refundFailures: { appointmentId: string; patientName?: string; error: string }[] = [];
+        let refundedCount = 0;
+        const cancelReason = reason || 'Slot cancelled by hospital (doctor unavailable)';
 
         for (const app of affectedAppointments) {
-            app.status = 'cancelled';
-            if (reason) {
-                app.notes = app.notes ? `${app.notes}\nCancellation reason: ${reason}` : `Cancellation reason: ${reason}`;
-            }
-            await app.save();
+            const payment: any = await Payment.findOne({
+                appointmentId: app._id,
+                paymentSource: 'pillora_online',
+                status: { $in: ['completed', 'paid', 'pending'] }
+            }).sort({ createdAt: -1 });
 
-            // Handle refund
-            const payment = await Payment.findOne({ appointmentId: app._id });
-            if (payment && payment.status === 'completed') {
-                payment.status = 'refund_initiated';
-                await payment.save();
-
-                if (payment.razorpayPaymentId) {
-                    try {
-                        const refundAmount = Math.round(payment.amount * 100);
-                        await razorpay.payments.refund(payment.razorpayPaymentId, {
-                            amount: refundAmount,
-                            notes: {
-                                reason: reason || 'Slot cancelled by hospital (doctor unavailable)',
-                                appointmentId: app._id.toString()
-                            }
-                        });
-                    } catch (refundError: any) {
-                        console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refundError.message);
-                    }
-                }                payment.settlementStatus = 'refunded';
+            if (payment && (payment.status === 'completed' || payment.status === 'paid')) {
+                const refund = await refundRazorpayPayment(payment, Number(payment.amount) || 0, {
+                    reason: cancelReason,
+                    appointmentId: app._id.toString()
+                });
+                if (refund.ok) {
+                    applyRefundToRecords(payment, app, refund, cancelReason);
+                    refundedCount++;
+                } else {
+                    console.error(`[SlotCancelRefundError] Failed to refund appointment ${app._id}:`, refund.error);
+                    payment.settlementStatus = 'Under Review';
+                    payment.notes = `${payment.notes ? payment.notes + '\n' : ''}Refund failed on slot cancel: ${refund.error}`;
+                    refundFailures.push({ appointmentId: app._id.toString(), patientName: app.patientName, error: refund.error || 'Refund failed' });
+                }
                 await payment.save();
             } else if (payment && payment.status === 'pending') {
                 payment.status = 'failed';
-                payment.settlementStatus = 'refunded';
+                payment.settlementStatus = 'not_applicable';
                 await payment.save();
             }
+
+            app.status = 'cancelled';
+            app.notes = app.notes ? `${app.notes}\nCancellation reason: ${cancelReason}` : `Cancellation reason: ${cancelReason}`;
+            if (refundFailures.some((f) => f.appointmentId === app._id.toString())) {
+                app.notes += '\nRefund of the online advance FAILED — Pillora admin must refund manually.';
+            }
+            await app.save();
+            // Mark the seat released on the appointment (the slot itself is cancelled, so its counts no longer matter)
+            await Appointment.updateOne({ _id: app._id }, { $set: { slotSeatHeld: false } });
         }
 
         // Emit socket update for real-time lists
@@ -769,7 +749,14 @@ export const cancelSlot = async (req: AuthRequest, res: Response): Promise<void>
             });
         }
 
-        res.json({ message: 'Slot and all associated bookings cancelled successfully.' });
+        res.status(refundFailures.length ? 207 : 200).json({
+            message: refundFailures.length
+                ? `Slot cancelled. ${refundFailures.length} online refund(s) FAILED and need a manual refund by Pillora admin.`
+                : 'Slot and all associated bookings cancelled successfully.',
+            cancelledAppointments: affectedAppointments.length,
+            refunded: refundedCount,
+            refundFailures
+        });
     } catch (error: any) {
         res.status(500).json({ message: 'Error cancelling slot', error: error.message });
     }
@@ -788,8 +775,26 @@ export const deleteSlot = async (req: AuthRequest, res: Response): Promise<void>
             return;
         }
 
-        // Delete associated bookings
-        await Appointment.deleteMany({ slot: slot._id });
+        // Never hard-delete real bookings or anything with money attached (H4).
+        const slotAppointments: any[] = await Appointment.find({ slot: slot._id }).select('_id status');
+        const appointmentIds = slotAppointments.map((a) => a._id);
+        const hasMoney = appointmentIds.length > 0 && await Payment.exists({
+            appointmentId: { $in: appointmentIds },
+            status: { $nin: ['pending', 'failed'] }
+        });
+        const hasActiveBooking = slotAppointments.some((a) => a.status !== 'cancelled' && a.status !== 'pending');
+        if (hasMoney || hasActiveBooking) {
+            res.status(409).json({
+                message: 'This slot has bookings or payments and cannot be deleted. Use "Cancel slot" instead — it cancels the bookings and refunds online advances.'
+            });
+            return;
+        }
+
+        // Only unpaid abandoned holds / cancelled unpaid bookings remain: remove them with the slot (previous behaviour)
+        if (appointmentIds.length > 0) {
+            await Payment.deleteMany({ appointmentId: { $in: appointmentIds }, status: { $in: ['pending', 'failed'] } });
+            await Appointment.deleteMany({ _id: { $in: appointmentIds } });
+        }
 
         // Delete the slot document itself
         await Slot.deleteOne({ _id: slot._id });
@@ -826,11 +831,11 @@ export const holdSlot = async (req: AuthRequest, res: Response): Promise<void> =
             return;
         }
 
-        // Check if already booked
+        // Check if already booked (an unpaid pending checkout of the same patient does not count)
         const existingActiveBooking = await Appointment.findOne({
             patient: patientId,
             slot: slotId,
-            status: { $ne: 'cancelled' }
+            status: { $nin: ['cancelled', 'pending'] }
         });
 
         if (existingActiveBooking) {
@@ -845,27 +850,8 @@ export const holdSlot = async (req: AuthRequest, res: Response): Promise<void> =
         const holdResult = await createHold(slotId, patientId.toString(), io);
 
         if (!holdResult.success) {
-            if (holdResult.message === 'Slot just became full') {
-                res.status(400).json({
-                    code: 'SLOT_FULL',
-                    message: 'Sorry, this slot was just booked by someone else. Please choose another slot.'
-                });
-            } else if (holdResult.message === 'Slot on temporary hold') {
-                res.status(400).json({
-                    code: 'SLOT_ON_HOLD',
-                    message: 'This slot is temporarily held. Please try again in a few minutes or choose another.'
-                });
-            } else if (holdResult.message === 'Slot cancelled by admin') {
-                res.status(400).json({
-                    code: 'SLOT_CANCELLED',
-                    message: 'This slot has been cancelled by the hospital. Please choose another.'
-                });
-            } else {
-                res.status(400).json({
-                    code: 'HOLD_FAILED',
-                    message: holdResult.message
-                });
-            }
+            const r = holdFailureResponse((holdResult.reason || 'UNAVAILABLE') as HoldFailure);
+            res.status(r.status).json({ code: r.code, message: r.message });
             return;
         }
 
@@ -914,12 +900,22 @@ export const releaseSlotHold = async (req: AuthRequest, res: Response): Promise<
 export const createManualAppointment = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const hospital = (req as any).hospital;
-        const { patientName, patientEmail, patientPhone, doctorId, slotId, slotTime, notes, paymentStatus } = req.body;
+        const { patientName, patientEmail, patientPhone, doctorId, slotId, notes, paymentStatus } = req.body;
 
-        if (!patientName || !patientEmail || !doctorId || !slotId || !slotTime) {
+        if (!patientName || !patientEmail || !doctorId || !slotId || !mongoose.Types.ObjectId.isValid(String(slotId)) || !mongoose.Types.ObjectId.isValid(String(doctorId))) {
             res.status(400).json({ message: 'Missing required manual booking fields' });
             return;
         }
+
+        // Slot and doctor must belong to the caller's own hospital (H3)
+        const ownSlot: any = await Slot.findOne({ _id: slotId, hospital: hospital._id }).select('doctor startTime status');
+        const ownDoctor: any = await Doctor.findOne({ _id: doctorId, hospital: hospital._id }).select('_id');
+        if (!ownSlot || !ownDoctor || String(ownSlot.doctor) !== String(ownDoctor._id)) {
+            res.status(404).json({ code: 'NOT_FOUND', message: 'Slot not found for this doctor at your hospital.' });
+            return;
+        }
+        // Appointment time always comes from the slot
+        const slotTime = ownSlot.startTime;
 
         // 1. Find or create the patient
         let patient = await User.findOne({ email: patientEmail.toLowerCase().trim() });
@@ -945,7 +941,7 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
         session.startTransaction();
 
         try {
-            const slot = await Slot.findById(slotId).session(session);
+            const slot: any = await Slot.findOne({ _id: slotId, hospital: hospital._id }).session(session);
             if (!slot) {
                 throw new Error('SLOT_NOT_FOUND');
             }
@@ -954,10 +950,12 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 throw new Error('SLOT_CANCELLED');
             }
 
-            const doctor = await Doctor.findById(doctorId).session(session);
-            const maxAppts = slot.max_appointments || (doctor?.maxAppointmentsPerSlot) || 1;
+            const doctor = await Doctor.findOne({ _id: doctorId, hospital: hospital._id }).session(session);
+            const maxAppts = slotCapacity(slot, doctor);
 
-            if (slot.booked_count >= maxAppts) {
+            // Take the seat first — atomic capacity check (patients' unexpired checkout holds count too)
+            const updatedSlot = await claimSeat(slotId, { fallbackCap: maxAppts, session });
+            if (!updatedSlot) {
                 throw new Error('SLOT_FULL');
             }
 
@@ -987,6 +985,8 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 balanceDue: isPaid ? 0 : docFee,
                 paymentStatus: isPaid ? 'paid' : 'unpaid',
                 paymentSource: 'manual',
+                bookingSource: 'walk_in',
+                slotSeatHeld: true,
                 notes: notes || '',
                 tokenNumber
             });
@@ -1014,25 +1014,7 @@ export const createManualAppointment = async (req: AuthRequest, res: Response): 
                 await payment.save({ session });
             }
 
-            // Increment booked_count atomically
-            const updatedSlot = await Slot.findOneAndUpdate(
-                { 
-                    _id: slotId, 
-                    booked_count: { $lt: maxAppts } 
-                },
-                { 
-                    $inc: { booked_count: 1 },
-                    $set: { 
-                        status: (slot.booked_count + 1 >= maxAppts) ? 'booked' : 'available',
-                        appointment: appointment._id
-                    }
-                },
-                { session, new: true }
-            );
-
-            if (!updatedSlot) {
-                throw new Error('SLOT_FULL');
-            }
+            await Slot.updateOne({ _id: slotId }, { $set: { appointment: appointment._id } }, { session });
 
             await session.commitTransaction();
             session.endSession();
@@ -1164,8 +1146,26 @@ export const deleteDoctor = async (req: AuthRequest, res: Response): Promise<voi
             return;
         }
 
-        // Delete associated appointments
-        await Appointment.deleteMany({ doctor: doctor._id });
+        // Never hard-delete real bookings or payment history (H4). Doctors with history are deactivated instead.
+        const doctorAppointments: any[] = await Appointment.find({ doctor: doctor._id }).select('_id status');
+        const appointmentIds = doctorAppointments.map((a) => a._id);
+        const hasMoney = appointmentIds.length > 0 && await Payment.exists({
+            appointmentId: { $in: appointmentIds },
+            status: { $nin: ['pending', 'failed'] }
+        });
+        const hasBookings = doctorAppointments.some((a) => a.status !== 'cancelled' && a.status !== 'pending');
+        if (hasMoney || hasBookings) {
+            res.status(409).json({
+                message: 'This doctor has appointments or payments on record, so it cannot be deleted. Deactivate the doctor instead (records are kept), and cancel any upcoming slots to refund patients.'
+            });
+            return;
+        }
+
+        // Only unpaid abandoned holds / cancelled unpaid bookings remain: remove them (previous behaviour)
+        if (appointmentIds.length > 0) {
+            await Payment.deleteMany({ appointmentId: { $in: appointmentIds }, status: { $in: ['pending', 'failed'] } });
+            await Appointment.deleteMany({ _id: { $in: appointmentIds } });
+        }
 
         // Delete associated slots
         await Slot.deleteMany({ doctor: doctor._id });
@@ -1368,13 +1368,24 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
     try {
         const hospital = (req as any).hospital;
         const { id } = req.params;
-        const { amount } = req.body;
-
-        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient');
+        const appointment = await Appointment.findOne({ _id: id, hospital: hospital._id }).populate('patient', 'name email phone');
         if (!appointment) {
             res.status(404).json({ message: 'Appointment not found' });
             return;
         }
+
+        // Invoice amount is worked out on the server (client `amount` is ignored):
+        // consultation fee from the appointment (or the doctor's fee), and what was really paid from Payment rows.
+        const doctorForFee: any = await Doctor.findById(appointment.doctor).select('fee').lean();
+        const fee = Number(appointment.consultationFee) > 0 ? Number(appointment.consultationFee) : Number(doctorForFee?.fee) || 0;
+        if (!(fee > 0)) {
+            res.status(400).json({ message: 'Consultation fee is not set for this appointment or doctor.' });
+            return;
+        }
+        const paidRows = await Payment.find({ appointmentId: appointment._id, status: { $in: ['completed', 'paid'] } }).select('amount').lean();
+        const paidSoFar = Math.round((paidRows as any[]).reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100;
+        const balance = Math.max(0, Math.round((fee - paidSoFar) * 100) / 100);
+        const amount = fee;
 
         const patientName = appointment.patientName || (appointment.patient as any)?.name || 'Patient';
         const patientEmail = (appointment.patient as any)?.email;
@@ -1424,6 +1435,12 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
         // Total
         doc.fontSize(14).text('Total:', 50, doc.y, { continued: true });
         doc.text(`Rs. ${amount}`, 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+        doc.fontSize(12).text('Paid:', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${paidSoFar}`, 400, doc.y, { align: 'right' });
+        doc.moveDown(0.5);
+        doc.text('Balance due:', 50, doc.y, { continued: true });
+        doc.text(`Rs. ${balance}`, 400, doc.y, { align: 'right' });
 
         doc.end();
 
@@ -1453,8 +1470,8 @@ export const generateAndSendInvoice = async (req: AuthRequest, res: Response): P
 
         const invoiceUrl = result.secure_url;
 
+        // Issuing an invoice does not change the payment status — only recorded payments do.
         appointment.invoiceUrl = invoiceUrl;
-        appointment.paymentStatus = 'paid';
         await appointment.save();
 
         try {
@@ -1493,13 +1510,13 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
             // First try exact match if valid ObjectId
             let initialBooking;
             if (mongoose.Types.ObjectId.isValid(lowerQuery) && lowerQuery.length === 24) {
-                initialBooking = await Appointment.findOne({ _id: lowerQuery, hospital: hospital._id }).populate('patient');
+                initialBooking = await Appointment.findOne({ _id: lowerQuery, hospital: hospital._id }).populate('patient', 'name email phone');
             }
             
             // If not found, fetch recent and do partial match like autocomplete
             if (!initialBooking) {
                 const recentAppts = await Appointment.find({ hospital: hospital._id })
-                    .populate('patient')
+                    .populate('patient', 'name email phone')
                     .sort({ createdAt: -1 })
                     .limit(500);
                 initialBooking = recentAppts.find(a => a._id.toString().toLowerCase().includes(lowerQuery));
@@ -1518,11 +1535,12 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
                 query.patientName = initialBooking.patientName;
             }
         } else if (name) {
-            const searchName = (name as string).trim();
-            const regex = new RegExp(searchName, 'i');
+            const searchName = String(name).trim().slice(0, 100);
+            const regex = new RegExp(escapeRegex(searchName), 'i');
             
-            // Find patients matching the name
-            const matchingUsers = await User.find({ name: regex });
+            // Find patients matching the name — only among this hospital's own patients
+            const hospitalPatientIds = await Appointment.distinct('patient', { hospital: hospital._id });
+            const matchingUsers = await User.find({ _id: { $in: hospitalPatientIds }, name: regex }).select('_id');
             
             // We want to match either the user account OR the name directly on the appointment
             query.$or = [
@@ -1538,13 +1556,24 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
         }
 
         const appointments = await Appointment.find(query)
-            .populate('patient')
-            .populate('doctor', 'name specialty')
+            .populate('patient', 'name email phone')
+            .populate('doctor', 'name specialty fee')
             .sort({ bookingDate: -1 });
 
         if (!appointments.length) {
             res.status(404).json({ message: 'No matching appointments found' });
             return;
+        }
+
+        // Real money collected per appointment (online advance + clinic payments), refunded ones excluded
+        const paidRows = await Payment.find({
+            appointmentId: { $in: appointments.map((a) => a._id) },
+            status: { $in: ['completed', 'paid'] }
+        }).select('appointmentId amount').lean();
+        const paidByAppointment = new Map<string, number>();
+        for (const p of paidRows as any[]) {
+            const key = String(p.appointmentId);
+            paidByAppointment.set(key, (paidByAppointment.get(key) || 0) + (Number(p.amount) || 0));
         }
 
         // Group by patient
@@ -1571,7 +1600,7 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
             }
 
             const patientData = patientsMap.get(patientId);
-            patientData.totalVisits += 1;
+            if (appt.status !== 'cancelled') patientData.patientInfo.totalVisits += 1;
             
             // Adjust dates
             if (new Date(appt.bookingDate) < new Date(patientData.patientInfo.firstVisit)) {
@@ -1581,12 +1610,7 @@ export const searchPatients = async (req: AuthRequest, res: Response): Promise<v
                 patientData.patientInfo.lastVisit = appt.bookingDate;
             }
 
-            // In our system, the amount paid might be in the invoice, or if fee is on slot. 
-            // We'll just sum up if paymentStatus is paid. (Mock fee or actual fee).
-            // Usually consulting fee is attached to doctor or slot. We will add 0 for now unless we have fee logic.
-            // Wait, we can extract amount from invoice logic or just assume 500 for paid
-            const mockFee = appt.paymentStatus === 'paid' ? 500 : 0; // Assuming 500 or adjust if you have a fee field
-            patientData.patientInfo.totalSpent += mockFee;
+            patientData.patientInfo.totalSpent += paidByAppointment.get(appt._id.toString()) || 0;
 
             patientData.bookings.push(appt);
         }
@@ -1831,22 +1855,12 @@ export const getAppointmentPrescriptionFile = async (req: any, res: Response): P
             return;
         }
 
-        // Validate token manually using the same secrets
-        const secretsToTry: string[] = [
-            process.env.JWT_SECRET,
-            'supersecretkey_dev_only',
-            'pillora_jwt_secret_fallback_2024',
-            'defaultSecret'
-        ].filter((s): s is string => typeof s === 'string' && s.length > 0);
-
+        // Validate token exactly like the protect middleware (env secret only, HS256)
         let decoded: any = null;
-        for (const secret of secretsToTry) {
-            try {
-                decoded = jwt.verify(token, secret);
-                break;
-            } catch (err) {
-                // Try next
-            }
+        try {
+            decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+        } catch (err) {
+            decoded = null;
         }
 
         if (!decoded) {
@@ -1855,9 +1869,15 @@ export const getAppointmentPrescriptionFile = async (req: any, res: Response): P
         }
 
         const userId = decoded.id || decoded.userId;
-        const user = await User.findById(userId);
+        const user: any = await User.findById(userId);
         if (!user) {
             res.status(401).json({ message: 'Not authorized, user not found' });
+            return;
+        }
+        // Tokens issued before "log out all devices" / password change are no longer valid (same rule as protect)
+        const revokedAt = user.tokensRevokedAt ? new Date(user.tokensRevokedAt).getTime() : 0;
+        if (revokedAt && typeof decoded.iat === 'number' && decoded.iat * 1000 < revokedAt - 1000) {
+            res.status(401).json({ message: 'Not authorized, session expired' });
             return;
         }
 
@@ -1954,25 +1974,56 @@ export const updatePaymentStatus = async (req: AuthRequest, res: Response): Prom
             return;
         }
 
-        const appointment = await Appointment.findOneAndUpdate(
-            { _id: id, hospital: hospital._id },
-            {
-                paymentStatus: status,
-                paymentSource: 'manual',
-                paymentUpdatedAt: new Date(),
-                paymentUpdatedBy: req.user?._id || req.user?.id
-            },
-            { new: true }
-        );
-
-        if (!appointment) {
+        const existing: any = await Appointment.findOne({ _id: id, hospital: hospital._id });
+        if (!existing) {
             res.status(404).json({ message: 'Appointment not found' });
             return;
         }
 
-        if (status === 'unpaid' || status === 'waived') {
-            await Payment.deleteOne({ appointmentId: id });
+        // Payment records are never deleted (H6). The online advance collected by Pillora cannot be undone
+        // here — it is refunded through cancellation. Clinic collections are reversed, not removed.
+        const onlineAdvance = await Payment.findOne({
+            appointmentId: existing._id,
+            paymentSource: 'pillora_online',
+            status: { $in: ['completed', 'paid'] }
+        }).select('_id');
+        if (status === 'unpaid' && onlineAdvance) {
+            res.status(409).json({
+                message: 'This booking has an online advance paid through Pillora, so it cannot be marked unpaid. Cancel the appointment to refund the advance instead.'
+            });
+            return;
         }
+
+        const fee = Number(existing.consultationFee) || 0;
+        const advancePaid = onlineAdvance ? Number(existing.advancePaid) || 0 : 0;
+        const update: any = {
+            paymentStatus: status,
+            paymentSource: 'manual',
+            paymentUpdatedAt: new Date(),
+            paymentUpdatedBy: req.user?._id || req.user?.id
+        };
+
+        if (status === 'unpaid' || status === 'waived') {
+            const actor = String(req.user?._id || req.user?.id || '');
+            await Payment.updateMany(
+                { appointmentId: existing._id, paymentSource: 'clinic_collection', status: { $in: ['completed', 'paid'] } },
+                [{
+                    $set: {
+                        status: 'refunded',
+                        notes: { $concat: [{ $ifNull: ['$notes', ''] }, ` | Reversed: booking marked ${status} by hospital user ${actor} on ${new Date().toISOString()}`] }
+                    }
+                }],
+                { updatePipeline: true }
+            );
+            update.balancePaid = 0;
+            update.balanceDue = status === 'waived' ? 0 : Math.max(0, fee - advancePaid);
+        }
+
+        const appointment = await Appointment.findOneAndUpdate(
+            { _id: existing._id, hospital: hospital._id },
+            update,
+            { new: true }
+        );
 
         res.json({ message: 'Payment status updated', appointment });
     } catch (error: any) {
@@ -1997,7 +2048,7 @@ export const autocompletePatients = async (req: AuthRequest, res: Response): Pro
         const bookingPatientIds = await Appointment.distinct('patient', { hospital: hospital._id });
 
         // Partial case-insensitive name match, limited to this hospital's patients
-        const regex = new RegExp(query, 'i');
+        const regex = new RegExp(escapeRegex(query.slice(0, 100)), 'i');
         const patients = await User.find({
             _id: { $in: bookingPatientIds },
             name: regex
@@ -2197,7 +2248,7 @@ export const getHospitalSubscription = async (req: AuthRequest, res: Response): 
             payments,
             contactAdmin: {
                 email: 'team@pillora.in',
-                phone: '+91 99999 99999',
+                phone: '+91 94291 67856',
                 instructions: 'To renew or activate your 30-day slot generation subscription, please contact the Pillora Admin after making payment. Your 30-day slot generation privileges will be renewed immediately.'
             }
         });

@@ -876,7 +876,7 @@ export const getSecurityOverview = async (req: AuthRequest, res: Response): Prom
 export const changeHospitalPassword = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { currentPassword, newPassword } = req.body;
-        const user = await User.findById(req.user?._id);
+        const user = await User.findById(req.user?._id).select('+passwordHash');
 
         if (!user || !user.passwordHash) {
             res.status(404).json({ message: 'User account not found' });
@@ -901,6 +901,8 @@ export const changeHospitalPassword = async (req: AuthRequest, res: Response): P
 
         user.passwordHash = await bcrypt.hash(newPassword, 10);
         user.isPasswordResetRequired = false;
+        // Every JWT issued before now stops working (checked in protect), on all devices
+        (user as any).tokensRevokedAt = new Date();
         await user.save();
 
         // Revoke active sessions
@@ -917,7 +919,7 @@ export const changeHospitalPassword = async (req: AuthRequest, res: Response): P
 
         res.json({
             success: true,
-            message: 'Password changed successfully. Please keep your new password safe.'
+            message: 'Password changed successfully. You have been signed out on all devices — please log in again with your new password.'
         });
     } catch (error: any) {
         console.error('[ChangeHospitalPasswordError]', error);
@@ -929,6 +931,8 @@ export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise
     try {
         const userId = req.user?._id;
         await Session.updateMany({ adminId: userId, isRevoked: false }, { isRevoked: true });
+        // Invalidate every JWT issued before now (checked in protect) — this includes the current device
+        await User.updateOne({ _id: userId }, { $set: { tokensRevokedAt: new Date() } });
 
         await AuditLog.create({
             action: 'ALL_SESSIONS_REVOKED',
@@ -939,7 +943,7 @@ export const logoutAllDevices = async (req: AuthRequest, res: Response): Promise
             status: 'success'
         });
 
-        res.json({ success: true, message: 'Successfully logged out from all other active devices' });
+        res.json({ success: true, message: 'Logged out from all devices, including this one. Please log in again.' });
     } catch (error: any) {
         console.error('[LogoutAllDevicesError]', error);
         res.status(500).json({ message: 'Failed to revoke sessions', error: error.message });

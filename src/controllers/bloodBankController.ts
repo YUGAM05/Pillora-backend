@@ -3,12 +3,23 @@ import BloodDonor from '../models/BloodDonor';
 import BloodRequest from '../models/BloodRequest';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { getCompatibleDonors } from '../utils/bloodCompatibility';
-import { sendWhatsAppMessage } from '../utils/whatsappService';
 import { verifyAadhaarLocal, validateVerhoeff } from '../utils/aadhaarVerifier';
 import { logActivity } from '../utils/activityLogger';
 import { processKYCResult } from '../services/bloodConnectService';
 import { sendTelegramMessage } from '../utils/telegram';
 
+// Escape user input before building a RegExp (prevents ReDoS / regex errors)
+const escapeRegex = (s: string): string => s.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// "a+", "A " (a '+' decoded from a query string becomes a space) -> "A+"
+const normalizeBloodGroup = (v: unknown): string =>
+    String(v).toUpperCase().replace(/\s+$/, '+').replace(/\s/g, '').slice(0, 3);
+
+/**
+ * Version of the donor sharing consent shown on the donor form (Pillora/src/app/blood-bank/BloodBankClient.tsx).
+ * Change it whenever that wording changes, so each donor's recorded consent can be traced to the text they saw.
+ */
+export const DONOR_CONSENT_VERSION = '2026-11-19';
 
 
 // @desc    Register as a blood donor
@@ -16,7 +27,15 @@ import { sendTelegramMessage } from '../utils/telegram';
 // @access  Private
 export const registerDonor = async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { bloodGroup, location, age, phone, address, gender, area, city, name } = req.body;
+        const { bloodGroup, location, age, phone, address, gender, area, city, name, consentToShare } = req.body;
+
+        // Sharing consent. The current donor form (pillora.in/blood-bank) already tells donors that
+        // their name and phone are shared when someone nearby needs blood, but it does not send an
+        // explicit flag yet. Record the explicit consent when the form sends it; registration is
+        // not blocked without it until the form has the checkbox (see audit report).
+        const consentFields = consentToShare === true
+            ? { sharingConsentAt: new Date(), sharingConsentVersion: DONOR_CONSENT_VERSION, sharingConsentSource: 'donor_form' }
+            : {};
 
         const ageNum = Number(age);
         if (isNaN(ageNum) || ageNum < 18 || ageNum > 60) {
@@ -45,6 +64,7 @@ export const registerDonor = async (req: AuthRequest, res: Response): Promise<vo
                 area,
                 city,
                 source: 'user_panel',
+                ...consentFields,
                 location: {
                     type: 'Point',
                     coordinates: location // [longitude, latitude]
@@ -79,35 +99,62 @@ export const registerDonor = async (req: AuthRequest, res: Response): Promise<vo
     }
 };
 
-// @desc    Find donors by blood group and location (optional)
+/** "Rahul Kumar Sharma" -> "Rahul S." (first name + last initial). */
+export const maskPersonName = (name?: string): string => {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'Donor';
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
+};
+
+/** Date -> "YYYY-MM" (month only, never the exact day). */
+const toMonth = (d?: Date | null): string | null => {
+    if (!d) return null;
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+/**
+ * Public donor shape. Never phone, address, exact location, email, age, gender or account ids.
+ * Contact details reach a requester only through the admin-approved request flow.
+ */
+const toPublicDonor = (d: any) => ({
+    name: maskPersonName(d.name),
+    bloodGroup: d.bloodGroup,
+    city: d.city || '',
+    area: d.area || '',
+    isAvailable: d.isAvailable !== false,
+    lastDonationMonth: toMonth(d.lastDonationDate),
+});
+
+// @desc    Find donors by blood group / city / area (public, reduced fields)
 // @route   GET /api/blood-bank/donors
 // @access  Public
 export const findDonors = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { bloodGroup, lng, lat, distance } = req.query;
+        const { bloodGroup, city, area } = req.query;
 
-        let query: any = { isAvailable: true };
+        const query: any = { isAvailable: true };
 
         if (bloodGroup) {
-            query.bloodGroup = bloodGroup;
+            // String() blocks operator injection like ?bloodGroup[$ne]=x
+            query.bloodGroup = normalizeBloodGroup(bloodGroup);
         }
+        if (city) query.city = new RegExp(escapeRegex(String(city).trim()), 'i');
+        if (area) query.area = new RegExp(escapeRegex(String(area).trim()), 'i');
+        // The geo ($near lng/lat/distance) filter was removed: repeated distance queries
+        // could be used to locate a donor.
 
-        if (lng && lat) {
-            query.location = {
-                $near: {
-                    $geometry: {
-                        type: "Point",
-                        coordinates: [parseFloat(lng as string), parseFloat(lat as string)]
-                    },
-                    $maxDistance: distance ? parseInt(distance as string) : 50000 // default 50km
-                }
-            };
-        }
-
-        const donors = await BloodDonor.find(query).populate('user', 'name email phone');
-        res.json(donors);
+        const donors = await BloodDonor.find(query)
+            .select('name bloodGroup city area isAvailable lastDonationDate')
+            .sort({ createdAt: -1 })
+            .limit(200)
+            .lean();
+        res.json(donors.map(toPublicDonor));
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+        console.error('[findDonors]', (error as any)?.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
@@ -124,7 +171,7 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
         }
 
         // Get all compatible blood groups
-        const compatibleGroups = getCompatibleDonors(bloodGroup as string);
+        const compatibleGroups = getCompatibleDonors(normalizeBloodGroup(bloodGroup));
 
         const ninetyDaysAgo = new Date();
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
@@ -141,16 +188,16 @@ export const findMatches = async (req: Request, res: Response): Promise<void> =>
 
         // Filter by city if provided
         if (city) {
-            query.city = new RegExp(city as string, 'i');
+            query.city = new RegExp(escapeRegex(String(city)), 'i');
         }
 
         // Filter by area if provided
         if (area) {
-            query.area = new RegExp(area as string, 'i');
+            query.area = new RegExp(escapeRegex(String(area)), 'i');
         }
 
         // Find matches in unified BloodDonor model
-        const donors = await BloodDonor.find(query).populate('user', 'name email phone').sort({ lastDonationDate: 1 });
+        const donors = await BloodDonor.find(query).select('name phone bloodGroup').sort({ lastDonationDate: 1 }).limit(200);
 
         // Map and remove duplicates if any (based on phone)
         const allDonors = donors.map(d => ({ name: d.name, phone: d.phone, bloodGroup: d.bloodGroup }));
@@ -171,29 +218,28 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
         const { patientName, age, bloodGroup, units, hospitalAddress, area, city, contactNumber, isUrgent, kycDocumentType, kycDocumentId, kycDocumentImage, email, unitsNeeded, coordinationNumber } = req.body;
 
         let finalKycDocumentId = kycDocumentId;
-        let aiStatus: 'Verified' | 'Rejected' | 'Error' = 'Pending' as any;
+        let aiStatus: 'Pending' | 'Verified' | 'Rejected' | 'Error' = 'Pending';
         let aiRemarks = '';
 
-        // Perform Fast Extract & Validate synchronously instantly natively
+        // ID check. Nothing is approved automatically: an admin reviews the ID document
+        // (PATCH /admin/requests/:id/kyc) before any donor details are shared.
+        // An Aadhaar number that fails the checksum is rejected straight away.
         if (kycDocumentType === 'Aadhar Card') {
-            if (!kycDocumentId || kycDocumentId.trim() === '') {
+            const cleanNum = String(kycDocumentId || '').replace(/\s/g, '');
+            if (!cleanNum) {
                 aiStatus = 'Rejected';
-                aiRemarks = 'Aadhaar Document Number is mandatory';
+                aiRemarks = 'Aadhaar number is required.';
+            } else if (cleanNum.length === 12 && validateVerhoeff(cleanNum)) {
+                aiStatus = 'Pending';
+                aiRemarks = 'Waiting for our team to check your ID document.';
+                finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
             } else {
-                const cleanNum = kycDocumentId.replace(/\s/g, '');
-                if (cleanNum.length === 12 && validateVerhoeff(cleanNum)) {
-                    aiStatus = 'Verified';
-                    aiRemarks = 'Verified via fast mathematical pattern matching';
-                    finalKycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
-                } else {
-                    aiStatus = 'Rejected';
-                    aiRemarks = 'Fake or Invalid Aadhaar Number';
-                }
+                aiStatus = 'Rejected';
+                aiRemarks = 'The Aadhaar number is not valid. Please check it and submit again.';
             }
         } else {
-            // Manual verification fallback
-            aiStatus = 'Verified';
-            aiRemarks = 'Verified via manual details';
+            aiStatus = 'Pending';
+            aiRemarks = 'Waiting for our team to check your ID document.';
         }
 
         // 1. Instant Save: Create the request with exact verify status
@@ -224,43 +270,15 @@ export const createRequest = async (req: AuthRequest, res: Response): Promise<vo
 
         // Send Telegram notification
         sendTelegramMessage(
-            `🩸 <b>New Blood Request</b>\n🅰️ Blood Group: ${bloodGroup}\n📍 City: ${city}\n📞 Contact: ${contactNumber}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+            `🩸 <b>New Blood Request</b>${aiStatus === 'Pending' ? ' (ID review needed)' : ''}\n🅰️ Blood Group: ${bloodGroup}\n📍 City: ${city}\n📞 Contact: ${contactNumber}\n🕐 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
         ).catch(err => console.error('Telegram notification failed:', err));
 
-        // 3. Background Processing: Matching & notifications safe out of flow
-        (async () => {
-            try {
-                // Call automated KYC processing flow
-                const kycPassed = aiStatus === 'Verified';
-                await processKYCResult(request._id.toString(), kycPassed);
-
-                // Perform WhatsApp Matching & Notifications if verified
-                if (aiStatus === 'Verified') {
-                    const ninetyDaysAgo = new Date();
-                    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
-                    const compatibleGroups = getCompatibleDonors(bloodGroup);
-                    const matchedDonorsRaw = await BloodDonor.find({
-                        bloodGroup: { $in: compatibleGroups },
-                        city: new RegExp(city, 'i'),
-                        area: new RegExp(area, 'i'),
-                        isAvailable: true,
-                        $or: [
-                            { lastDonationDate: { $exists: false } },
-                            { lastDonationDate: null },
-                            { lastDonationDate: { $lte: ninetyDaysAgo } }
-                        ]
-                    }).limit(5);
-                    const matchedDonors = matchedDonorsRaw.map(d => ({ name: d.name, phone: d.phone }));
-                    if (matchedDonors.length > 0) {
-                        let messageBody = `🚨 Pillora Blood Match Found! 🚨\n\nFor your request (${bloodGroup} at ${hospitalAddress}), we found compatible donors.\n\nPlease contact them immediately. Stay Safe!`;
-                        await sendWhatsAppMessage(contactNumber, messageBody);
-                    }
-                }
-            } catch (bgErr) {
-                console.error("[BackgroundMatching] Error occurred:", bgErr);
-            }
-        })();
+        // 3. A rejected Aadhaar number gets the failure email now. Pending requests wait for
+        //    an admin decision; donor details are shared only after approval (updateKycStatus).
+        if (aiStatus === 'Rejected') {
+            processKYCResult(request._id.toString(), false).catch(err =>
+                console.error('[createRequest] KYC failure email error:', err?.message || err));
+        }
 
     } catch (error: any) {
         if (!res.headersSent) {
@@ -303,12 +321,28 @@ export const getMyDonorProfile = async (req: AuthRequest, res: Response): Promis
 // @access  Public
 export const getRequests = async (req: Request, res: Response): Promise<void> => {
     try {
-        const requests = await BloodRequest.find({ status: { $ne: 'Closed' } })
+        // Public list: no KYC, contact number, email, age, account id or verification notes.
+        // Fake/rejected requests are not listed.
+        const requests = await BloodRequest.find({ status: { $nin: ['Closed', 'Fake'] } })
+            .select('patientName bloodGroup units unitsNeeded hospitalAddress area city isUrgent status createdAt')
             .sort({ isUrgent: -1, createdAt: -1 }) // Urgent first
-            .populate('user', 'name');
-        res.json(requests);
+            .limit(200)
+            .lean();
+        res.json(requests.map((r: any) => ({
+            _id: r._id,
+            patientName: maskPersonName(r.patientName),
+            bloodGroup: r.bloodGroup,
+            units: r.unitsNeeded || r.units,
+            hospitalAddress: r.hospitalAddress,
+            area: r.area,
+            city: r.city,
+            isUrgent: Boolean(r.isUrgent),
+            status: r.status,
+            createdAt: r.createdAt,
+        })));
     } catch (error) {
-        res.status(500).json({ message: 'Server Error', error });
+        console.error('[getRequests]', (error as any)?.message || error);
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 // @desc    Get all donors (Admin)
@@ -515,25 +549,18 @@ export const verifyRequestWithAI = async (req: Request, res: Response): Promise<
         const patientName = request.patientName;
 
         const result = await verifyAadhaarLocal(imageContent, patientName);
-        console.log(`[Controller] Agent Result for ID ${id}:`, result);
+        console.log(`[Controller] Agent result for ID ${id}: ${result.status}`);
 
-        request.aiVerificationStatus = result.status as any;
-        request.aiVerificationRemarks = result.remarks;
+        // Advisory only: the OCR result is recorded for the admin, who then approves or
+        // rejects with PATCH /admin/requests/:id/kyc. It never shares donor details itself.
+        request.aiVerificationRemarks = `Automatic document check: ${result.status}. ${result.remarks || ''}`.trim();
         
         if (result.aadhaarNumber) {
             const cleanNum = result.aadhaarNumber.replace(/\s/g, '');
             request.kycDocumentId = `**** **** **${cleanNum.slice(-2)}`;
         }
 
-        console.log(`[Controller] Saving request with status: ${request.aiVerificationStatus}...`);
         const savedRequest = await request.save();
-        console.log(`[Controller] Request saved successfully. New status: ${savedRequest.aiVerificationStatus}`);
-
-        // Trigger automated KYC and notification flow
-        const kycPassed = savedRequest.aiVerificationStatus === 'Verified';
-        processKYCResult(savedRequest._id.toString(), kycPassed).catch(err => {
-            console.error('[verifyRequestWithAI] Error running processKYCResult:', err);
-        });
 
         res.json(savedRequest);
 
@@ -612,7 +639,7 @@ export const deleteMyRequest = async (req: AuthRequest, res: Response): Promise<
 export const updateDonorAdmin = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
-        const { lastDonationDate, isAvailable, name, email, phone, age, gender, address, area, city } = req.body;
+        const { lastDonationDate, isAvailable, name, email, phone, age, gender, address, area, city, sharingConsentConfirmed } = req.body;
 
         const updateData: any = {};
         if (lastDonationDate !== undefined) {
@@ -629,6 +656,14 @@ export const updateDonorAdmin = async (req: Request, res: Response): Promise<voi
         if (address !== undefined) updateData.address = address;
         if (area !== undefined) updateData.area = area;
         if (city !== undefined) updateData.city = city;
+        // Record sharing consent after confirming it directly with the donor (e.g. imported donors).
+        if (sharingConsentConfirmed === true) {
+            updateData.sharingConsentAt = new Date();
+            updateData.sharingConsentVersion = DONOR_CONSENT_VERSION;
+            updateData.sharingConsentSource = 'admin_confirmed';
+        } else if (sharingConsentConfirmed === false) {
+            updateData.sharingConsentAt = null;
+        }
 
         const donor = await BloodDonor.findByIdAndUpdate(id, updateData, { new: true });
 
