@@ -394,7 +394,7 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
         }
         const uniqueIds = Array.from(new Set(paymentIds.map((id: any) => String(id))));
 
-        // Only this hospital's completed online advances that are not yet settled / refunded / retained / in another
+        // Only this hospital's completed online advances that are not yet settled / refunded / in another
         // settlement can be paid out. Anything else in the list rejects the whole request (prevents double payouts,
         // e.g. a payment already 'Settled' through the payout-recording path).
         const payments = await Payment.find({
@@ -402,7 +402,8 @@ export const initiateManualSettlement = async (req: AuthRequest, res: Response):
             hospitalId: hospital._id,
             status: { $in: ['completed', 'paid'] },
             paymentSource: 'pillora_online',
-            settlementStatus: { $in: ['Pending', 'Ready for Settlement', 'Waiting for Razorpay Settlement'] }
+            // 'retained_by_pillora' = older patient-cancelled advances, which are also paid to the hospital
+            settlementStatus: { $in: ['Pending', 'Ready for Settlement', 'Waiting for Razorpay Settlement', 'retained_by_pillora'] }
         });
         if (payments.length !== uniqueIds.length) {
             res.status(400).json({ success: false, message: 'One or more selected payments are not eligible: they belong to another hospital, are refunded/retained/unpaid, or have already been settled or are pending confirmation.' });

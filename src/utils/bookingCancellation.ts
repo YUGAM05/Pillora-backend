@@ -81,7 +81,7 @@ export type CancelResult = {
  *       hospital: its next settlement is reduced by the Razorpay charge Pillora loses (2.36%), or by the
  *       full advance if that advance was already paid out (HospitalDeduction); admin: Pillora bears it
  *   - hospital or admin cancels                        -> the patient is told (in-app, email, WhatsApp)
- *   - patient cancels a paid online booking            -> no refund (advance retained_by_pillora)
+ *   - patient cancels a paid online booking            -> no refund; the advance still goes to the hospital
  *   - unpaid pending booking                           -> pending payment marked failed
  * If the Razorpay refund fails, NOTHING is changed and the error is returned (no fake "refunded").
  * The seat on the slot (and any checkout hold) is given back exactly once.
@@ -127,7 +127,11 @@ export const cancelAppointmentWithPolicy = async (appointmentId: any, actor: Can
                 hospitalCharge = Number(deduction?.amount) || 0;
             }
         } else {
-            payment.settlementStatus = 'retained_by_pillora';
+            // Patient cancelled: no refund. The advance is kept and paid out to the hospital like any other
+            // advance (minus the gateway charge), so the settlement status is left as it is.
+            // (Older records used 'retained_by_pillora'; settlement code treats that as payable too.)
+            const note = 'Patient cancelled: advance not refunded, paid to the hospital.';
+            payment.notes = payment.notes ? `${payment.notes}\n${note}` : note;
             refundOutcome = 'retained';
         }
         await payment.save();

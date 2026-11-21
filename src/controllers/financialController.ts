@@ -1272,7 +1272,8 @@ export const recordAdminSettlementPayout = async (req: AuthRequest, res: Respons
             hospitalId,
             status: { $in: ['completed', 'paid'] },
             paymentSource: 'pillora_online',
-            settlementStatus: { $in: ['Pending', 'Waiting for Razorpay Settlement', 'Ready for Settlement'] }
+            // 'retained_by_pillora' = older patient-cancelled advances, which are also paid to the hospital
+            settlementStatus: { $in: ['Pending', 'Waiting for Razorpay Settlement', 'Ready for Settlement', 'retained_by_pillora'] }
         });
 
         if (pendingPayments.length === 0) {
