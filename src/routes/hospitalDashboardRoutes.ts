@@ -41,7 +41,8 @@ import {
     updatePaymentStatus,
     getHospitalSubscription
 } from '../controllers/hospitalDashboardController';
-import { getUsage, orderPack, verifyPack, getVoiceCalls } from '../controllers/usageController';
+import { getUsage, orderPack, verifyPack } from '../controllers/usageController';
+import { getVoiceCalls, setVoiceCallCalledBack } from '../controllers/voiceCallsController';
 import { getAiReceptionist, updateAiReceptionist } from '../controllers/aiReceptionistController';
 import {
     getFollowUpReminders,
@@ -133,11 +134,14 @@ router.get('/slots/:id/cancel-preview', ...staff, can('doctorsSlots'), getSlotCa
 router.post('/slots/:id/cancel', ...staff, can('doctorsSlots'), cancelSlot);
 router.delete('/slots/:id', ...staff, can('doctorsSlots'), deleteSlot);
 
-// Plan usage (WhatsApp messages, AI minutes), add-on packs, AI call history
+// Plan usage (WhatsApp messages, AI minutes), add-on packs
 router.get('/usage', ...staff, can('planView'), getUsage);
 router.post('/packs/order', ...staff, can('planPurchase'), orderPack);
 router.post('/packs/verify', ...staff, can('planPurchase'), verifyPack);
-router.get('/voice-calls', ...staff, can('planView'), getVoiceCalls);
+
+// AI call history and call-back list ("AI calls" tab): owner, administrator, receptionist
+router.get('/voice-calls', ...staff, can('followups'), getVoiceCalls);
+router.patch('/voice-calls/:id/called-back', ...staff, can('followups'), setVoiceCallCalledBack);
 
 // AI phone receptionist settings: spoken hospital name, greeting language, information for the AI
 router.get('/ai-receptionist', ...staff, can('hospitalSettings'), getAiReceptionist);

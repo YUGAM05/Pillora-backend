@@ -2,7 +2,6 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Hospital from '../models/Hospital';
-import VoiceCall from '../models/VoiceCall';
 import VoiceHospitalConfig from '../models/VoiceHospitalConfig';
 import { usageSummary, createPackOrder, verifyPackPayment, reconcilePendingPacks, grantPack } from '../services/usageService';
 import { packFor } from '../config/plans';
@@ -58,20 +57,6 @@ export const verifyPack = async (req: AuthRequest, res: Response): Promise<void>
     } catch (error: any) {
         console.error('[Usage] verifyPack failed:', error.message);
         res.status(400).json({ success: false, message: 'Payment could not be verified. If money was deducted, the pack will appear within a few minutes, or contact support.' });
-    }
-};
-
-/** GET /api/hospital/dashboard/voice-calls : last 50 AI receptionist calls. */
-export const getVoiceCalls = async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const calls = await VoiceCall.find({ hospital: hospitalOf(req)._id })
-            .sort({ createdAt: -1 })
-            .limit(50)
-            .populate('appointment', 'patientName appointmentDate appointmentTime doctorName status')
-            .lean();
-        res.json(calls);
-    } catch (error: any) {
-        res.status(500).json({ message: 'Could not load calls' });
     }
 };
 

@@ -17,6 +17,9 @@ export interface IVoiceCall extends Document {
     outcome: 'booked' | 'no_booking' | 'ended_early' | 'unavailable';
     appointment?: mongoose.Types.ObjectId;
     language?: string;
+    /** Set when hospital staff mark a not-booked call as called back (dashboard > AI calls). */
+    calledBackAt?: Date;
+    calledBackBy?: mongoose.Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -33,6 +36,8 @@ const VoiceCallSchema = new Schema(
         outcome: { type: String, enum: ['booked', 'no_booking', 'ended_early', 'unavailable'], default: 'no_booking' },
         appointment: { type: Schema.Types.ObjectId, ref: 'Appointment' },
         language: { type: String },
+        calledBackAt: { type: Date },
+        calledBackBy: { type: Schema.Types.ObjectId, ref: 'User' },
     },
     { timestamps: true }
 );
