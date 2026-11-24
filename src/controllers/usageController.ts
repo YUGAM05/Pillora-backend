@@ -16,7 +16,12 @@ export const getUsage = async (req: AuthRequest, res: Response): Promise<void> =
     try {
         const hospital = hospitalOf(req);
         await reconcilePendingPacks(hospital._id).catch(() => {});
-        res.json(await usageSummary(hospital._id));
+        const [summary, voice] = await Promise.all([
+            usageSummary(hospital._id),
+            VoiceHospitalConfig.find({ hospitalId: hospital._id }).select('exotelNumber isEnabled').lean(),
+        ]);
+        // The hospital's AI receptionist number(s), shown next to its AI minutes.
+        res.json({ ...summary, voiceNumbers: voice.map((v: any) => ({ number: v.exotelNumber, enabled: v.isEnabled })) });
     } catch (error: any) {
         console.error('[Usage] getUsage failed:', error.message);
         res.status(500).json({ message: 'Could not load usage' });

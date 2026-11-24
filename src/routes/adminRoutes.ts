@@ -14,6 +14,7 @@ import {
 } from '../controllers/financialController';
 import { protect, adminOnly } from '../middleware/authMiddleware';
 import { adminGetUsage, adminGrantPack, adminSetVoiceNumber } from '../controllers/usageController';
+import { adminGetAiReceptionist, adminUpdateAiReceptionist } from '../controllers/aiReceptionistController';
 import multer from 'multer';
 
 const router = express.Router();
@@ -106,5 +107,7 @@ router.post('/financial/refunds/process', protect, adminOnly, processAdminRefund
 router.get('/hospitals/:id/usage', protect, adminOnly, adminGetUsage);
 router.post('/hospitals/:id/packs', protect, adminOnly, adminGrantPack);
 router.put('/hospitals/:id/voice-number', protect, adminOnly, adminSetVoiceNumber);
+router.get('/hospitals/:id/ai-receptionist', protect, adminOnly, adminGetAiReceptionist);
+router.put('/hospitals/:id/ai-receptionist', protect, adminOnly, adminUpdateAiReceptionist);
 
 export default router;

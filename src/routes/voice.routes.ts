@@ -16,6 +16,7 @@ import { voiceAuth } from '../middleware/voiceAuth.middleware';
 import { resolveVoiceHospital } from '../middleware/resolveVoiceHospital.middleware';
 import { sendSms } from '../services/sms.service';
 import { sendCountedTemplate, aiStatus, consumeAiSeconds, billableSeconds } from '../services/usageService';
+import { aiReceptionistForVoice } from '../utils/aiReceptionist';
 
 const router = express.Router();
 
@@ -86,10 +87,11 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
             specialty: d.specialty
         }));
 
-        // Hospital name, so the AI receptionist can greet callers with it, and
-        // whether the hospital still has AI call minutes (plan + packs).
+        // Hospital name and AI receptionist settings (spoken name, greeting
+        // language, information for callers), and whether the hospital still has
+        // AI call minutes (plan + packs).
         const [hospital, ai] = await Promise.all([
-            Hospital.findById(req.hospitalId).select('name').lean(),
+            Hospital.findById(req.hospitalId).select('name aiReceptionist').lean(),
             aiStatus(req.hospitalId!).catch((e: any) => {
                 console.error('[VoiceDoctors] AI minutes check failed, allowing the call:', e?.message);
                 return { allowed: true, remainingMinutes: null as any, planMinutes: null as any };
@@ -97,7 +99,7 @@ router.post('/doctors', voiceAuth, resolveVoiceHospital, async (req: Request, re
         ]);
 
         res.status(200).json({
-            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors, hospitalName: hospital?.name?.trim(), ai }) }]
+            results: [{ toolCallId, result: JSON.stringify({ doctors: responseDoctors, hospitalName: hospital?.name?.trim(), receptionist: aiReceptionistForVoice(hospital), ai }) }]
         });
     } catch (error: any) {
         console.error('[VoiceDoctorsError]', error.message);

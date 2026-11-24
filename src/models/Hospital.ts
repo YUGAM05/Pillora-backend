@@ -64,6 +64,19 @@ export interface IHospital extends Document {
     adminNotes?: string;
     createdAt?: Date;
     updatedAt?: Date;
+    /** AI phone receptionist settings (hospital dashboard Settings, or Pillora admin). */
+    aiReceptionist?: {
+        /** Hospital name as the AI should say it, in Gujarati script (or Latin). */
+        spokenNameGu?: string;
+        /** Hospital name as the AI should say it, in Hindi/Devanagari script (or Latin). */
+        spokenNameHi?: string;
+        /** Language the AI greets callers in; it still follows the caller's language. */
+        firstLanguage?: 'gu' | 'hi';
+        /** Facts for the AI: address, timings, fees, services... (max AI_INFO_MAX chars). */
+        info?: string;
+        updatedAt?: Date;
+        updatedBy?: mongoose.Types.ObjectId;
+    };
     bankDetails?: {
         accountHolderName?: string;
         bankName?: string;
@@ -145,6 +158,15 @@ const HospitalSchema: Schema = new Schema({
     lastPaymentMethod: { type: String },
     lastPaymentReference: { type: String },
     adminNotes: { type: String },
+    // AI phone receptionist settings (see utils/aiReceptionist.ts for limits)
+    aiReceptionist: {
+        spokenNameGu: { type: String, default: '' },
+        spokenNameHi: { type: String, default: '' },
+        firstLanguage: { type: String, enum: ['gu', 'hi'], default: 'gu' },
+        info: { type: String, default: '' },
+        updatedAt: { type: Date },
+        updatedBy: { type: Schema.Types.ObjectId, ref: 'User' }
+    },
     bankDetails: {
         accountHolderName: { type: String, default: '' },
         bankName: { type: String, default: '' },

@@ -42,6 +42,7 @@ import {
     getHospitalSubscription
 } from '../controllers/hospitalDashboardController';
 import { getUsage, orderPack, verifyPack, getVoiceCalls } from '../controllers/usageController';
+import { getAiReceptionist, updateAiReceptionist } from '../controllers/aiReceptionistController';
 import {
     getFollowUpReminders,
     createFollowUpReminder,
@@ -137,5 +138,9 @@ router.get('/usage', ...staff, can('planView'), getUsage);
 router.post('/packs/order', ...staff, can('planPurchase'), orderPack);
 router.post('/packs/verify', ...staff, can('planPurchase'), verifyPack);
 router.get('/voice-calls', ...staff, can('planView'), getVoiceCalls);
+
+// AI phone receptionist settings: spoken hospital name, greeting language, information for the AI
+router.get('/ai-receptionist', ...staff, can('hospitalSettings'), getAiReceptionist);
+router.put('/ai-receptionist', ...staff, can('hospitalSettings'), updateAiReceptionist);
 
 export default router;
