@@ -612,3 +612,36 @@ export const sendCancellationRefundEmail = async ({
     console.error('[EmailService] Cancellation email failed:', error?.message || error);
   }
 };
+
+interface AdminAlertProps {
+  subject: string;
+  heading: string;
+  lines: string[];
+}
+
+/**
+ * Internal alert to Pillora's own team (e.g. the AI phone line is down).
+ * Goes to ADMIN_ALERT_EMAIL, or team@pillora.in. Returns whether it was sent.
+ */
+export const sendAdminAlertEmail = async ({ subject, heading, lines }: AdminAlertProps): Promise<boolean> => {
+  const to = process.env.ADMIN_ALERT_EMAIL || 'team@pillora.in';
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+  try {
+    await transporter.sendMail({
+      from: DEFAULT_FROM,
+      to,
+      subject,
+      text: [heading, '', ...lines].join('\n'),
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #0f172a;">${esc(heading)}</h2>
+          ${lines.map((l) => `<p style="margin: 8px 0;">${esc(l)}</p>`).join('')}
+          <p style="color: #94a3b8; font-size: 12px;">Sent automatically by the Pillora voice server.</p>
+        </div>`
+    });
+    return true;
+  } catch (error: any) {
+    console.error('[EmailService] Admin alert failed:', error?.message || error);
+    return false;
+  }
+};

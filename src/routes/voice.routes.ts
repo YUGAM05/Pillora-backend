@@ -17,6 +17,7 @@ import { resolveVoiceHospital } from '../middleware/resolveVoiceHospital.middlew
 import { sendSms } from '../services/sms.service';
 import { sendCountedTemplate, aiStatus, consumeAiSeconds, billableSeconds } from '../services/usageService';
 import { aiReceptionistForVoice } from '../utils/aiReceptionist';
+import { sendAdminAlertEmail } from '../services/emailService';
 
 const router = express.Router();
 
@@ -570,6 +571,65 @@ router.post('/call-usage', voiceAuth, resolveVoiceHospital, async (req: Request,
         console.error('[VoiceCallUsageError]', error.message);
         res.status(500).json({ results: [{ toolCallId, result: JSON.stringify({ error: 'internal_server_error' }) }] });
     }
+});
+
+/**
+ * 6. POST /api/voice/alert
+ * Sent by the voice server when the AI phone line stops or starts working
+ * (Sarvam: no credits, quota, bad key). Emails Pillora's team.
+ * Body: { kind: 'sarvam_down' | 'sarvam_up' | 'test', reason?, since? (ISO), failedCalls? }
+ */
+const lastAlertAt = new Map<string, number>(); // kind -> time of the last email sent
+const ALERT_GAP_MS = 10 * 60_000; // the voice server limits too; this stops loops
+
+router.post('/alert', voiceAuth, async (req: Request, res: Response): Promise<void> => {
+    const { kind, reason, since, failedCalls } = req.body ?? {};
+    if (!['sarvam_down', 'sarvam_up', 'test'].includes(kind)) {
+        res.status(400).json({ error: 'invalid_kind' });
+        return;
+    }
+    if (Date.now() - (lastAlertAt.get(kind) ?? 0) < ALERT_GAP_MS) {
+        res.status(200).json({ ok: true, skipped: 'sent_recently' });
+        return;
+    }
+    const ist = (d: Date) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }).format(d);
+    const sinceDate = since && !Number.isNaN(Date.parse(since)) ? new Date(since) : null;
+    const missed = Number.isFinite(Number(failedCalls)) ? Math.max(0, Math.round(Number(failedCalls))) : 0;
+    const why = typeof reason === 'string' ? reason.slice(0, 200) : '';
+
+    let sent = false;
+    if (kind === 'sarvam_down') {
+        sent = await sendAdminAlertEmail({
+            subject: 'Pillora AI phone line is DOWN',
+            heading: 'The AI phone receptionist cannot take calls',
+            lines: [
+                `Since: ${ist(sinceDate ?? new Date())} (India time)`,
+                `What Sarvam AI says: ${why || 'unknown error'}`,
+                ...(missed ? [`Callers turned away so far: ${missed}`] : []),
+                'Callers hear a short message (in Gujarati and Hindi) to call the hospital directly, then the call ends.',
+                'If it says "No credits available": add credits in your Sarvam account (Settings → Billing). Turning on Auto-Recharge there stops this from happening again.',
+                'You will get another email as soon as calls work again.',
+            ],
+        });
+    } else if (kind === 'sarvam_up') {
+        sent = await sendAdminAlertEmail({
+            subject: 'Pillora AI phone line is working again',
+            heading: 'The AI phone receptionist is taking calls again',
+            lines: [
+                `Working again since: ${ist(new Date())} (India time)`,
+                ...(sinceDate ? [`It was down from: ${ist(sinceDate)}`] : []),
+                `Callers turned away meanwhile: ${missed}`,
+            ],
+        });
+    } else {
+        sent = await sendAdminAlertEmail({
+            subject: 'Pillora AI phone line: test alert',
+            heading: 'Test alert from the Pillora voice server',
+            lines: ['If you can read this, alerts about the AI phone line reach this inbox. Nothing is wrong.'],
+        });
+    }
+    if (sent) lastAlertAt.set(kind, Date.now());
+    res.status(sent ? 200 : 502).json({ ok: sent });
 });
 
 export default router;
