@@ -18,6 +18,7 @@ import { sendSms } from '../services/sms.service';
 import { sendCountedTemplate, aiStatus, consumeAiSeconds, billableSeconds } from '../services/usageService';
 import { aiReceptionistForVoice } from '../utils/aiReceptionist';
 import { sendAdminAlertEmail } from '../services/emailService';
+import { groupFreeSlots, checkedDates } from '../utils/voiceAvailability';
 
 const router = express.Router();
 
@@ -193,6 +194,69 @@ router.post('/slots', voiceAuth, resolveVoiceHospital, async (req: Request, res:
         });
     } catch (error: any) {
         console.error('[VoiceSlotsError]', error.message);
+        res.status(500).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
+        });
+    }
+});
+
+/**
+ * 2b. POST /api/voice/availability
+ * Body: { doctorIds?: string[], dates: string[] } // dates YYYY-MM-DD, 1-14, within 31 days
+ * Free (unbooked) slots of several doctors on several days in ONE request:
+ * { doctors: [{ doctorId, days: [{ date, slots: [{ slotId, time }] }] }] }.
+ * No doctorIds = every active doctor of the hospital. The AI receptionist used
+ * to call /slots once per doctor per day: 7+ requests per question, about 5 s
+ * while the server started extra copies of itself.
+ */
+router.post('/availability', voiceAuth, resolveVoiceHospital, async (req: Request, res: Response): Promise<void> => {
+    const toolCall = req.body?.message?.toolCallList?.[0];
+    const toolCallId = toolCall?.id;
+    const args = toolCall?.function?.arguments || {};
+    const invalid = (details: string) => {
+        res.status(400).json({
+            results: [{ toolCallId, result: JSON.stringify({ error: "invalid_input", details }) }]
+        });
+    };
+    try {
+        const dates = checkedDates(args.dates);
+        if (!dates) return invalid('dates must be 1-14 dates (YYYY-MM-DD) within 31 days');
+
+        const { doctorIds } = args;
+        const asked: string[] | undefined = doctorIds;
+        if (asked !== undefined && (!Array.isArray(asked) || asked.length === 0 || asked.length > 50
+            || !asked.every((id: unknown) => typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)))) {
+            return invalid('doctorIds must be 1-50 valid doctor ids');
+        }
+
+        // Only this hospital's doctors: the ones asked for, else every active one.
+        const hospital = new mongoose.Types.ObjectId(req.hospitalId);
+        const doctorQuery: any = { hospital };
+        if (asked) doctorQuery._id = { $in: asked.map((id) => new mongoose.Types.ObjectId(id)) };
+        else doctorQuery.is_active = true;
+        const doctors = await Doctor.find(doctorQuery).select('_id').lean();
+        const found = new Set(doctors.map((d) => d._id.toString()));
+
+        const slots = doctors.length
+            ? await Slot.find({
+                doctor: { $in: doctors.map((d) => d._id) },
+                hospital,
+                startTime: {
+                    $gte: new Date(`${dates[0]}T00:00:00+05:30`),
+                    $lte: new Date(`${dates[dates.length - 1]}T23:59:59.999+05:30`),
+                    $gt: new Date()
+                },
+                status: { $in: ['available', 'locked'] }
+            }).select('doctor startTime booked_count max_appointments').sort({ startTime: 1 }).lean()
+            : [];
+
+        // The order asked for; doctors of other hospitals are left out.
+        const order = asked ? asked.filter((id) => found.has(id)) : [...found];
+        res.status(200).json({
+            results: [{ toolCallId, result: JSON.stringify({ doctors: groupFreeSlots(order, dates, slots as any[]) }) }]
+        });
+    } catch (error: any) {
+        console.error('[VoiceAvailabilityError]', error.message);
         res.status(500).json({
             results: [{ toolCallId, result: JSON.stringify({ error: "internal_server_error" }) }]
         });
